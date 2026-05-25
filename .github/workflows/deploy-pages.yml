@@ -31,7 +31,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build web
-        run: pnpm --filter @chatting-cursor/web build
+        run: pnpm --filter @chatting-cursor/shared build && pnpm --filter @chatting-cursor/web build
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
