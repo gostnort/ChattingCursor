@@ -1,33 +1,43 @@
 import { useEffect, useMemo, useState } from "react";
-import type { CrewStatusResponse, HistorySessionSummary, LocalConfigResponse } from "@chatting-cursor/shared";
+import type { AuthStatusResponse, CrewStatusResponse, HistorySessionSummary, LocalConfigResponse } from "@chatting-cursor/shared";
 import {
   buildBridgeUrl,
   buildWebDevUrl,
   DEFAULT_BRIDGE_PORT,
-  DEFAULT_WEB_PORT,
   getWebPort,
+  isLocalBridgeUrl,
+  normalizeBridgeUrl,
   resetPortSettings,
   setWebPort,
 } from "../bridgeSettings";
 import { GITHUB_PAGES_URL, isGitHubPages } from "../environment";
 import {
+  fetchAuthStatus,
+  fetchCrewStatus,
   fetchHistoryContent,
   fetchHistoryList,
   fetchLocalConfig,
-  fetchCrewStatus,
-  isLocalBridgeUrl,
+  fetchLocalTokenFile,
+  verifyBridgeToken,
 } from "../api/bridge";
+import {
+  getSelectedDirectoryLabel,
+  isDirectoryPickerSupported,
+  pickTokenDirectory,
+  syncTokenFileToSelectedDirectory,
+} from "../tokenSyncDirectory";
 
 
 interface ConfigSubPageProps {
-  bridgePort: number;
   bridgeUrl: string;
+  bridgeToken: string;
   onBridgePortChange: (port: number) => void;
+  onBridgeTokenChange: (token: string) => void;
+  onBridgeUrlChange: (url: string) => void;
   onOpenCli: () => void;
 }
 
 
-/** 校验端口输入 */
 function parsePortInput(value: string): number | null {
   const trimmed = value.trim();
   if (!trimmed) {
@@ -41,9 +51,16 @@ function parsePortInput(value: string): number | null {
 }
 
 
-/** 本地 · 配置子页 */
-export function ConfigSubPage({ bridgePort, bridgeUrl, onBridgePortChange, onOpenCli }: ConfigSubPageProps) {
+export function ConfigSubPage({
+  bridgeUrl,
+  bridgeToken,
+  onBridgePortChange,
+  onBridgeTokenChange,
+  onBridgeUrlChange,
+  onOpenCli,
+}: ConfigSubPageProps) {
   const onGitHubPages = isGitHubPages();
+  const [authStatus, setAuthStatus] = useState<AuthStatusResponse | null>(null);
   const [localConfig, setLocalConfig] = useState<LocalConfigResponse | null>(null);
   const [crewStatus, setCrewStatus] = useState<CrewStatusResponse | null>(null);
   const [sessions, setSessions] = useState<HistorySessionSummary[]>([]);
@@ -52,24 +69,22 @@ export function ConfigSubPage({ bridgePort, bridgeUrl, onBridgePortChange, onOpe
   const [historyFilter, setHistoryFilter] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [bridgePortInput, setBridgePortInput] = useState(String(bridgePort));
+  const [bridgeUrlInput, setBridgeUrlInput] = useState(bridgeUrl);
+  const [tokenInput, setTokenInput] = useState(bridgeToken);
+  const [tokenFileName, setTokenFileName] = useState("chattingcursor-token.txt");
+  const [selectedDirectoryLabel, setSelectedDirectoryLabel] = useState<string | null>(null);
   const [webPortInput, setWebPortInput] = useState(() => String(getWebPort()));
   const [savedWebPort, setSavedWebPort] = useState(() => getWebPort());
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
-  const [retrying, setRetrying] = useState(false);
-  const normalizedBridgeUrl = useMemo(() => bridgeUrl.replace(/\/$/, ""), [bridgeUrl]);
-  const parsedBridgePort = useMemo(() => parsePortInput(bridgePortInput), [bridgePortInput]);
+  const normalizedBridgeUrl = useMemo(() => normalizeBridgeUrl(bridgeUrl), [bridgeUrl]);
+  const normalizedBridgeUrlInput = useMemo(() => normalizeBridgeUrl(bridgeUrlInput), [bridgeUrlInput]);
   const parsedWebPort = useMemo(() => parsePortInput(webPortInput), [webPortInput]);
-  const hasInvalidInput = onGitHubPages
-    ? parsedBridgePort === null
-    : parsedBridgePort === null || parsedWebPort === null;
-  const hasUnsavedChanges = !hasInvalidInput && (
-    onGitHubPages
-      ? parsedBridgePort !== bridgePort
-      : parsedBridgePort !== bridgePort || parsedWebPort !== savedWebPort
-  );
-  const previewWebPort = parsedWebPort ?? savedWebPort;
   const canUseLocalApi = isLocalBridgeUrl(normalizedBridgeUrl);
+  const hasInvalidInput = !normalizedBridgeUrlInput || (!onGitHubPages && parsedWebPort === null);
+  const hasUnsavedChanges = bridgeUrlInput.trim() !== bridgeUrl
+    || tokenInput.trim() !== bridgeToken
+    || (!onGitHubPages && parsedWebPort !== null && parsedWebPort !== savedWebPort);
+  const previewWebPort = parsedWebPort ?? savedWebPort;
   const filteredSessions = useMemo(() => {
     const keyword = historyFilter.trim().toLowerCase();
     if (!keyword) {
@@ -83,8 +98,13 @@ export function ConfigSubPage({ bridgePort, bridgeUrl, onBridgePortChange, onOpe
 
 
   useEffect(() => {
-    setBridgePortInput(String(bridgePort));
-  }, [bridgePort]);
+    setBridgeUrlInput(bridgeUrl);
+  }, [bridgeUrl]);
+
+
+  useEffect(() => {
+    setTokenInput(bridgeToken);
+  }, [bridgeToken]);
 
 
   useEffect(() => {
@@ -98,38 +118,45 @@ export function ConfigSubPage({ bridgePort, bridgeUrl, onBridgePortChange, onOpe
 
   useEffect(() => {
     let cancelled = false;
-    let retryTimer: ReturnType<typeof setTimeout> | null = null;
-    const RETRY_INTERVAL_MS = 3000;
-    const clearRetry = (): void => {
-      if (retryTimer !== null) {
-        clearTimeout(retryTimer);
-        retryTimer = null;
+    void getSelectedDirectoryLabel().then((label) => {
+      if (!cancelled) {
+        setSelectedDirectoryLabel(label);
       }
+    }).catch(() => {
+      if (!cancelled) {
+        setSelectedDirectoryLabel(null);
+      }
+    });
+    return () => {
+      cancelled = true;
     };
-    const load = async (initialLoad: boolean): Promise<void> => {
-      if (initialLoad) {
-        setLoading(true);
-        setError(null);
-        setLocalConfig(null);
-        setCrewStatus(null);
-        setSessions([]);
-        setSelectedFile(null);
-        setHistoryContent("");
-      }
-      if (!canUseLocalApi) {
-        setError("本地配置 API 仅在 Bridge 地址为 127.0.0.1 或 localhost 时可用。");
-        setLoading(false);
-        setRetrying(false);
-        return;
-      }
-      if (!initialLoad) {
-        setRetrying(true);
-      }
+  }, []);
+
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async (): Promise<void> => {
+      setLoading(true);
+      setError(null);
       try {
+        const auth = await fetchAuthStatus(normalizedBridgeUrl);
+        if (cancelled) {
+          return;
+        }
+        setAuthStatus(auth);
+        if (!isLocalBridgeUrl(normalizedBridgeUrl)) {
+          setLocalConfig(null);
+          setCrewStatus(null);
+          setSessions([]);
+          setSelectedFile(null);
+          setHistoryContent("");
+          setLoading(false);
+          return;
+        }
         const [config, history, crew] = await Promise.all([
-          fetchLocalConfig(normalizedBridgeUrl),
-          fetchHistoryList(normalizedBridgeUrl),
-          fetchCrewStatus(normalizedBridgeUrl).catch(() => null),
+          fetchLocalConfig(normalizedBridgeUrl, bridgeToken),
+          fetchHistoryList(normalizedBridgeUrl, bridgeToken),
+          fetchCrewStatus(normalizedBridgeUrl, bridgeToken).catch(() => null),
         ]);
         if (cancelled) {
           return;
@@ -137,66 +164,96 @@ export function ConfigSubPage({ bridgePort, bridgeUrl, onBridgePortChange, onOpe
         setLocalConfig(config);
         setSessions(history.sessions);
         setCrewStatus(crew);
-        setError(null);
-        setRetrying(false);
-        clearRetry();
+        const tokenFile = await fetchLocalTokenFile(normalizedBridgeUrl, bridgeToken);
+        if (!cancelled) {
+          setTokenFileName(tokenFile.fileName);
+          if (selectedDirectoryLabel) {
+            try {
+              await syncTokenFileToSelectedDirectory(tokenFile.fileName, tokenFile.content);
+            } catch {
+              // 忽略同步失败，保留手动重试
+            }
+          }
+        }
       } catch (loadError) {
         if (!cancelled) {
           const message = loadError instanceof Error ? loadError.message : String(loadError);
-          setError(`无法加载本地配置：${message}。请先运行 pnpm dev:bridge（端口 ${bridgePort}）。`);
-          setRetrying(true);
-          clearRetry();
-          retryTimer = setTimeout(() => {
-            void load(false);
-          }, RETRY_INTERVAL_MS);
+          setError(`无法加载配置：${message}`);
         }
       } finally {
-        if (!cancelled && initialLoad) {
+        if (!cancelled) {
           setLoading(false);
         }
       }
     };
-    void load(true);
+    if (!normalizedBridgeUrl) {
+      setLoading(false);
+      setError("请先填写 Bridge URL。");
+      return () => {
+        cancelled = true;
+      };
+    }
+    void load();
     return () => {
       cancelled = true;
-      clearRetry();
     };
-  }, [bridgePort, canUseLocalApi, normalizedBridgeUrl]);
+  }, [bridgeToken, normalizedBridgeUrl, selectedDirectoryLabel]);
 
 
-  const handleSaveAndApply = (): void => {
-    if (parsedBridgePort === null) {
-      setSaveMessage("端口无效，请输入 1–65535 之间的整数。");
+  const handleSaveAndApply = async (): Promise<void> => {
+    if (!normalizedBridgeUrlInput) {
+      setSaveMessage("请输入有效的 Bridge URL。");
+      return;
+    }
+    const remoteTarget = !isLocalBridgeUrl(normalizedBridgeUrlInput);
+    if (remoteTarget && !tokenInput.trim()) {
+      setSaveMessage("远程 Bridge 必须填写当天口令。");
       return;
     }
     if (!onGitHubPages && parsedWebPort === null) {
-      setSaveMessage("端口无效，请输入 1–65535 之间的整数。");
+      setSaveMessage("网页端口无效，请输入 1–65535 之间的整数。");
       return;
     }
-    if (parsedBridgePort !== bridgePort) {
-      onBridgePortChange(parsedBridgePort);
+    if (tokenInput.trim()) {
+      try {
+        await verifyBridgeToken(normalizedBridgeUrlInput, tokenInput.trim());
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        setSaveMessage(`口令验证失败：${message}`);
+        return;
+      }
+    }
+    onBridgeUrlChange(normalizedBridgeUrlInput);
+    onBridgeTokenChange(tokenInput.trim());
+    if (isLocalBridgeUrl(normalizedBridgeUrlInput)) {
+      const port = (() => {
+        try {
+          return Number.parseInt(new URL(normalizedBridgeUrlInput).port || String(DEFAULT_BRIDGE_PORT), 10);
+        } catch {
+          return DEFAULT_BRIDGE_PORT;
+        }
+      })();
+      onBridgePortChange(port);
     }
     if (!onGitHubPages && parsedWebPort !== null) {
       setWebPort(parsedWebPort);
       setSavedWebPort(parsedWebPort);
       setWebPortInput(String(parsedWebPort));
     }
-    setBridgePortInput(String(parsedBridgePort));
-    setSaveMessage(onGitHubPages
-      ? "已保存 Bridge 端口。请在本机运行 Bridge 后刷新聊天页。"
-      : "已保存并应用。Bridge 进程需以相同端口启动后聊天才能连通。");
+    setSaveMessage("已保存并应用连接配置。");
   };
 
 
   const handleResetDefaults = (): void => {
     const defaults = resetPortSettings();
     onBridgePortChange(defaults.bridgePort);
+    onBridgeUrlChange(buildBridgeUrl(defaults.bridgePort));
+    onBridgeTokenChange("");
     setSavedWebPort(defaults.webPort);
-    setBridgePortInput(String(defaults.bridgePort));
+    setBridgeUrlInput(buildBridgeUrl(defaults.bridgePort));
+    setTokenInput("");
     setWebPortInput(String(defaults.webPort));
-    setSaveMessage(onGitHubPages
-      ? `已恢复默认 Bridge 端口 ${DEFAULT_BRIDGE_PORT}。`
-      : `已恢复默认（Bridge ${DEFAULT_BRIDGE_PORT}，Web ${DEFAULT_WEB_PORT}）并应用。`);
+    setSaveMessage("已恢复默认连接配置。");
   };
 
 
@@ -204,7 +261,7 @@ export function ConfigSubPage({ bridgePort, bridgeUrl, onBridgePortChange, onOpe
     setSelectedFile(file);
     setHistoryContent("加载中…");
     try {
-      const result = await fetchHistoryContent(normalizedBridgeUrl, file);
+      const result = await fetchHistoryContent(normalizedBridgeUrl, file, bridgeToken);
       setHistoryContent(result.content);
     } catch (selectError) {
       const message = selectError instanceof Error ? selectError.message : String(selectError);
@@ -213,44 +270,51 @@ export function ConfigSubPage({ bridgePort, bridgeUrl, onBridgePortChange, onOpe
   };
 
 
+  const handleSelectTokenDirectory = async (): Promise<void> => {
+    try {
+      const label = await pickTokenDirectory();
+      setSelectedDirectoryLabel(label);
+      if (canUseLocalApi) {
+        const tokenFile = await fetchLocalTokenFile(normalizedBridgeUrl, bridgeToken);
+        setTokenFileName(tokenFile.fileName);
+        await syncTokenFileToSelectedDirectory(tokenFile.fileName, tokenFile.content);
+        setSaveMessage(`已同步到 ${label}/${tokenFile.fileName}`);
+      } else {
+        setSaveMessage(`已选择目录：${label}`);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setSaveMessage(`选择文件夹失败：${message}`);
+    }
+  };
+
+
   return (
     <div className="config-sub-page">
       <section className="config-section">
         <h2>连接设置</h2>
-        {onGitHubPages && (
-          <p className="config-hint">
-            GitHub Pages 只托管前端 UI；Bridge 仍在你本机运行（默认 <code>{DEFAULT_BRIDGE_PORT}</code>）。
-            浏览器会从当前页面直连 <code>127.0.0.1</code> 上的 Bridge，不会暴露到公网。
-          </p>
-        )}
         <div className="config-grid config-grid-form">
-          <label className="config-field" htmlFor="bridge-port">
-            <span className="config-field-label">
-              {onGitHubPages ? "本机 Bridge 端口" : "本地接收端口（Bridge）"}
-            </span>
+          <label className="config-field" htmlFor="bridge-url">
+            <span className="config-field-label">Bridge URL</span>
             <input
-              id="bridge-port"
-              type="number"
-              min={1}
-              max={65535}
-              value={bridgePortInput}
-              onChange={(event) => setBridgePortInput(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  handleSaveAndApply();
-                }
-              }}
+              id="bridge-url"
+              type="url"
+              value={bridgeUrlInput}
+              onChange={(event) => setBridgeUrlInput(event.target.value)}
+              placeholder={onGitHubPages ? "https://bridge.example.com" : "http://127.0.0.1:4321"}
             />
           </label>
-          {onGitHubPages ? (
-            <div className="config-field config-field-readonly">
-              <span className="config-field-label">网页地址（线上固定）</span>
-              <p className="config-readonly-value">
-                <code>{GITHUB_PAGES_URL}</code>
-              </p>
-              <p className="config-hint">线上固定地址，无需配置网页端口。</p>
-            </div>
-          ) : (
+          <label className="config-field" htmlFor="bridge-token">
+            <span className="config-field-label">今日口令</span>
+            <input
+              id="bridge-token"
+              type="password"
+              value={tokenInput}
+              onChange={(event) => setTokenInput(event.target.value)}
+              placeholder="从云盘同步文件中查看当天 token"
+            />
+          </label>
+          {!onGitHubPages && (
             <label className="config-field" htmlFor="web-port">
               <span className="config-field-label">网页接收端口（Vite dev）</span>
               <input
@@ -260,24 +324,25 @@ export function ConfigSubPage({ bridgePort, bridgeUrl, onBridgePortChange, onOpe
                 max={65535}
                 value={webPortInput}
                 onChange={(event) => setWebPortInput(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    handleSaveAndApply();
-                  }
-                }}
               />
             </label>
+          )}
+          {onGitHubPages && (
+            <div className="config-field config-field-readonly">
+              <span className="config-field-label">网页地址（线上固定）</span>
+              <p className="config-readonly-value">
+                <code>{GITHUB_PAGES_URL}</code>
+              </p>
+            </div>
           )}
         </div>
         <div className="config-save-row">
           <p className={`config-save-status${hasUnsavedChanges ? " config-save-status-dirty" : ""}`} aria-live="polite">
             {hasInvalidInput
-              ? "端口格式无效"
+              ? "Bridge URL 或网页端口无效"
               : hasUnsavedChanges
                 ? "有未保存的更改"
-                : onGitHubPages
-                  ? `已保存（Bridge ${bridgePort} → ${normalizedBridgeUrl}）`
-                  : `已保存（Bridge ${bridgePort}，Web ${savedWebPort}）`}
+                : `已保存（${normalizedBridgeUrl || "未配置"}）`}
           </p>
           {saveMessage && <p className="config-save-toast" role="status">{saveMessage}</p>}
         </div>
@@ -285,8 +350,8 @@ export function ConfigSubPage({ bridgePort, bridgeUrl, onBridgePortChange, onOpe
           <button
             type="button"
             className="btn-primary config-action-primary"
-            onClick={handleSaveAndApply}
-            disabled={!hasUnsavedChanges || hasInvalidInput}
+            onClick={() => void handleSaveAndApply()}
+            disabled={hasInvalidInput || !hasUnsavedChanges}
           >
             保存并应用
           </button>
@@ -298,63 +363,78 @@ export function ConfigSubPage({ bridgePort, bridgeUrl, onBridgePortChange, onOpe
             恢复默认
           </button>
         </div>
-        {onGitHubPages ? (
-          <>
-            <p className="config-hint">
-              默认 Bridge 地址：<code>{buildBridgeUrl(DEFAULT_BRIDGE_PORT)}</code>。若本机 Bridge 使用其他端口，请修改上方端口并保存。
-            </p>
-            <p className="config-hint">
-              聊天页通过 <code>{normalizedBridgeUrl}</code> 连接本机 Bridge。请在本机运行
-              {" "}<code>pnpm dev:bridge</code>（或 <code>BRIDGE_PORT={parsedBridgePort ?? bridgePort} pnpm dev:bridge</code>），
-              端口需与上方一致。
-            </p>
-          </>
-        ) : (
-          <>
-            <p className="config-hint">
-              默认端口：Bridge <code>{DEFAULT_BRIDGE_PORT}</code>，Web <code>{DEFAULT_WEB_PORT}</code>。首次打开使用默认值；若曾修改过，浏览器会记住上次保存的设置。
-            </p>
-            <p className="config-hint">
-              聊天页通过 <code>{normalizedBridgeUrl}</code> 连接本机 Bridge。此处保存的是<strong>网页要连接的 Bridge 端口</strong>，保存后立即生效；Bridge 进程本身由环境变量 <code>BRIDGE_PORT</code> 决定监听端口（默认 {DEFAULT_BRIDGE_PORT}），需与此处一致，例如 <code>BRIDGE_PORT={parsedBridgePort ?? bridgePort} pnpm dev:bridge</code>。
-            </p>
-            <p className="config-hint">
-              网页端口仅作本地开发参考；修改并保存后需<strong>重启</strong> <code>pnpm dev:web</code> 才会真正监听新端口。当前参考地址：<code>{buildWebDevUrl(previewWebPort)}</code>
-            </p>
-          </>
+        <p className="config-hint">
+          手机访问 GitHub Pages 时，应填写公开的 Bridge 域名；电脑本机开发时，仍可填写 <code>{buildBridgeUrl(DEFAULT_BRIDGE_PORT)}</code>。
+        </p>
+        {!onGitHubPages && (
+          <p className="config-hint">
+            网页端口仅作本地开发参考；修改并保存后需重启 <code>pnpm dev:web</code>。当前参考地址：<code>{buildWebDevUrl(previewWebPort)}</code>
+          </p>
         )}
       </section>
+
+      <section className="config-section">
+        <h2>每日口令</h2>
+        {authStatus ? (
+          <dl className="config-grid">
+            <dt>当前日期</dt>
+            <dd>{authStatus.tokenDate}</dd>
+            <dt>远程入口</dt>
+            <dd>{authStatus.publicBridgeUrl}</dd>
+            <dt>固定文件名</dt>
+            <dd>{tokenFileName}</dd>
+            <dt>同步目录</dt>
+            <dd>{selectedDirectoryLabel ? `${selectedDirectoryLabel}/${tokenFileName}` : "未选择"}</dd>
+          </dl>
+        ) : (
+          <p className="config-hint">连接 Bridge 后会显示当天口令文件位置。</p>
+        )}
+        <div className="config-actions">
+          <button
+            type="button"
+            className="btn-secondary config-action-secondary"
+            onClick={() => void handleSelectTokenDirectory()}
+          >
+            选择文件夹
+          </button>
+        </div>
+        <p className="config-hint">
+          页面不会显示 token 内容。选择文件夹后，会把固定文件名 <code>{tokenFileName}</code> 写入该目录，供云盘同步。
+        </p>
+        {!isDirectoryPickerSupported() && (
+          <p className="config-hint">当前浏览器不支持文件夹选择 API，请使用本机 Chrome/Edge 打开此页。</p>
+        )}
+      </section>
+
       {loading && <p className="config-hint">加载 Bridge 状态…</p>}
-      {!loading && error && (
-        <>
-          <p className="config-error">{error}</p>
-          {retrying && <p className="config-hint">Bridge 未连接，每 3 秒自动重试…</p>}
-        </>
-      )}
-      {!loading && !error && localConfig && (
+      {!loading && error && <p className="config-error">{error}</p>}
+
+      {!loading && !error && localConfig && canUseLocalApi && (
         <>
           <section className="config-section">
             <h2>Bridge 与 CLI</h2>
             <dl className="config-grid">
               <dt>Bridge 地址</dt>
               <dd>{localConfig.bridgeUrl}</dd>
+              <dt>公开地址</dt>
+              <dd>{localConfig.publicBridgeUrl}</dd>
               <dt>默认模型</dt>
               <dd>{localConfig.defaultModel || "（未检测到）"}</dd>
               <dt>模型来源</dt>
               <dd>{localConfig.modelsSource === "cli" ? "cursor-agent models" : "内置回退列表"}</dd>
               <dt>CLI 命令</dt>
               <dd>{localConfig.cli.available ? (localConfig.cli.command ?? "可用") : (localConfig.cli.message ?? "不可用")}</dd>
-              <dt>Chrome 9222</dt>
-              <dd>
-                {crewStatus?.chrome.available
-                  ? `${crewStatus.chrome.endpoint}（已连接 ${crewStatus.chrome.pages ?? 0} 个页面）`
-                  : (crewStatus?.chrome.message ?? "未检测到")}
-              </dd>
+              <dt>固定文件名</dt>
+              <dd>{tokenFileName}</dd>
+              <dt>口令日期</dt>
+              <dd>{localConfig.tokenDate}</dd>
               <dt>历史目录</dt>
               <dd>{localConfig.historyDir}</dd>
               <dt>保留天数</dt>
               <dd>{localConfig.historyRetentionDays} 天</dd>
             </dl>
           </section>
+
           <section className="config-section">
             <h2>CLI 实时反馈</h2>
             <p className="config-hint">
@@ -366,6 +446,7 @@ export function ConfigSubPage({ bridgePort, bridgeUrl, onBridgePortChange, onOpe
               打开 CLI 输出
             </button>
           </section>
+
           <section className="config-section">
             <h2>crewAI 编排</h2>
             {crewStatus ? (
@@ -386,24 +467,18 @@ export function ConfigSubPage({ bridgePort, bridgeUrl, onBridgePortChange, onOpe
                 <dd><code>pnpm crew:run</code>（dry-run）· <code>POST /crews/run</code></dd>
               </dl>
             ) : (
-              <p className="config-hint">crewAI 状态不可用。请确认 Bridge 已启动并安装 Python 依赖（见 QUICKSTART）。</p>
+              <p className="config-hint">crewAI 状态不可用。</p>
             )}
           </section>
         </>
       )}
+
       <section className="config-section">
         <h2>历史文件查看</h2>
         <p className="config-hint">
-          浏览 <code>~/.chattingcursor/history/</code> 下的会话文本（通过 Bridge 只读代理）。
-          {localConfig ? ` 文件位于 ${localConfig.historyDir}，超过 ${localConfig.historyRetentionDays} 天会自动删除。` : ""}
-          聊天页仍可用自然语言搜索；此处为完整只读浏览。
+          只有当 Bridge URL 指向当前电脑本机时，才允许查看本地历史全文与配置细节。远程手机场景下，这部分默认不开放。
         </p>
-        {!canUseLocalApi && (
-          <p className="config-hint">请将 Bridge 端口设为 {DEFAULT_BRIDGE_PORT} 并指向本机后再加载历史列表。</p>
-        )}
-        {canUseLocalApi && !loading && error && (
-          <p className="config-hint">Bridge 未连接，无法列出历史文件。请先运行 <code>pnpm dev:bridge</code>。</p>
-        )}
+        {!canUseLocalApi && <p className="config-hint">当前 Bridge 不是本机地址，历史全文浏览已禁用。</p>}
         {canUseLocalApi && !loading && !error && sessions.length === 0 && (
           <p className="config-hint">暂无历史文件。完成至少一次 Agent 回复后会在此列出。</p>
         )}

@@ -7,11 +7,12 @@ const LATEST_RUN_ID_KEY = "latestRunId";
 
 interface CliOutputSubPageProps {
   bridgeUrl: string;
+  bridgeToken: string;
 }
 
 
 /** 本地 · CLI 输出子页 */
-export function CliOutputSubPage({ bridgeUrl }: CliOutputSubPageProps) {
+export function CliOutputSubPage({ bridgeUrl, bridgeToken }: CliOutputSubPageProps) {
   const [runId, setRunId] = useState("");
   const normalizedBridgeUrl = useMemo(() => bridgeUrl.replace(/\/$/, ""), [bridgeUrl]);
 
@@ -53,7 +54,7 @@ export function CliOutputSubPage({ bridgeUrl }: CliOutputSubPageProps) {
         <pre className="terminal-command">pnpm cli:watch</pre>
         <p className="config-hint">指定 runId：<code>pnpm cli:watch &lt;runId&gt;</code></p>
       </section>
-      <TerminalPanel bridgeUrl={normalizedBridgeUrl} runId={runId.trim() || null} />
+      <TerminalPanel bridgeUrl={normalizedBridgeUrl} bridgeToken={bridgeToken} runId={runId.trim() || null} />
     </div>
   );
 }

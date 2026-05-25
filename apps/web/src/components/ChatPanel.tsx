@@ -2,12 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import type { ChatMessage, ModelInfo } from "@chatting-cursor/shared";
 import {
   createChatSession,
+  fetchRecentChatSession,
   fetchModels,
   mergeAssistantStreamText,
   sendChatMessage,
   subscribeRunEvents,
 } from "../api/bridge";
 import { clearChatState, loadChatState, saveChatState } from "../chatPersistence";
+import { isLocalBridgeUrl } from "../bridgeSettings";
 import { useSpeech } from "../hooks/useSpeech";
 import { MessageBubble } from "./MessageBubble";
 
@@ -17,6 +19,7 @@ const LATEST_RUN_ID_KEY = "latestRunId";
 
 interface ChatPanelProps {
   bridgeUrl: string;
+  bridgeToken: string;
 }
 
 
@@ -24,13 +27,14 @@ const MODEL_STORAGE_KEY = "selectedModel";
 
 
 /** 最小聊天面板 */
-export function ChatPanel({ bridgeUrl }: ChatPanelProps) {
+export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
   const restoredState = loadChatState();
   const [messages, setMessages] = useState<ChatMessage[]>(() => restoredState?.messages ?? []);
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
   const [models, setModels] = useState<ModelInfo[]>([]);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState(
     () => restoredState?.selectedModel ?? localStorage.getItem(MODEL_STORAGE_KEY) ?? "",
   );
@@ -45,10 +49,11 @@ export function ChatPanel({ bridgeUrl }: ChatPanelProps) {
     let cancelled = false;
     const loadModels = async (): Promise<void> => {
       try {
-        const result = await fetchModels(bridgeUrl);
+        const result = await fetchModels(bridgeUrl, bridgeToken);
         if (cancelled) {
           return;
         }
+        setConnectionError(null);
         setModels(result.models);
         const stored = localStorage.getItem(MODEL_STORAGE_KEY);
         const defaultModel = result.models.find((item) => item.isDefault)?.id ?? result.models[0]?.id ?? "";
@@ -57,15 +62,18 @@ export function ChatPanel({ bridgeUrl }: ChatPanelProps) {
         } else if (defaultModel) {
           setSelectedModel(defaultModel);
         }
-      } catch {
-        // 模型列表加载失败时保留当前选择
+      } catch (error) {
+        if (!cancelled) {
+          const message = error instanceof Error ? error.message : String(error);
+          setConnectionError(message);
+        }
       }
     };
     void loadModels();
     return () => {
       cancelled = true;
     };
-  }, [bridgeUrl]);
+  }, [bridgeToken, bridgeUrl]);
 
 
   useEffect(() => {
@@ -75,12 +83,26 @@ export function ChatPanel({ bridgeUrl }: ChatPanelProps) {
         return;
       }
       try {
-        const result = await createChatSession(bridgeUrl);
+        const recent = await fetchRecentChatSession(bridgeUrl, bridgeToken);
+        if (!cancelled && recent) {
+          setSessionId(recent.sessionId);
+          setMessages(recent.messages);
+          if (recent.model) {
+            setSelectedModel(recent.model);
+          }
+          setConnectionError(null);
+          return;
+        }
+        const result = await createChatSession(bridgeUrl, bridgeToken);
         if (!cancelled) {
           setSessionId(result.sessionId);
+          setConnectionError(null);
         }
-      } catch {
-        // 会话初始化失败，发送时会再次创建
+      } catch (error) {
+        if (!cancelled) {
+          const message = error instanceof Error ? error.message : String(error);
+          setConnectionError(message);
+        }
       }
     };
     void initSession();
@@ -88,7 +110,7 @@ export function ChatPanel({ bridgeUrl }: ChatPanelProps) {
       cancelled = true;
       sseCloseRef.current?.();
     };
-  }, [bridgeUrl, sessionId]);
+  }, [bridgeToken, bridgeUrl, sessionId]);
 
 
   useEffect(() => {
@@ -124,8 +146,9 @@ export function ChatPanel({ bridgeUrl }: ChatPanelProps) {
     resetChatState();
     clearChatState();
     try {
-      const result = await createChatSession(bridgeUrl);
+      const result = await createChatSession(bridgeUrl, bridgeToken);
       setSessionId(result.sessionId);
+      setConnectionError(null);
     } catch {
       setSessionId(null);
     }
@@ -210,14 +233,16 @@ export function ChatPanel({ bridgeUrl }: ChatPanelProps) {
       const { runId, sessionId: activeSessionId } = await sendChatMessage(bridgeUrl, prompt, {
         model: selectedModel || undefined,
         sessionId: sessionId ?? undefined,
+        token: bridgeToken,
       });
       setSessionId(activeSessionId);
+      setConnectionError(null);
       localStorage.setItem(LATEST_RUN_ID_KEY, runId);
       sseCloseRef.current = subscribeRunEvents(bridgeUrl, runId, handleStreamEvent, () => {
         setIsSending(false);
         setIsThinking(false);
         sseCloseRef.current = null;
-      });
+      }, bridgeToken);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setMessages((prev) => [
@@ -229,6 +254,7 @@ export function ChatPanel({ bridgeUrl }: ChatPanelProps) {
           createdAt: new Date().toISOString(),
         },
       ]);
+      setConnectionError(message);
       setIsSending(false);
       setIsThinking(false);
     }
@@ -269,6 +295,18 @@ export function ChatPanel({ bridgeUrl }: ChatPanelProps) {
             新对话
           </button>
         </div>
+        {connectionError && (
+          <p className="config-error">
+            {isLocalBridgeUrl(bridgeUrl)
+              ? `Bridge 连接异常：${connectionError}`
+              : `远程 Bridge 连接异常：${connectionError}。请在“本地 → 配置”中确认 Bridge URL 和当天口令。`}
+          </p>
+        )}
+        {!bridgeToken && !isLocalBridgeUrl(bridgeUrl) && (
+          <p className="config-hint">
+            当前 Bridge URL 不是本机地址。请先在“本地 → 配置”里输入当天口令，再开始聊天。
+          </p>
+        )}
         <div className="messages">
           {messages.map((message) => (
             <MessageBubble

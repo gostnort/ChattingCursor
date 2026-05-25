@@ -104,6 +104,17 @@ export const chatNewSessionResponseSchema = z.object({
 export type ChatNewSessionResponse = z.infer<typeof chatNewSessionResponseSchema>;
 
 
+/** GET /chat/recent-session 响应体 */
+export const recentChatSessionResponseSchema = z.object({
+  sessionId: z.string().min(1),
+  model: z.string().optional(),
+  messages: z.array(chatMessageSchema),
+  updatedAt: z.string().datetime(),
+});
+
+export type RecentChatSessionResponse = z.infer<typeof recentChatSessionResponseSchema>;
+
+
 /** GET /models 单项 */
 export const modelInfoSchema = z.object({
   id: z.string().min(1),
@@ -145,11 +156,14 @@ export type HistorySearchResponse = z.infer<typeof historySearchResponseSchema>;
 /** GET /local/config 响应体 */
 export const localConfigResponseSchema = z.object({
   bridgeUrl: z.string().min(1),
+  publicBridgeUrl: z.string().min(1),
   bridgeHost: z.string().min(1),
   bridgePort: z.number().int().positive(),
   corsOrigins: z.array(z.string()),
   historyDir: z.string().min(1),
   historyRetentionDays: z.number().int().positive(),
+  tokenFilePath: z.string().min(1),
+  tokenDate: z.string().min(1),
   defaultModel: z.string(),
   modelsSource: z.enum(["cli", "fallback"]),
   cli: z.object({
@@ -161,6 +175,38 @@ export const localConfigResponseSchema = z.object({
 });
 
 export type LocalConfigResponse = z.infer<typeof localConfigResponseSchema>;
+
+
+/** GET /auth/status 响应体 */
+export const authStatusResponseSchema = z.object({
+  enabled: z.boolean(),
+  tokenDate: z.string().min(1),
+  publicBridgeUrl: z.string().min(1),
+  tokenFilePath: z.string().min(1),
+  timestamp: z.string().datetime(),
+});
+
+export type AuthStatusResponse = z.infer<typeof authStatusResponseSchema>;
+
+
+/** POST /auth/verify 响应体 */
+export const authVerifyResponseSchema = z.object({
+  ok: z.boolean(),
+  tokenDate: z.string().min(1),
+  timestamp: z.string().datetime(),
+});
+
+export type AuthVerifyResponse = z.infer<typeof authVerifyResponseSchema>;
+
+
+/** GET /local/token-file 响应体 */
+export const localTokenFileResponseSchema = z.object({
+  fileName: z.string().min(1),
+  tokenDate: z.string().min(1),
+  content: z.string(),
+});
+
+export type LocalTokenFileResponse = z.infer<typeof localTokenFileResponseSchema>;
 
 
 /** GET /local/history 会话摘要 */

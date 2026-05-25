@@ -5,12 +5,13 @@ import { subscribeTerminalEvents } from "../api/bridge";
 
 interface TerminalPanelProps {
   bridgeUrl: string;
+  bridgeToken: string;
   runId: string | null;
 }
 
 
 /** 展示 cursor-agent 子进程原始 stdout/stderr（非解析后的 SSE 事件） */
-export function TerminalPanel({ bridgeUrl, runId }: TerminalPanelProps) {
+export function TerminalPanel({ bridgeUrl, bridgeToken, runId }: TerminalPanelProps) {
   const [lines, setLines] = useState<string[]>([]);
   const [commandLine, setCommandLine] = useState<string>("");
   const preRef = useRef<HTMLPreElement>(null);
@@ -46,9 +47,9 @@ export function TerminalPanel({ bridgeUrl, runId }: TerminalPanelProps) {
         const code = data?.exitCode;
         setLines((prev) => [...prev, `\n[进程结束 exit=${code ?? "?"}]`]);
       }
-    });
+    }, undefined, bridgeToken);
     return close;
-  }, [bridgeUrl, runId]);
+  }, [bridgeToken, bridgeUrl, runId]);
 
 
   useEffect(() => {

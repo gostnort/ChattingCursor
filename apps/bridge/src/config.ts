@@ -3,17 +3,21 @@
 export interface BridgeConfig {
   host: string;
   port: number;
+  publicBridgeUrl: string;
   corsOrigins: string[];
 }
 
 
 /** 从环境变量加载配置 */
 export function loadConfig(): BridgeConfig {
+  const host = process.env.BRIDGE_HOST ?? "127.0.0.1";
+  const port = Number(process.env.BRIDGE_PORT ?? 4321);
   const corsRaw = process.env.BRIDGE_CORS_ORIGINS
     ?? "http://127.0.0.1:43210,http://localhost:43210,http://127.0.0.1:5173,http://localhost:5173,https://*.github.io";
   return {
-    host: process.env.BRIDGE_HOST ?? "127.0.0.1",
-    port: Number(process.env.BRIDGE_PORT ?? 4321),
+    host,
+    port,
+    publicBridgeUrl: process.env.BRIDGE_PUBLIC_URL?.trim() || `http://${host}:${port}`,
     corsOrigins: corsRaw.split(",").map((item) => item.trim()).filter(Boolean),
   };
 }
