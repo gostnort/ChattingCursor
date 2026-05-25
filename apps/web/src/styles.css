@@ -1038,6 +1038,24 @@ body {
 
 
 
+.config-field-readonly .config-readonly-value {
+
+  margin: 0;
+
+  color: #c9d1d9;
+
+}
+
+
+
+.config-field-readonly .config-hint {
+
+  margin: 0;
+
+}
+
+
+
 .config-save-row {
 
   display: flex;

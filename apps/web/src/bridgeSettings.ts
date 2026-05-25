@@ -1,3 +1,5 @@
+import { isGitHubPages } from "./environment";
+
 /** Bridge / 网页端口 localStorage 键与默认值 */
 export const BRIDGE_PORT_KEY = "bridgePort";
 export const WEB_PORT_KEY = "webPort";
@@ -17,6 +19,18 @@ function parsePort(value: string | null, fallback: number): number {
     return fallback;
   }
   return parsed;
+}
+
+
+/** GitHub Pages 首次加载：清除 webPort 并确保 Bridge 默认指向本机 4321 */
+export function initPortSettingsForEnvironment(): void {
+  if (!isGitHubPages()) {
+    return;
+  }
+  localStorage.removeItem(WEB_PORT_KEY);
+  if (!localStorage.getItem(BRIDGE_PORT_KEY) && !localStorage.getItem(LEGACY_BRIDGE_URL_KEY)) {
+    setBridgePort(DEFAULT_BRIDGE_PORT);
+  }
 }
 
 
@@ -55,14 +69,20 @@ export function buildBridgeUrl(port: number = getBridgePort()): string {
 }
 
 
-/** 读取网页（Vite dev）端口，仅作本地开发参考 */
+/** 读取网页（Vite dev）端口，仅作本地开发参考；GitHub Pages 不使用 */
 export function getWebPort(): number {
+  if (isGitHubPages()) {
+    return DEFAULT_WEB_PORT;
+  }
   return parsePort(localStorage.getItem(WEB_PORT_KEY), DEFAULT_WEB_PORT);
 }
 
 
-/** 保存网页端口参考值 */
+/** 保存网页端口参考值；GitHub Pages 不写入 */
 export function setWebPort(port: number): void {
+  if (isGitHubPages()) {
+    return;
+  }
   localStorage.setItem(WEB_PORT_KEY, String(port));
 }
 
@@ -70,19 +90,27 @@ export function setWebPort(port: number): void {
 /** 清除已保存端口，恢复默认值 */
 export function resetPortSettings(): { bridgePort: number; webPort: number } {
   localStorage.removeItem(BRIDGE_PORT_KEY);
-  localStorage.removeItem(WEB_PORT_KEY);
   localStorage.removeItem(LEGACY_BRIDGE_URL_KEY);
+  if (isGitHubPages()) {
+    localStorage.removeItem(WEB_PORT_KEY);
+    setBridgePort(DEFAULT_BRIDGE_PORT);
+    return { bridgePort: DEFAULT_BRIDGE_PORT, webPort: DEFAULT_WEB_PORT };
+  }
+  localStorage.removeItem(WEB_PORT_KEY);
   return { bridgePort: DEFAULT_BRIDGE_PORT, webPort: DEFAULT_WEB_PORT };
 }
 
 
 /** 当前保存值是否与默认端口一致 */
 export function isDefaultPortSettings(): boolean {
+  if (isGitHubPages()) {
+    return getBridgePort() === DEFAULT_BRIDGE_PORT;
+  }
   return getBridgePort() === DEFAULT_BRIDGE_PORT && getWebPort() === DEFAULT_WEB_PORT;
 }
 
 
-/** 构建本地开发前端 URL */
+/** 构建本地开发前端 URL；GitHub Pages 不使用 */
 export function buildWebDevUrl(port: number = getWebPort()): string {
   return `http://${BRIDGE_HOST}:${port}/ChattingCursor/`;
 }
