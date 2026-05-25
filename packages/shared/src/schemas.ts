@@ -205,6 +205,12 @@ export const crewStatusResponseSchema = z.object({
     version: z.string().optional(),
     message: z.string().optional(),
   }),
+  chrome: z.object({
+    available: z.boolean(),
+    endpoint: z.string(),
+    pages: z.number().int().nonnegative().optional(),
+    message: z.string().optional(),
+  }),
   exampleConfig: z.object({
     valid: z.boolean(),
     path: z.string().optional(),

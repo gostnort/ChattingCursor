@@ -1,6 +1,8 @@
 node_modules/
 dist/
 .pnpm-store/
+.venv/
+.test-screenshots/
 *.log
 .env
 .env.*

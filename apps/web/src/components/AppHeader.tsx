@@ -60,11 +60,6 @@ export function AppHeader({ mode, onModeChange }: AppHeaderProps) {
           </div>
         </div>
       </div>
-      {mode === "chat" ? (
-        <p className="app-tagline">与 Cursor Agent 对话。</p>
-      ) : (
-        <p className="app-tagline">本机 Bridge 配置、历史浏览与 CLI 原始输出。</p>
-      )}
     </header>
   );
 }

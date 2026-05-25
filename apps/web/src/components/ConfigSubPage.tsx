@@ -343,6 +343,12 @@ export function ConfigSubPage({ bridgePort, bridgeUrl, onBridgePortChange, onOpe
               <dd>{localConfig.modelsSource === "cli" ? "cursor-agent models" : "内置回退列表"}</dd>
               <dt>CLI 命令</dt>
               <dd>{localConfig.cli.available ? (localConfig.cli.command ?? "可用") : (localConfig.cli.message ?? "不可用")}</dd>
+              <dt>Chrome 9222</dt>
+              <dd>
+                {crewStatus?.chrome.available
+                  ? `${crewStatus.chrome.endpoint}（已连接 ${crewStatus.chrome.pages ?? 0} 个页面）`
+                  : (crewStatus?.chrome.message ?? "未检测到")}
+              </dd>
               <dt>历史目录</dt>
               <dd>{localConfig.historyDir}</dd>
               <dt>保留天数</dt>
@@ -368,6 +374,12 @@ export function ConfigSubPage({ bridgePort, bridgeUrl, onBridgePortChange, onOpe
                 <dd>{crewStatus.python.available ? (crewStatus.python.command ?? "可用") : (crewStatus.python.message ?? "不可用")}</dd>
                 <dt>crewAI</dt>
                 <dd>{crewStatus.crewai.installed ? `已安装 (${crewStatus.crewai.version ?? "未知版本"})` : (crewStatus.crewai.message ?? "未安装")}</dd>
+                <dt>Chrome 验证</dt>
+                <dd>
+                  {crewStatus.chrome.available
+                    ? `${crewStatus.chrome.endpoint}（${crewStatus.chrome.pages ?? 0} 个页面）`
+                    : (crewStatus.chrome.message ?? "未连接 9222")}
+                </dd>
                 <dt>示例配置</dt>
                 <dd>{crewStatus.exampleConfig.valid ? crewStatus.exampleConfig.path : (crewStatus.exampleConfig.message ?? "无效")}</dd>
                 <dt>运行方式</dt>
@@ -382,7 +394,7 @@ export function ConfigSubPage({ bridgePort, bridgeUrl, onBridgePortChange, onOpe
       <section className="config-section">
         <h2>历史文件查看</h2>
         <p className="config-hint">
-          浏览 <code>~/.chattingcursor/history/</code> 下的会话 JSON（通过 Bridge 只读代理）。
+          浏览 <code>~/.chattingcursor/history/</code> 下的会话文本（通过 Bridge 只读代理）。
           {localConfig ? ` 文件位于 ${localConfig.historyDir}，超过 ${localConfig.historyRetentionDays} 天会自动删除。` : ""}
           聊天页仍可用自然语言搜索；此处为完整只读浏览。
         </p>
@@ -432,7 +444,7 @@ export function ConfigSubPage({ bridgePort, bridgeUrl, onBridgePortChange, onOpe
                     <pre>{historyContent}</pre>
                   </>
                 ) : (
-                  <p className="config-hint history-viewer-empty">从左侧选择文件以查看完整 JSON 内容。</p>
+                  <p className="config-hint history-viewer-empty">从左侧选择文件以查看完整文本内容。</p>
                 )}
               </div>
             </div>
