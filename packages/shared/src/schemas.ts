@@ -55,6 +55,7 @@ export const runEventTypeSchema = z.enum([
   "raw_stdout",
   "stderr",
   "assistant",
+  "thinking",
   "tool_call",
   "result",
   "error",

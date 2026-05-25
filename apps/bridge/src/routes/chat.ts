@@ -19,8 +19,9 @@ function buildSseHeaders(request: FastifyRequest): Record<string, string> {
   const config = loadConfig();
   const headers: Record<string, string> = {
     "Content-Type": "text/event-stream",
-    "Cache-Control": "no-cache",
+    "Cache-Control": "no-cache, no-transform",
     Connection: "keep-alive",
+    "X-Accel-Buffering": "no",
   };
   const origin = resolveCorsOrigin(request.headers.origin, config.corsOrigins);
   if (origin) {
@@ -196,6 +197,8 @@ export async function registerChatRoutes(app: FastifyInstance): Promise<void> {
     reply.raw.writeHead(200, buildSseHeaders(request));
     const writeEvent = (event: unknown): void => {
       reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
+      const raw = reply.raw as NodeJS.WritableStream & { flush?: () => void };
+      raw.flush?.();
     };
     for (const event of run.events) {
       writeEvent(event);

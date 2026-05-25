@@ -50,6 +50,27 @@ function makeEvent(
 }
 
 
+/** 从 assistant NDJSON 载荷提取文本（支持增量与完整两种模式） */
+function extractAssistantText(payload: Record<string, unknown>): string {
+  const message = payload.message as { content?: Array<{ type?: string; text?: string }> } | undefined;
+  const fromBlocks = message?.content
+    ?.filter((block) => block.type === "text")
+    .map((block) => block.text ?? "")
+    .join("") ?? "";
+  if (fromBlocks) {
+    return fromBlocks;
+  }
+  if (typeof payload.text === "string") {
+    return payload.text;
+  }
+  const delta = payload.delta as { text?: string } | undefined;
+  if (typeof delta?.text === "string") {
+    return delta.text;
+  }
+  return "";
+}
+
+
 /** 解析 stream-json 单行 NDJSON */
 function parseStreamJsonLine(runId: string, line: string, onEvent?: (event: RunEvent) => void): void {
   const trimmed = line.trim();
@@ -60,14 +81,15 @@ function parseStreamJsonLine(runId: string, line: string, onEvent?: (event: RunE
     const payload = JSON.parse(trimmed) as Record<string, unknown>;
     const eventType = typeof payload.type === "string" ? payload.type : "unknown";
     if (eventType === "assistant") {
-      const message = payload.message as { content?: Array<{ type?: string; text?: string }> } | undefined;
-      const text = message?.content
-        ?.filter((block) => block.type === "text")
-        .map((block) => block.text ?? "")
-        .join("") ?? "";
+      const text = extractAssistantText(payload);
       if (text) {
         onEvent?.(makeEvent(runId, "assistant", { text, data: payload }));
       }
+      return;
+    }
+    if (eventType === "thinking") {
+      const thinkingText = typeof payload.text === "string" ? payload.text : "";
+      onEvent?.(makeEvent(runId, "thinking", { text: thinkingText, data: payload }));
       return;
     }
     if (eventType === "result") {

@@ -7,6 +7,8 @@ import {
   sendChatMessage,
   subscribeRunEvents,
 } from "../api/bridge";
+import { useSpeech } from "../hooks/useSpeech";
+import { MessageBubble } from "./MessageBubble";
 
 
 const LATEST_RUN_ID_KEY = "latestRunId";
@@ -25,11 +27,14 @@ export function ChatPanel({ bridgeUrl }: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
+  const [isThinking, setIsThinking] = useState(false);
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [selectedModel, setSelectedModel] = useState(() => localStorage.getItem(MODEL_STORAGE_KEY) ?? "");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const assistantBufferRef = useRef("");
   const sseCloseRef = useRef<(() => void) | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const { speak } = useSpeech();
 
 
   useEffect(() => {
@@ -79,6 +84,11 @@ export function ChatPanel({ bridgeUrl }: ChatPanelProps) {
   }, [bridgeUrl]);
 
 
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [messages, isSending, isThinking]);
+
+
   const handleModelChange = (value: string): void => {
     setSelectedModel(value);
     localStorage.setItem(MODEL_STORAGE_KEY, value);
@@ -91,6 +101,7 @@ export function ChatPanel({ bridgeUrl }: ChatPanelProps) {
     assistantBufferRef.current = "";
     setMessages([]);
     setIsSending(false);
+    setIsThinking(false);
   };
 
 
@@ -105,12 +116,67 @@ export function ChatPanel({ bridgeUrl }: ChatPanelProps) {
   };
 
 
+  const handleStreamEvent = (event: { type: string; text?: string }): void => {
+    if (event.type === "thinking") {
+      setIsThinking(true);
+      return;
+    }
+    if (event.type === "assistant" && event.text) {
+      setIsThinking(false);
+      assistantBufferRef.current = mergeAssistantStreamText(assistantBufferRef.current, event.text);
+      setMessages((prev) => {
+        const last = prev[prev.length - 1];
+        if (last?.role === "assistant") {
+          return [...prev.slice(0, -1), { ...last, content: assistantBufferRef.current }];
+        }
+        return [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            role: "assistant",
+            content: assistantBufferRef.current,
+            createdAt: new Date().toISOString(),
+          },
+        ];
+      });
+    }
+    if (event.type === "result" && event.text) {
+      setIsThinking(false);
+      assistantBufferRef.current = event.text;
+      setMessages((prev) => {
+        const last = prev[prev.length - 1];
+        if (last?.role === "assistant") {
+          return [...prev.slice(0, -1), { ...last, content: event.text ?? "" }];
+        }
+        if (event.text) {
+          return [
+            ...prev,
+            {
+              id: crypto.randomUUID(),
+              role: "assistant",
+              content: event.text,
+              createdAt: new Date().toISOString(),
+            },
+          ];
+        }
+        return prev;
+      });
+    }
+    if (event.type === "run_finished") {
+      setIsSending(false);
+      setIsThinking(false);
+      sseCloseRef.current = null;
+    }
+  };
+
+
   const handleSend = async (): Promise<void> => {
     const prompt = input.trim();
     if (!prompt || isSending) {
       return;
     }
     setIsSending(true);
+    setIsThinking(true);
     setInput("");
     assistantBufferRef.current = "";
     sseCloseRef.current?.();
@@ -128,52 +194,9 @@ export function ChatPanel({ bridgeUrl }: ChatPanelProps) {
       });
       setSessionId(activeSessionId);
       localStorage.setItem(LATEST_RUN_ID_KEY, runId);
-      sseCloseRef.current = subscribeRunEvents(bridgeUrl, runId, (event) => {
-        if (event.type === "assistant" && event.text) {
-          assistantBufferRef.current = mergeAssistantStreamText(assistantBufferRef.current, event.text);
-          setMessages((prev) => {
-            const last = prev[prev.length - 1];
-            if (last?.role === "assistant") {
-              return [...prev.slice(0, -1), { ...last, content: assistantBufferRef.current }];
-            }
-            return [
-              ...prev,
-              {
-                id: crypto.randomUUID(),
-                role: "assistant",
-                content: assistantBufferRef.current,
-                createdAt: new Date().toISOString(),
-              },
-            ];
-          });
-        }
-        if (event.type === "result" && event.text) {
-          assistantBufferRef.current = event.text;
-          setMessages((prev) => {
-            const last = prev[prev.length - 1];
-            if (last?.role === "assistant") {
-              return [...prev.slice(0, -1), { ...last, content: event.text ?? "" }];
-            }
-            if (event.text) {
-              return [
-                ...prev,
-                {
-                  id: crypto.randomUUID(),
-                  role: "assistant",
-                  content: event.text,
-                  createdAt: new Date().toISOString(),
-                },
-              ];
-            }
-            return prev;
-          });
-        }
-        if (event.type === "run_finished") {
-          setIsSending(false);
-          sseCloseRef.current = null;
-        }
-      }, () => {
+      sseCloseRef.current = subscribeRunEvents(bridgeUrl, runId, handleStreamEvent, () => {
         setIsSending(false);
+        setIsThinking(false);
         sseCloseRef.current = null;
       });
     } catch (error) {
@@ -188,8 +211,17 @@ export function ChatPanel({ bridgeUrl }: ChatPanelProps) {
         },
       ]);
       setIsSending(false);
+      setIsThinking(false);
     }
   };
+
+
+  const showTypingIndicator = isSending && (
+    isThinking
+    || messages.length === 0
+    || messages[messages.length - 1]?.role !== "assistant"
+    || !messages[messages.length - 1]?.content
+  );
 
 
   return (
@@ -220,11 +252,21 @@ export function ChatPanel({ bridgeUrl }: ChatPanelProps) {
         </div>
         <div className="messages">
           {messages.map((message) => (
-            <article key={message.id} className={`message message-${message.role}`}>
-              <strong>{message.role === "user" ? "你" : "Agent"}</strong>
-              <pre>{message.content}</pre>
-            </article>
+            <MessageBubble key={message.id} message={message} onSpeak={speak} />
           ))}
+          {showTypingIndicator && (
+            <div className="bubble-row bubble-row-assistant bubble-typing" aria-live="polite" aria-label="Agent 正在输入">
+              <div className="bubble-avatar bubble-avatar-agent" aria-hidden="true">A</div>
+              <div className="bubble-main">
+                <div className="bubble bubble-assistant bubble-assistant-typing">
+                  <span className="typing-dot" />
+                  <span className="typing-dot" />
+                  <span className="typing-dot" />
+                </div>
+              </div>
+            </div>
+          )}
+          <div ref={messagesEndRef} className="messages-anchor" />
         </div>
         <div className="composer input-area">
           <textarea
@@ -234,7 +276,12 @@ export function ChatPanel({ bridgeUrl }: ChatPanelProps) {
             rows={3}
             disabled={isSending}
           />
-          <button type="button" onClick={() => void handleSend()} disabled={isSending || !input.trim()}>
+          <button
+            type="button"
+            className="composer-send"
+            onClick={() => void handleSend()}
+            disabled={isSending || !input.trim()}
+          >
             {isSending ? "运行中…" : "发送"}
           </button>
         </div>
@@ -242,4 +289,3 @@ export function ChatPanel({ bridgeUrl }: ChatPanelProps) {
     </>
   );
 }
-
