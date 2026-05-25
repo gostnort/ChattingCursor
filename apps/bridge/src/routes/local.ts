@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { listCursorModels, probeCursorCli } from "@chatting-cursor/cli-client";
+import { localTokenDirectoryUpdateRequestSchema } from "@chatting-cursor/shared";
 import { loadConfig } from "../config.js";
 import { isLocalRequest } from "../middleware/auth.js";
 import { historyStore } from "../services/history-store.js";
@@ -60,6 +61,25 @@ export async function registerLocalRoutes(app: FastifyInstance): Promise<void> {
       fileName: tokenFile.fileName,
       tokenDate: tokenFile.date,
       content: tokenFile.content,
+    });
+  });
+
+
+  app.post("/local/token-directory", async (request, reply) => {
+    const parsed = localTokenDirectoryUpdateRequestSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.status(400).send({
+        error: "invalid_request",
+        message: parsed.error.message,
+      });
+    }
+    await tokenRotationService.setDirectory(parsed.data.directory);
+    const tokenFile = await tokenRotationService.readTodayTokenFileContent();
+    return reply.send({
+      directory: tokenRotationService.getDirectory(),
+      fileName: tokenFile.fileName,
+      filePath: tokenRotationService.getFilePath(),
+      tokenDate: tokenFile.date,
     });
   });
 

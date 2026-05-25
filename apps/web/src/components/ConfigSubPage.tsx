@@ -17,15 +17,9 @@ import {
   fetchHistoryContent,
   fetchHistoryList,
   fetchLocalConfig,
-  fetchLocalTokenFile,
+  updateTokenDirectory,
   verifyBridgeToken,
 } from "../api/bridge";
-import {
-  getSelectedDirectoryLabel,
-  isDirectoryPickerSupported,
-  pickTokenDirectory,
-  syncTokenFileToSelectedDirectory,
-} from "../tokenSyncDirectory";
 
 
 interface ConfigSubPageProps {
@@ -72,7 +66,7 @@ export function ConfigSubPage({
   const [bridgeUrlInput, setBridgeUrlInput] = useState(bridgeUrl);
   const [tokenInput, setTokenInput] = useState(bridgeToken);
   const [tokenFileName, setTokenFileName] = useState("chattingcursor-token.txt");
-  const [selectedDirectoryLabel, setSelectedDirectoryLabel] = useState<string | null>(null);
+  const [tokenDirectoryInput, setTokenDirectoryInput] = useState("");
   const [webPortInput, setWebPortInput] = useState(() => String(getWebPort()));
   const [savedWebPort, setSavedWebPort] = useState(() => getWebPort());
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
@@ -118,23 +112,6 @@ export function ConfigSubPage({
 
   useEffect(() => {
     let cancelled = false;
-    void getSelectedDirectoryLabel().then((label) => {
-      if (!cancelled) {
-        setSelectedDirectoryLabel(label);
-      }
-    }).catch(() => {
-      if (!cancelled) {
-        setSelectedDirectoryLabel(null);
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-
-  useEffect(() => {
-    let cancelled = false;
     const load = async (): Promise<void> => {
       setLoading(true);
       setError(null);
@@ -162,19 +139,10 @@ export function ConfigSubPage({
           return;
         }
         setLocalConfig(config);
+        setTokenDirectoryInput(config.tokenFilePath.replace(new RegExp(`[\\\\/]${config.tokenFilePath.split(/[\\\\/]/).pop() ?? ""}$`), ""));
         setSessions(history.sessions);
         setCrewStatus(crew);
-        const tokenFile = await fetchLocalTokenFile(normalizedBridgeUrl, bridgeToken);
-        if (!cancelled) {
-          setTokenFileName(tokenFile.fileName);
-          if (selectedDirectoryLabel) {
-            try {
-              await syncTokenFileToSelectedDirectory(tokenFile.fileName, tokenFile.content);
-            } catch {
-              // 忽略同步失败，保留手动重试
-            }
-          }
-        }
+        setTokenFileName(config.tokenFilePath.split(/[\\/]/).pop() ?? "chattingcursor-token.txt");
       } catch (loadError) {
         if (!cancelled) {
           const message = loadError instanceof Error ? loadError.message : String(loadError);
@@ -197,7 +165,7 @@ export function ConfigSubPage({
     return () => {
       cancelled = true;
     };
-  }, [bridgeToken, normalizedBridgeUrl, selectedDirectoryLabel]);
+  }, [bridgeToken, normalizedBridgeUrl]);
 
 
   const handleSaveAndApply = async (): Promise<void> => {
@@ -270,21 +238,23 @@ export function ConfigSubPage({
   };
 
 
-  const handleSelectTokenDirectory = async (): Promise<void> => {
+  const handleApplyTokenDirectoryPath = async (): Promise<void> => {
+    if (!tokenDirectoryInput.trim()) {
+      setSaveMessage("请先输入完整目录路径。");
+      return;
+    }
+    if (!canUseLocalApi) {
+      setSaveMessage("只有本机 Bridge 才允许修改 token 同步目录。");
+      return;
+    }
     try {
-      const label = await pickTokenDirectory();
-      setSelectedDirectoryLabel(label);
-      if (canUseLocalApi) {
-        const tokenFile = await fetchLocalTokenFile(normalizedBridgeUrl, bridgeToken);
-        setTokenFileName(tokenFile.fileName);
-        await syncTokenFileToSelectedDirectory(tokenFile.fileName, tokenFile.content);
-        setSaveMessage(`已同步到 ${label}/${tokenFile.fileName}`);
-      } else {
-        setSaveMessage(`已选择目录：${label}`);
-      }
+      const result = await updateTokenDirectory(normalizedBridgeUrl, tokenDirectoryInput.trim(), bridgeToken);
+      setTokenFileName(result.fileName);
+      setTokenDirectoryInput(result.directory);
+      setSaveMessage(`已切换到 ${result.directory}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      setSaveMessage(`选择文件夹失败：${message}`);
+      setSaveMessage(`设置目录失败：${message}`);
     }
   };
 
@@ -384,26 +354,33 @@ export function ConfigSubPage({
             <dt>固定文件名</dt>
             <dd>{tokenFileName}</dd>
             <dt>同步目录</dt>
-            <dd>{selectedDirectoryLabel ? `${selectedDirectoryLabel}/${tokenFileName}` : "未选择"}</dd>
+            <dd>{tokenDirectoryInput ? `${tokenDirectoryInput}/${tokenFileName}` : "未配置"}</dd>
           </dl>
         ) : (
           <p className="config-hint">连接 Bridge 后会显示当天口令文件位置。</p>
         )}
+        <label className="config-field" htmlFor="token-directory-path">
+          <span className="config-field-label">同步目录路径</span>
+          <input
+            id="token-directory-path"
+            type="text"
+            value={tokenDirectoryInput}
+            onChange={(event) => setTokenDirectoryInput(event.target.value)}
+            placeholder="可手动粘贴完整路径，例如 D:\\Sync\\ChattingCursor"
+          />
+        </label>
         <div className="config-actions">
           <button
             type="button"
             className="btn-secondary config-action-secondary"
-            onClick={() => void handleSelectTokenDirectory()}
+            onClick={() => void handleApplyTokenDirectoryPath()}
           >
-            选择文件夹
+            使用这个路径
           </button>
         </div>
         <p className="config-hint">
-          页面不会显示 token 内容。选择文件夹后，会把固定文件名 <code>{tokenFileName}</code> 写入该目录，供云盘同步。
+          页面不会显示 token 内容。请手动粘贴完整目录路径，Bridge 会把固定文件名 <code>{tokenFileName}</code> 写入该目录。
         </p>
-        {!isDirectoryPickerSupported() && (
-          <p className="config-hint">当前浏览器不支持文件夹选择 API，请使用本机 Chrome/Edge 打开此页。</p>
-        )}
       </section>
 
       {loading && <p className="config-hint">加载 Bridge 状态…</p>}

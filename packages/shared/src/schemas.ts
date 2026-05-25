@@ -199,6 +199,25 @@ export const authVerifyResponseSchema = z.object({
 export type AuthVerifyResponse = z.infer<typeof authVerifyResponseSchema>;
 
 
+/** POST /local/token-directory 请求体 */
+export const localTokenDirectoryUpdateRequestSchema = z.object({
+  directory: z.string().min(1),
+});
+
+export type LocalTokenDirectoryUpdateRequest = z.infer<typeof localTokenDirectoryUpdateRequestSchema>;
+
+
+/** POST /local/token-directory 响应体 */
+export const localTokenDirectoryUpdateResponseSchema = z.object({
+  directory: z.string().min(1),
+  fileName: z.string().min(1),
+  filePath: z.string().min(1),
+  tokenDate: z.string().min(1),
+});
+
+export type LocalTokenDirectoryUpdateResponse = z.infer<typeof localTokenDirectoryUpdateResponseSchema>;
+
+
 /** GET /local/token-file 响应体 */
 export const localTokenFileResponseSchema = z.object({
   fileName: z.string().min(1),

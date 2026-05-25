@@ -65,6 +65,18 @@ export class TokenRotationService {
   }
 
 
+  async setDirectory(directory: string): Promise<void> {
+    const normalized = directory.trim();
+    if (!normalized) {
+      throw new Error("同步目录不能为空");
+    }
+    this.directory = normalized;
+    this.cachedRecord = null;
+    await mkdir(this.directory, { recursive: true });
+    await this.ensureTodayToken();
+  }
+
+
   getFilePath(): string {
     return path.join(this.directory, this.fileName);
   }

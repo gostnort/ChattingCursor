@@ -8,6 +8,7 @@ import type {
   LocalConfigResponse,
   LocalHistoryContentResponse,
   LocalHistoryListResponse,
+  LocalTokenDirectoryUpdateResponse,
   LocalTokenFileResponse,
   ModelsResponse,
   RecentChatSessionResponse,
@@ -308,6 +309,24 @@ export async function fetchLocalTokenFile(bridgeUrl: string, token?: string): Pr
     throw new Error(await readErrorDetail(response, `读取 token 文件失败 (${response.status})`));
   }
   return response.json() as Promise<LocalTokenFileResponse>;
+}
+
+
+/** 更新本机 token 同步目录 */
+export async function updateTokenDirectory(
+  bridgeUrl: string,
+  directory: string,
+  token?: string,
+): Promise<LocalTokenDirectoryUpdateResponse> {
+  const response = await fetch(`${bridgeUrl}/local/token-directory`, {
+    method: "POST",
+    headers: buildAuthHeaders(token, { "Content-Type": "application/json" }),
+    body: JSON.stringify({ directory }),
+  });
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, `更新 token 目录失败 (${response.status})`));
+  }
+  return response.json() as Promise<LocalTokenDirectoryUpdateResponse>;
 }
 
 
