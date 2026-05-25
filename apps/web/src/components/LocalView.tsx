@@ -1,14 +1,15 @@
 import type { LocalSub } from "../routing";
-import { buildBridgeUrl } from "../bridgeSettings";
 import { CliOutputSubPage } from "./CliOutputSubPage";
 import { ConfigSubPage } from "./ConfigSubPage";
 
 
 interface LocalViewProps {
   localSub: LocalSub;
-  bridgePort: number;
   bridgeUrl: string;
+  bridgeToken: string;
   onBridgePortChange: (port: number) => void;
+  onBridgeTokenChange: (token: string) => void;
+  onBridgeUrlChange: (url: string) => void;
   onLocalSubChange: (sub: LocalSub) => void;
 }
 
@@ -16,9 +17,11 @@ interface LocalViewProps {
 /** 本地模式根视图（仅含配置 / CLI 输出子导航） */
 export function LocalView({
   localSub,
-  bridgePort,
   bridgeUrl,
+  bridgeToken,
   onBridgePortChange,
+  onBridgeTokenChange,
+  onBridgeUrlChange,
   onLocalSubChange,
 }: LocalViewProps) {
   return (
@@ -45,15 +48,17 @@ export function LocalView({
         {localSub === "config" ? (
           <div id="local-config" className="local-sub-panel config-page">
             <ConfigSubPage
-              bridgePort={bridgePort}
               bridgeUrl={bridgeUrl}
+              bridgeToken={bridgeToken}
               onBridgePortChange={onBridgePortChange}
+              onBridgeTokenChange={onBridgeTokenChange}
+              onBridgeUrlChange={onBridgeUrlChange}
               onOpenCli={() => onLocalSubChange("cli")}
             />
           </div>
         ) : (
           <div id="local-cli" className="local-sub-panel cli-page">
-            <CliOutputSubPage bridgeUrl={buildBridgeUrl(bridgePort)} />
+            <CliOutputSubPage bridgeUrl={bridgeUrl} bridgeToken={bridgeToken} />
           </div>
         )}
       </main>

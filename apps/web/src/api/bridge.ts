@@ -1,4 +1,6 @@
 import type {
+  AuthStatusResponse,
+  AuthVerifyResponse,
   ChatNewSessionResponse,
   ChatSendResponse,
   CrewStatusResponse,
@@ -6,7 +8,9 @@ import type {
   LocalConfigResponse,
   LocalHistoryContentResponse,
   LocalHistoryListResponse,
+  LocalTokenFileResponse,
   ModelsResponse,
+  RecentChatSessionResponse,
   RunEvent,
 } from "@chatting-cursor/shared";
 
@@ -19,7 +23,32 @@ export interface BridgeHealthResponse {
     command?: string;
     message?: string;
   };
+  publicBridgeUrl?: string;
   timestamp: string;
+}
+
+
+function buildAuthHeaders(token?: string, extra: Record<string, string> = {}): HeadersInit {
+  const headers: Record<string, string> = { ...extra };
+  if (token?.trim()) {
+    headers.Authorization = `Bearer ${token.trim()}`;
+  }
+  return headers;
+}
+
+
+async function readErrorDetail(response: Response, fallback: string): Promise<string> {
+  const body = await response.text();
+  let detail = body || fallback;
+  try {
+    const parsed = JSON.parse(body) as { message?: string };
+    if (parsed.message) {
+      detail = parsed.message;
+    }
+  } catch {
+    // 非 JSON 响应，保留原始文本
+  }
+  return detail;
 }
 
 
@@ -42,37 +71,56 @@ export function mergeAssistantStreamText(current: string, incoming: string): str
 
 
 /** 创建新会话 */
-export async function createChatSession(bridgeUrl: string): Promise<ChatNewSessionResponse> {
+export async function createChatSession(bridgeUrl: string, token?: string): Promise<ChatNewSessionResponse> {
   const response = await fetch(`${bridgeUrl}/chat/new-session`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: buildAuthHeaders(token, { "Content-Type": "application/json" }),
     body: "{}",
   });
   if (!response.ok) {
-    throw new Error(`新建会话失败 (${response.status})`);
+    throw new Error(await readErrorDetail(response, `新建会话失败 (${response.status})`));
   }
   return response.json() as Promise<ChatNewSessionResponse>;
 }
 
 
 /** 获取可用模型列表 */
-export async function fetchModels(bridgeUrl: string): Promise<ModelsResponse> {
-  const response = await fetch(`${bridgeUrl}/models`);
+export async function fetchModels(bridgeUrl: string, token?: string): Promise<ModelsResponse> {
+  const response = await fetch(`${bridgeUrl}/models`, {
+    headers: buildAuthHeaders(token),
+  });
   if (!response.ok) {
-    throw new Error(`获取模型列表失败 (${response.status})`);
+    throw new Error(await readErrorDetail(response, `获取模型列表失败 (${response.status})`));
   }
   return response.json() as Promise<ModelsResponse>;
 }
 
 
 /** 搜索本地历史 */
-export async function searchHistory(bridgeUrl: string, query: string): Promise<HistorySearchResponse> {
+export async function searchHistory(bridgeUrl: string, query: string, token?: string): Promise<HistorySearchResponse> {
   const params = new URLSearchParams({ q: query });
-  const response = await fetch(`${bridgeUrl}/history/search?${params.toString()}`);
+  const response = await fetch(`${bridgeUrl}/history/search?${params.toString()}`, {
+    headers: buildAuthHeaders(token),
+  });
   if (!response.ok) {
-    throw new Error(`搜索历史失败 (${response.status})`);
+    throw new Error(await readErrorDetail(response, `搜索历史失败 (${response.status})`));
   }
   return response.json() as Promise<HistorySearchResponse>;
+}
+
+
+/** 获取最近一次活跃会话，用于跨设备恢复 */
+export async function fetchRecentChatSession(bridgeUrl: string, token?: string): Promise<RecentChatSessionResponse | null> {
+  const response = await fetch(`${bridgeUrl}/chat/recent-session`, {
+    headers: buildAuthHeaders(token),
+  });
+  if (response.status === 404) {
+    return null;
+  }
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, `获取最近会话失败 (${response.status})`));
+  }
+  return response.json() as Promise<RecentChatSessionResponse>;
 }
 
 
@@ -80,11 +128,11 @@ export async function searchHistory(bridgeUrl: string, query: string): Promise<H
 export async function sendChatMessage(
   bridgeUrl: string,
   prompt: string,
-  options: { model?: string; sessionId?: string } = {},
+  options: { model?: string; sessionId?: string; token?: string } = {},
 ): Promise<ChatSendResponse> {
   const response = await fetch(`${bridgeUrl}/chat/send`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: buildAuthHeaders(options.token, { "Content-Type": "application/json" }),
     body: JSON.stringify({
       prompt,
       model: options.model,
@@ -92,46 +140,85 @@ export async function sendChatMessage(
     }),
   });
   if (!response.ok) {
-    const body = await response.text();
-    let detail = body;
-    try {
-      const parsed = JSON.parse(body) as { message?: string };
-      if (parsed.message) {
-        detail = parsed.message;
-      }
-    } catch {
-      // 非 JSON 响应，保留原始文本
-    }
+    const detail = await readErrorDetail(response, `发送失败 (${response.status})`);
     throw new Error(`发送失败 (${response.status}): ${detail}`);
   }
   return response.json() as Promise<ChatSendResponse>;
 }
 
 
-/** 订阅 run 的 SSE 事件流 */
+function parseSsePayload(buffer: string, onEvent: (event: RunEvent) => void): string {
+  const chunks = buffer.split("\n\n");
+  const tail = chunks.pop() ?? "";
+  for (const chunk of chunks) {
+    const dataLines = chunk
+      .split(/\r?\n/)
+      .filter((line) => line.startsWith("data: "))
+      .map((line) => line.slice("data: ".length));
+    if (dataLines.length === 0) {
+      continue;
+    }
+    try {
+      const event = JSON.parse(dataLines.join("\n")) as RunEvent;
+      onEvent(event);
+    } catch {
+      // 忽略单条坏数据，继续消费后续流
+    }
+  }
+  return tail;
+}
+
+
+function streamRunEvents(
+  url: string,
+  token: string | undefined,
+  onEvent: (event: RunEvent) => void,
+  onError?: (error: Error) => void,
+): () => void {
+  const controller = new AbortController();
+  void (async () => {
+    try {
+      const response = await fetch(url, {
+        headers: buildAuthHeaders(token),
+        signal: controller.signal,
+      });
+      if (!response.ok || !response.body) {
+        throw new Error(await readErrorDetail(response, `流式请求失败 (${response.status})`));
+      }
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
+        }
+        buffer += decoder.decode(value, { stream: true });
+        buffer = parseSsePayload(buffer, onEvent);
+      }
+      if (buffer.trim()) {
+        parseSsePayload(buffer + "\n\n", onEvent);
+      }
+    } catch (error) {
+      if (controller.signal.aborted) {
+        return;
+      }
+      onError?.(error instanceof Error ? error : new Error(String(error)));
+    }
+  })();
+  return () => controller.abort();
+}
+
+
+/** 订阅 run 的流式事件 */
 export function subscribeRunEvents(
   bridgeUrl: string,
   runId: string,
   onEvent: (event: RunEvent) => void,
   onError?: (error: Error) => void,
+  token?: string,
 ): () => void {
-  const source = new EventSource(`${bridgeUrl}/chat/stream/${runId}`);
-  source.onmessage = (message) => {
-    try {
-      const event = JSON.parse(message.data) as RunEvent;
-      onEvent(event);
-      if (event.type === "run_finished") {
-        source.close();
-      }
-    } catch (error) {
-      onError?.(error instanceof Error ? error : new Error(String(error)));
-    }
-  };
-  source.onerror = () => {
-    onError?.(new Error("SSE 连接中断"));
-    source.close();
-  };
-  return () => source.close();
+  return streamRunEvents(`${bridgeUrl}/chat/stream/${runId}`, token, onEvent, onError);
 }
 
 
@@ -141,24 +228,9 @@ export function subscribeTerminalEvents(
   runId: string,
   onEvent: (event: RunEvent) => void,
   onError?: (error: Error) => void,
+  token?: string,
 ): () => void {
-  const source = new EventSource(`${bridgeUrl}/chat/terminal/${runId}`);
-  source.onmessage = (message) => {
-    try {
-      const event = JSON.parse(message.data) as RunEvent;
-      onEvent(event);
-      if (event.type === "run_finished") {
-        source.close();
-      }
-    } catch (error) {
-      onError?.(error instanceof Error ? error : new Error(String(error)));
-    }
-  };
-  source.onerror = () => {
-    onError?.(new Error("终端 SSE 连接中断"));
-    source.close();
-  };
-  return () => source.close();
+  return streamRunEvents(`${bridgeUrl}/chat/terminal/${runId}`, token, onEvent, onError);
 }
 
 
@@ -188,20 +260,24 @@ export function isLocalBridgeUrl(bridgeUrl: string): boolean {
 
 
 /** 获取本地配置（仅 localhost Bridge） */
-export async function fetchLocalConfig(bridgeUrl: string): Promise<LocalConfigResponse> {
-  const response = await fetch(`${bridgeUrl}/local/config`);
+export async function fetchLocalConfig(bridgeUrl: string, token?: string): Promise<LocalConfigResponse> {
+  const response = await fetch(`${bridgeUrl}/local/config`, {
+    headers: buildAuthHeaders(token),
+  });
   if (!response.ok) {
-    throw new Error(`本地配置不可用 (${response.status})`);
+    throw new Error(await readErrorDetail(response, `本地配置不可用 (${response.status})`));
   }
   return response.json() as Promise<LocalConfigResponse>;
 }
 
 
 /** 列出全部历史会话文件 */
-export async function fetchHistoryList(bridgeUrl: string): Promise<LocalHistoryListResponse> {
-  const response = await fetch(`${bridgeUrl}/local/history`);
+export async function fetchHistoryList(bridgeUrl: string, token?: string): Promise<LocalHistoryListResponse> {
+  const response = await fetch(`${bridgeUrl}/local/history`, {
+    headers: buildAuthHeaders(token),
+  });
   if (!response.ok) {
-    throw new Error(`历史列表不可用 (${response.status})`);
+    throw new Error(await readErrorDetail(response, `历史列表不可用 (${response.status})`));
   }
   return response.json() as Promise<LocalHistoryListResponse>;
 }
@@ -211,20 +287,61 @@ export async function fetchHistoryList(bridgeUrl: string): Promise<LocalHistoryL
 export async function fetchHistoryContent(
   bridgeUrl: string,
   file: string,
+  token?: string,
 ): Promise<LocalHistoryContentResponse> {
-  const response = await fetch(`${bridgeUrl}/local/history/${encodeURIComponent(file)}`);
+  const response = await fetch(`${bridgeUrl}/local/history/${encodeURIComponent(file)}`, {
+    headers: buildAuthHeaders(token),
+  });
   if (!response.ok) {
-    throw new Error(`读取历史失败 (${response.status})`);
+    throw new Error(await readErrorDetail(response, `读取历史失败 (${response.status})`));
   }
   return response.json() as Promise<LocalHistoryContentResponse>;
 }
 
 
-/** 获取 crewAI 环境状态 */
-export async function fetchCrewStatus(bridgeUrl: string): Promise<CrewStatusResponse> {
-  const response = await fetch(`${bridgeUrl}/crews/status`);
+/** 读取当天 token 文件内容（仅本机） */
+export async function fetchLocalTokenFile(bridgeUrl: string, token?: string): Promise<LocalTokenFileResponse> {
+  const response = await fetch(`${bridgeUrl}/local/token-file`, {
+    headers: buildAuthHeaders(token),
+  });
   if (!response.ok) {
-    throw new Error(`crewAI 状态不可用 (${response.status})`);
+    throw new Error(await readErrorDetail(response, `读取 token 文件失败 (${response.status})`));
+  }
+  return response.json() as Promise<LocalTokenFileResponse>;
+}
+
+
+/** 获取 crewAI 环境状态 */
+export async function fetchCrewStatus(bridgeUrl: string, token?: string): Promise<CrewStatusResponse> {
+  const response = await fetch(`${bridgeUrl}/crews/status`, {
+    headers: buildAuthHeaders(token),
+  });
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, `crewAI 状态不可用 (${response.status})`));
   }
   return response.json() as Promise<CrewStatusResponse>;
+}
+
+
+/** 获取当前认证状态 */
+export async function fetchAuthStatus(bridgeUrl: string): Promise<AuthStatusResponse> {
+  const response = await fetch(`${bridgeUrl}/auth/status`);
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, `认证状态不可用 (${response.status})`));
+  }
+  return response.json() as Promise<AuthStatusResponse>;
+}
+
+
+/** 验证当前口令是否有效 */
+export async function verifyBridgeToken(bridgeUrl: string, token: string): Promise<AuthVerifyResponse> {
+  const response = await fetch(`${bridgeUrl}/auth/verify`, {
+    method: "POST",
+    headers: buildAuthHeaders(token, { "Content-Type": "application/json" }),
+    body: "{}",
+  });
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, `口令验证失败 (${response.status})`));
+  }
+  return response.json() as Promise<AuthVerifyResponse>;
 }

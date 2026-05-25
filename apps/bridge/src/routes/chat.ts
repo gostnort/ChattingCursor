@@ -4,6 +4,7 @@ import { listCursorModels, mergeAssistantStreamText, probeCursorCli, runCursorCl
 import type { RunEvent } from "@chatting-cursor/shared";
 import { chatSendRequestSchema } from "@chatting-cursor/shared";
 import { loadConfig, resolveCorsOrigin } from "../config.js";
+import { requireRemoteToken } from "../middleware/auth.js";
 import {
   extractSearchKeywords,
   formatHistorySearchReply,
@@ -92,6 +93,15 @@ function extractAssistantText(events: RunEvent[]): string {
 /** 注册聊天相关路由 */
 export async function registerChatRoutes(app: FastifyInstance): Promise<void> {
   await historyStore.cleanupOldFiles();
+  app.addHook("onRequest", async (request, reply) => {
+    const needsAuth = request.url === "/models"
+      || request.url.startsWith("/chat/")
+      || request.url.startsWith("/history/search");
+    if (!needsAuth) {
+      return;
+    }
+    await requireRemoteToken(request, reply);
+  });
 
 
   app.post("/chat/new-session", async (_request, reply) => {
@@ -113,6 +123,25 @@ export async function registerChatRoutes(app: FastifyInstance): Promise<void> {
   });
 
 
+  app.get("/chat/recent-session", async (_request, reply) => {
+    const session = sessionStore.getRecent();
+    if (!session || session.messages.length === 0) {
+      return reply.status(404).send({ error: "recent_session_not_found" });
+    }
+    return reply.send({
+      sessionId: session.sessionId,
+      model: session.model,
+      updatedAt: session.updatedAt,
+      messages: session.messages.map((message, index) => ({
+        id: `${session.sessionId}-${index}`,
+        role: message.role,
+        content: message.content,
+        createdAt: message.timestamp,
+      })),
+    });
+  });
+
+
   app.post("/chat/send", async (request, reply) => {
     const parsed = chatSendRequestSchema.safeParse(request.body);
     if (!parsed.success) {
@@ -130,6 +159,7 @@ export async function registerChatRoutes(app: FastifyInstance): Promise<void> {
     runStore.create(runId);
     const { prompt, model, workspace } = parsed.data;
     const startedAt = new Date().toISOString();
+    sessionStore.setModel(session.sessionId, model);
     sessionStore.appendMessage(session.sessionId, {
       role: "user",
       content: prompt,

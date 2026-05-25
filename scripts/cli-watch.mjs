@@ -5,6 +5,7 @@ import process from "node:process";
 
 const DEFAULT_BRIDGE_URL = "http://127.0.0.1:4321";
 const bridgeUrl = (process.env.BRIDGE_URL ?? DEFAULT_BRIDGE_URL).replace(/\/$/, "");
+const bridgeToken = process.env.BRIDGE_TOKEN?.trim() ?? "";
 const runId = process.argv[2]?.trim() ?? process.env.RUN_ID?.trim() ?? "";
 
 
@@ -15,7 +16,8 @@ function printUsage() {
   console.log("聊天页发送消息后 runId 会写入浏览器 localStorage；也可从 Bridge 日志或聊天响应中获取。");
   console.log("");
   console.log(`Bridge URL: ${bridgeUrl}`);
-  console.log("环境变量: BRIDGE_URL, RUN_ID");
+  console.log(`Bridge Token: ${bridgeToken ? "已设置" : "未设置"}`);
+  console.log("环境变量: BRIDGE_URL, BRIDGE_TOKEN, RUN_ID");
   console.log("");
   console.log("或在浏览器打开: http://127.0.0.1:43210/ChattingCursor/terminal");
 }
@@ -32,7 +34,10 @@ console.log("---");
 
 
 const response = await fetch(`${bridgeUrl}/chat/terminal/${runId}`, {
-  headers: { Accept: "text/event-stream" },
+  headers: {
+    Accept: "text/event-stream",
+    ...(bridgeToken ? { Authorization: `Bearer ${bridgeToken}` } : {}),
+  },
 });
 
 

@@ -1,17 +1,9 @@
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { FastifyInstance } from "fastify";
 import { listCursorModels, probeCursorCli } from "@chatting-cursor/cli-client";
 import { loadConfig } from "../config.js";
+import { isLocalRequest } from "../middleware/auth.js";
 import { historyStore } from "../services/history-store.js";
-
-
-/** 判断请求是否来自本机（本地配置 API 仅 localhost 可用） */
-function isLocalRequest(request: FastifyRequest): boolean {
-  const address = request.ip;
-  return address === "127.0.0.1"
-    || address === "::1"
-    || address === "::ffff:127.0.0.1"
-    || address === "localhost";
-}
+import { tokenRotationService } from "../services/token-rotation.js";
 
 
 /** 注册本地配置与历史浏览路由 */
@@ -36,11 +28,14 @@ export async function registerLocalRoutes(app: FastifyInstance): Promise<void> {
     const defaultModel = models.models.find((item) => item.isDefault)?.id ?? models.models[0]?.id ?? "";
     return reply.send({
       bridgeUrl: `http://${config.host}:${config.port}`,
+      publicBridgeUrl: config.publicBridgeUrl,
       bridgeHost: config.host,
       bridgePort: config.port,
       corsOrigins: config.corsOrigins,
       historyDir: historyStore.getDirectory(),
       historyRetentionDays: historyStore.getRetentionDays(),
+      tokenFilePath: tokenRotationService.getFilePath(),
+      tokenDate: tokenRotationService.getToday(),
       defaultModel,
       modelsSource: models.source,
       cli,
@@ -55,6 +50,16 @@ export async function registerLocalRoutes(app: FastifyInstance): Promise<void> {
       historyDir: historyStore.getDirectory(),
       retentionDays: historyStore.getRetentionDays(),
       sessions,
+    });
+  });
+
+
+  app.get("/local/token-file", async (_request, reply) => {
+    const tokenFile = await tokenRotationService.readTodayTokenFileContent();
+    return reply.send({
+      fileName: tokenFile.fileName,
+      tokenDate: tokenFile.date,
+      content: tokenFile.content,
     });
   });
 

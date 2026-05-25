@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { buildBridgeUrl, getBridgePort, setBridgePort } from "./bridgeSettings";
+import {
+  getBridgeToken,
+  getBridgeUrl,
+  setBridgePort,
+  setBridgeToken,
+  setBridgeUrl,
+} from "./bridgeSettings";
 import { AppHeader } from "./components/AppHeader";
 import { ChatView } from "./components/ChatView";
 import { LocalView } from "./components/LocalView";
@@ -21,8 +27,8 @@ function readRoute(): AppRoute {
 /** 应用根组件：聊天 / 本地 双顶层视图 */
 export default function App() {
   const [route, setRoute] = useState<AppRoute>(readRoute);
-  const [bridgePort, setBridgePortState] = useState(() => getBridgePort());
-  const bridgeUrl = useMemo(() => buildBridgeUrl(bridgePort), [bridgePort]);
+  const [bridgeUrl, setBridgeUrlState] = useState(() => getBridgeUrl());
+  const [bridgeToken, setBridgeTokenState] = useState(() => getBridgeToken());
   const normalizedBridgeUrl = useMemo(() => bridgeUrl.replace(/\/$/, ""), [bridgeUrl]);
 
 
@@ -46,8 +52,20 @@ export default function App() {
 
 
   const handleBridgePortChange = (port: number): void => {
-    setBridgePortState(port);
     setBridgePort(port);
+    setBridgeUrlState(getBridgeUrl());
+  };
+
+
+  const handleBridgeUrlChange = (url: string): void => {
+    setBridgeUrl(url);
+    setBridgeUrlState(getBridgeUrl());
+  };
+
+
+  const handleBridgeTokenChange = (token: string): void => {
+    setBridgeToken(token);
+    setBridgeTokenState(getBridgeToken());
   };
 
 
@@ -65,13 +83,15 @@ export default function App() {
     <div className="app">
       <AppHeader mode={route.mode} onModeChange={handleModeChange} />
       {route.mode === "chat" ? (
-        <ChatView bridgeUrl={normalizedBridgeUrl} />
+        <ChatView bridgeUrl={normalizedBridgeUrl} bridgeToken={bridgeToken} />
       ) : (
         <LocalView
           localSub={route.localSub}
-          bridgePort={bridgePort}
           bridgeUrl={bridgeUrl}
+          bridgeToken={bridgeToken}
           onBridgePortChange={handleBridgePortChange}
+          onBridgeTokenChange={handleBridgeTokenChange}
+          onBridgeUrlChange={handleBridgeUrlChange}
           onLocalSubChange={handleLocalSubChange}
         />
       )}

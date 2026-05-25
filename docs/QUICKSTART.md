@@ -24,6 +24,16 @@ http://127.0.0.1:43210/ChattingCursor/
 
 确认 Bridge 已在 `4321` 端口运行后即可开始聊天。Bridge URL 在 **本地 → 配置** 中设置（默认 `http://127.0.0.1:4321`）。
 
+如果你要在**手机**上使用 GitHub Pages：
+
+1. 电脑继续运行 `pnpm dev:bridge`
+2. 给 Bridge 配一个公网地址（例如 tunnel 域名）
+3. 在手机打开 GitHub Pages 后，到 **本地 → 配置** 填入：
+   - `Bridge URL`
+   - 当天口令（从同步文件查看）
+
+完整远程配置见 `docs/REMOTE_SETUP.md`。
+
 标题旁有 **聊天 | 本地** 切换：聊天页仅对话 UI；本地模式含 **配置** 与 **CLI输出** 两个子页。
 
 **响应式布局**：Web 端不针对单一分辨率（如 375px）写死断点，而是用 `orientation` / `aspect-ratio` 媒体查询、`dvh`/`clamp()` 等流体单位、聊天面板的 **container queries**，以及安全区 `env(safe-area-inset-*)` 适配各尺寸手机与横竖屏。
@@ -97,6 +107,7 @@ http://127.0.0.1:43210/ChattingCursor/local/cli
 | 项目 | 说明 |
 |------|------|
 | Bridge URL | 与聊天页共用（存于浏览器 `localStorage`） |
+| 今日口令 | 当天随机 token，手动输入后用于远程聊天鉴权 |
 | 默认模型 | 来自 `cursor-agent models` 或内置回退列表 |
 | CLI 命令 | 例如 `wsl cursor-agent`（Windows 经 WSL） |
 | 历史目录 | 默认 `~/.chattingcursor/history/` |
@@ -110,6 +121,8 @@ http://127.0.0.1:43210/ChattingCursor/local/cli
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/local/config` | Bridge/CLI/历史目录/默认模型 |
+| GET | `/auth/status` | 当天 token 文件位置、日期、公开 Bridge 地址 |
+| POST | `/auth/verify` | 校验当天 token |
 | GET | `/local/history` | 列出全部历史文件 |
 | GET | `/local/history/:file` | 读取单个历史文件全文 |
 | GET | `/crews/status` | crewAI / Python / Chrome 9222 / 示例配置状态 |
@@ -176,7 +189,12 @@ curl -X POST http://127.0.0.1:4321/crews/run -H "Content-Type: application/json"
 
 **Bridge 显示离线？**
 - 确认终端 1 中 `pnpm dev:bridge` 正在运行
-- 确认 Bridge URL 输入框为 `http://127.0.0.1:4321`
+- 确认 Bridge URL 输入框为正确地址；电脑本机通常是 `http://127.0.0.1:4321`，手机远程则应填写你的公网 Bridge 域名
+
+**手机连不上？**
+- 确认公网 Bridge 域名已经能转发到这台电脑
+- 确认当天口令已同步到手机可查看的位置
+- 确认网页里输入的是当天 token，而不是旧日期的 token
 
 **CLI 不可用？**
 - 在 WSL 中运行 `cursor-agent status`，确认已登录
