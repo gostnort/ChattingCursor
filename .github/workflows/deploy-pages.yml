@@ -9,6 +9,7 @@ permissions:
   contents: read
   pages: write
   id-token: write
+  administration: write
 
 concurrency:
   group: pages
@@ -19,6 +20,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Use workflow-based Pages build
+        run: |
+          curl --fail-with-body -sS -X PUT \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/pages" \
+            -d '{"build_type":"workflow"}'
 
       - uses: pnpm/action-setup@v4
 
@@ -32,6 +44,12 @@ jobs:
 
       - name: Build web
         run: pnpm --filter @chatting-cursor/shared build && pnpm --filter @chatting-cursor/web build
+
+      - name: Prepare Pages artifact
+        run: |
+          test -f apps/web/dist/.nojekyll || touch apps/web/dist/.nojekyll
+          test -f apps/web/dist/404.html
+          test -f apps/web/dist/index.html
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
