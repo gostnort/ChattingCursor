@@ -274,16 +274,6 @@ export function ConfigSubPage({
               placeholder={onGitHubPages ? "https://bridge.example.com" : "http://127.0.0.1:4321"}
             />
           </label>
-          <label className="config-field" htmlFor="bridge-token">
-            <span className="config-field-label">今日口令</span>
-            <input
-              id="bridge-token"
-              type="password"
-              value={tokenInput}
-              onChange={(event) => setTokenInput(event.target.value)}
-              placeholder="从云盘同步文件中查看当天 token"
-            />
-          </label>
           {!onGitHubPages && (
             <label className="config-field" htmlFor="web-port">
               <span className="config-field-label">网页接收端口（Vite dev）</span>
@@ -379,7 +369,7 @@ export function ConfigSubPage({
           </button>
         </div>
         <p className="config-hint">
-          页面不会显示 token 内容。请手动粘贴完整目录路径，Bridge 会把固定文件名 <code>{tokenFileName}</code> 写入该目录。
+          页面不会显示 token 内容。请从同步文件里查看当天 token，并在需要时粘贴到聊天页；这里仅配置同步目录路径。Bridge 会把固定文件名 <code>{tokenFileName}</code> 写入该目录。
         </p>
       </section>
 
