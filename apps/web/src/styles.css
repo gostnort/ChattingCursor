@@ -460,6 +460,40 @@ body {
 
 
 
+.btn-primary {
+
+  flex-shrink: 0;
+
+  min-width: 5rem;
+
+  padding: 0.5rem 0.75rem;
+
+  border: none;
+
+  border-radius: 6px;
+
+  background: #238636;
+
+  color: #fff;
+
+  cursor: pointer;
+
+  white-space: nowrap;
+
+}
+
+
+
+.btn-primary:disabled {
+
+  opacity: 0.6;
+
+  cursor: not-allowed;
+
+}
+
+
+
 .messages {
 
   flex: 1;
@@ -1004,6 +1038,76 @@ body {
 
 
 
+.config-save-row {
+
+  display: flex;
+
+  flex-direction: column;
+
+  gap: 0.35rem;
+
+  margin-bottom: 0.75rem;
+
+}
+
+
+
+.config-save-status {
+
+  margin: 0;
+
+  color: #8b949e;
+
+  font-size: 0.9rem;
+
+}
+
+
+
+.config-save-status-dirty {
+
+  color: #d29922;
+
+}
+
+
+
+.config-save-toast {
+
+  margin: 0;
+
+  color: #3fb950;
+
+  font-size: 0.9rem;
+
+}
+
+
+
+.config-actions {
+
+  display: flex;
+
+  flex-wrap: wrap;
+
+  gap: 0.5rem;
+
+  margin-bottom: 0.75rem;
+
+}
+
+
+
+.config-action-primary,
+
+.config-action-secondary {
+
+  min-width: 7rem;
+
+}
+
+
+
 .history-filter {
 
   margin-bottom: 0.75rem;
@@ -1067,6 +1171,26 @@ body {
     width: auto;
 
     max-width: 100%;
+
+  }
+
+
+
+  .config-actions {
+
+    flex-direction: column;
+
+  }
+
+
+
+  .config-action-primary,
+
+  .config-action-secondary {
+
+    width: 100%;
+
+    max-width: none;
 
   }
 

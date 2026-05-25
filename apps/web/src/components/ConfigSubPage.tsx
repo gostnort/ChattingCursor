@@ -5,6 +5,7 @@ import {
   DEFAULT_BRIDGE_PORT,
   DEFAULT_WEB_PORT,
   getWebPort,
+  resetPortSettings,
   setWebPort,
 } from "../bridgeSettings";
 import {
@@ -50,7 +51,16 @@ export function ConfigSubPage({ bridgePort, bridgeUrl, onBridgePortChange, onOpe
   const [loading, setLoading] = useState(true);
   const [bridgePortInput, setBridgePortInput] = useState(String(bridgePort));
   const [webPortInput, setWebPortInput] = useState(() => String(getWebPort()));
+  const [savedWebPort, setSavedWebPort] = useState(() => getWebPort());
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const normalizedBridgeUrl = useMemo(() => bridgeUrl.replace(/\/$/, ""), [bridgeUrl]);
+  const parsedBridgePort = useMemo(() => parsePortInput(bridgePortInput), [bridgePortInput]);
+  const parsedWebPort = useMemo(() => parsePortInput(webPortInput), [webPortInput]);
+  const hasInvalidInput = parsedBridgePort === null || parsedWebPort === null;
+  const hasUnsavedChanges = !hasInvalidInput && (
+    parsedBridgePort !== bridgePort || parsedWebPort !== savedWebPort
+  );
+  const previewWebPort = parsedWebPort ?? savedWebPort;
   const canUseLocalApi = isLocalBridgeUrl(normalizedBridgeUrl);
   const filteredSessions = useMemo(() => {
     const keyword = historyFilter.trim().toLowerCase();
@@ -67,6 +77,15 @@ export function ConfigSubPage({ bridgePort, bridgeUrl, onBridgePortChange, onOpe
   useEffect(() => {
     setBridgePortInput(String(bridgePort));
   }, [bridgePort]);
+
+
+  useEffect(() => {
+    if (!saveMessage) {
+      return;
+    }
+    const timer = window.setTimeout(() => setSaveMessage(null), 4000);
+    return () => window.clearTimeout(timer);
+  }, [saveMessage]);
 
 
   useEffect(() => {
@@ -114,26 +133,29 @@ export function ConfigSubPage({ bridgePort, bridgeUrl, onBridgePortChange, onOpe
   }, [bridgePort, canUseLocalApi, normalizedBridgeUrl]);
 
 
-  const handleBridgePortBlur = (): void => {
-    const parsed = parsePortInput(bridgePortInput);
-    if (parsed === null) {
-      setBridgePortInput(String(bridgePort));
+  const handleSaveAndApply = (): void => {
+    if (parsedBridgePort === null || parsedWebPort === null) {
+      setSaveMessage("端口无效，请输入 1–65535 之间的整数。");
       return;
     }
-    if (parsed !== bridgePort) {
-      onBridgePortChange(parsed);
+    if (parsedBridgePort !== bridgePort) {
+      onBridgePortChange(parsedBridgePort);
     }
+    setWebPort(parsedWebPort);
+    setSavedWebPort(parsedWebPort);
+    setBridgePortInput(String(parsedBridgePort));
+    setWebPortInput(String(parsedWebPort));
+    setSaveMessage("已保存并应用。Bridge 进程需以相同端口启动后聊天才能连通。");
   };
 
 
-  const handleWebPortBlur = (): void => {
-    const parsed = parsePortInput(webPortInput);
-    if (parsed === null) {
-      setWebPortInput(String(getWebPort()));
-      return;
-    }
-    setWebPort(parsed);
-    setWebPortInput(String(parsed));
+  const handleResetDefaults = (): void => {
+    const defaults = resetPortSettings();
+    onBridgePortChange(defaults.bridgePort);
+    setSavedWebPort(defaults.webPort);
+    setBridgePortInput(String(defaults.bridgePort));
+    setWebPortInput(String(defaults.webPort));
+    setSaveMessage("已恢复默认（Bridge 3000，Web 5173）并应用。");
   };
 
 
@@ -164,10 +186,9 @@ export function ConfigSubPage({ bridgePort, bridgeUrl, onBridgePortChange, onOpe
               max={65535}
               value={bridgePortInput}
               onChange={(event) => setBridgePortInput(event.target.value)}
-              onBlur={handleBridgePortBlur}
               onKeyDown={(event) => {
                 if (event.key === "Enter") {
-                  handleBridgePortBlur();
+                  handleSaveAndApply();
                 }
               }}
             />
@@ -181,20 +202,49 @@ export function ConfigSubPage({ bridgePort, bridgeUrl, onBridgePortChange, onOpe
               max={65535}
               value={webPortInput}
               onChange={(event) => setWebPortInput(event.target.value)}
-              onBlur={handleWebPortBlur}
               onKeyDown={(event) => {
                 if (event.key === "Enter") {
-                  handleWebPortBlur();
+                  handleSaveAndApply();
                 }
               }}
             />
           </label>
         </div>
+        <div className="config-save-row">
+          <p className={`config-save-status${hasUnsavedChanges ? " config-save-status-dirty" : ""}`} aria-live="polite">
+            {hasInvalidInput
+              ? "端口格式无效"
+              : hasUnsavedChanges
+                ? "有未保存的更改"
+                : `已保存（Bridge ${bridgePort}，Web ${savedWebPort}）`}
+          </p>
+          {saveMessage && <p className="config-save-toast" role="status">{saveMessage}</p>}
+        </div>
+        <div className="config-actions">
+          <button
+            type="button"
+            className="btn-primary config-action-primary"
+            onClick={handleSaveAndApply}
+            disabled={!hasUnsavedChanges || hasInvalidInput}
+          >
+            保存并应用
+          </button>
+          <button
+            type="button"
+            className="btn-secondary config-action-secondary"
+            onClick={handleResetDefaults}
+          >
+            恢复默认
+          </button>
+        </div>
         <p className="config-hint">
-          聊天页通过 <code>{normalizedBridgeUrl}</code> 连接本机 Bridge。修改 Bridge 端口后需在本机以相同端口启动 Bridge（例如 <code>BRIDGE_PORT={bridgePort} pnpm dev:bridge</code>）。
+          默认端口：Bridge <code>{DEFAULT_BRIDGE_PORT}</code>，Web <code>{DEFAULT_WEB_PORT}</code>。首次打开使用默认值；若曾修改过，浏览器会记住上次保存的设置。
         </p>
         <p className="config-hint">
-          网页端口默认 {DEFAULT_WEB_PORT}，仅作本地开发参考；修改后需<strong>重启</strong> <code>pnpm dev:web</code> 才会生效。当前参考地址：<code>{buildWebDevUrl(Number.parseInt(webPortInput, 10) || DEFAULT_WEB_PORT)}</code>
+          聊天页通过 <code>{normalizedBridgeUrl}</code> 连接本机 Bridge。此处保存的是<strong>网页要连接的 Bridge 端口</strong>，保存后立即生效；Bridge 进程本身由环境变量 <code>BRIDGE_PORT</code> 决定监听端口（默认 {DEFAULT_BRIDGE_PORT}），需与此处一致，例如 <code>BRIDGE_PORT={parsedBridgePort ?? bridgePort} pnpm dev:bridge</code>。
+        </p>
+        <p className="config-hint">
+          网页端口仅作本地开发参考；修改并保存后需<strong>重启</strong> <code>pnpm dev:web</code> 才会真正监听新端口。当前参考地址：<code>{buildWebDevUrl(previewWebPort)}</code>
         </p>
       </section>
       {loading && <p className="config-hint">加载 Bridge 状态…</p>}

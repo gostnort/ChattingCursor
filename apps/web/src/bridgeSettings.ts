@@ -67,6 +67,21 @@ export function setWebPort(port: number): void {
 }
 
 
+/** 清除已保存端口，恢复默认值 */
+export function resetPortSettings(): { bridgePort: number; webPort: number } {
+  localStorage.removeItem(BRIDGE_PORT_KEY);
+  localStorage.removeItem(WEB_PORT_KEY);
+  localStorage.removeItem(LEGACY_BRIDGE_URL_KEY);
+  return { bridgePort: DEFAULT_BRIDGE_PORT, webPort: DEFAULT_WEB_PORT };
+}
+
+
+/** 当前保存值是否与默认端口一致 */
+export function isDefaultPortSettings(): boolean {
+  return getBridgePort() === DEFAULT_BRIDGE_PORT && getWebPort() === DEFAULT_WEB_PORT;
+}
+
+
 /** 构建本地开发前端 URL */
 export function buildWebDevUrl(port: number = getWebPort()): string {
   return `http://${BRIDGE_HOST}:${port}/ChattingCursor/`;
