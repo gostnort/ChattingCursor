@@ -3,7 +3,7 @@ import path from "node:path";
 import os from "node:os";
 
 
-const RETENTION_DAYS = 7;
+export const HISTORY_RETENTION_DAYS = 7;
 const SNIPPET_CONTEXT_CHARS = 80;
 
 
@@ -14,6 +14,18 @@ export class HistoryStore {
 
   constructor(dir?: string) {
     this.dir = dir ?? path.join(os.homedir(), ".chattingcursor", "history");
+  }
+
+
+  /** 历史目录绝对路径 */
+  getDirectory(): string {
+    return this.dir;
+  }
+
+
+  /** 历史保留天数 */
+  getRetentionDays(): number {
+    return HISTORY_RETENTION_DAYS;
   }
 
 
@@ -63,7 +75,7 @@ export class HistoryStore {
   /** 删除超过保留期的历史文件 */
   async cleanupOldFiles(): Promise<void> {
     await this.ensureDir();
-    const cutoff = Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000;
+    const cutoff = Date.now() - HISTORY_RETENTION_DAYS * 24 * 60 * 60 * 1000;
     let entries: string[];
     try {
       entries = await readdir(this.dir);
@@ -83,6 +95,52 @@ export class HistoryStore {
       } catch {
         // 忽略单个文件清理失败
       }
+    }
+  }
+
+
+  /** 列出所有会话历史文件（按修改时间倒序） */
+  async listSessions(): Promise<Array<{ file: string; sessionId: string; sizeBytes: number; modifiedAt: string }>> {
+    await this.cleanupOldFiles();
+    let entries: string[];
+    try {
+      entries = await readdir(this.dir);
+    } catch {
+      return [];
+    }
+    const items: Array<{ file: string; sessionId: string; sizeBytes: number; modifiedAt: string }> = [];
+    for (const name of entries) {
+      if (!name.endsWith(".txt")) {
+        continue;
+      }
+      const filePath = path.join(this.dir, name);
+      try {
+        const info = await stat(filePath);
+        items.push({
+          file: name,
+          sessionId: name.replace(/\.txt$/, ""),
+          sizeBytes: info.size,
+          modifiedAt: new Date(info.mtimeMs).toISOString(),
+        });
+      } catch {
+        // 忽略单个文件读取失败
+      }
+    }
+    items.sort((left, right) => right.modifiedAt.localeCompare(left.modifiedAt));
+    return items;
+  }
+
+
+  /** 读取指定历史文件全文 */
+  async readSessionFile(fileName: string): Promise<string | null> {
+    if (!/^[\w-]+\.txt$/.test(fileName)) {
+      return null;
+    }
+    const filePath = path.join(this.dir, fileName);
+    try {
+      return await readFile(filePath, "utf8");
+    } catch {
+      return null;
     }
   }
 

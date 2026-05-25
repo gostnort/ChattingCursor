@@ -8,10 +8,18 @@ function redirectRootPlugin(): Plugin {
     name: "redirect-root-to-base",
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
-        if (req.url === "/" || req.url === "/index.html") {
+        const url = req.url?.split("?")[0] ?? "";
+        if (url === "/" || url === "/index.html") {
           res.writeHead(302, { Location: "/ChattingCursor/" });
           res.end();
           return;
+        }
+        if (
+          url.startsWith("/ChattingCursor/local/")
+          || url.endsWith("/config")
+          || url.endsWith("/terminal")
+        ) {
+          req.url = "/ChattingCursor/";
         }
         next();
       });

@@ -12,6 +12,13 @@ export type {
   ModelsResponse,
   HistorySearchHit,
   HistorySearchResponse,
+  LocalConfigResponse,
+  HistorySessionSummary,
+  LocalHistoryListResponse,
+  LocalHistoryContentResponse,
+  CrewStatusResponse,
+  CrewRunRequest,
+  CrewRunResponse,
 } from "./schemas.js";
 
 export {
@@ -29,4 +36,11 @@ export {
   modelsResponseSchema,
   historySearchHitSchema,
   historySearchResponseSchema,
+  localConfigResponseSchema,
+  historySessionSummarySchema,
+  localHistoryListResponseSchema,
+  localHistoryContentResponseSchema,
+  crewStatusResponseSchema,
+  crewRunRequestSchema,
+  crewRunResponseSchema,
 } from "./schemas.js";

@@ -12,7 +12,9 @@ Local-first 的多 Agent 聊天与测试平台：前端部署在 GitHub Pages，
 2. 终端 2：`pnpm dev:web`
 3. 浏览器打开：`http://127.0.0.1:5173/ChattingCursor/`
 
-确认 Bridge URL 为 `http://127.0.0.1:3000`，状态栏显示 CLI 可用后即可聊天。
+确认 Bridge 端口为 `3000`（可在 **本地 → 配置** 修改），状态栏显示 CLI 可用后即可聊天。
+
+在线版（GitHub Pages）：https://gostnort.github.io/ChattingCursor/ — 仅托管前端 UI，聊天仍需在本机运行 Bridge。
 
 ## 架构概览
 
@@ -43,7 +45,7 @@ pnpm dev:bridge
 pnpm dev:web
 ```
 
-浏览器打开 `http://127.0.0.1:5173/ChattingCursor/`，确认 Bridge URL 为 `http://127.0.0.1:3000` 后即可聊天。
+浏览器打开 `http://127.0.0.1:5173/ChattingCursor/`，在 **本地 → 配置** 可修改 Bridge 端口（默认 3000）与查看历史文件，确认 CLI 可用后即可聊天。
 
 - **CLI 原始终端**：页面下方「CLI 终端（原始输出）」展示 `cursor-agent` 子进程 stdout/stderr；API：`GET /chat/terminal/:runId`（SSE）
 - **对话内历史搜索**：在聊天框输入如「帮我找之前关于端口的对话」，Bridge 搜索 `~/.chattingcursor/history/`（保留 7 天）并直接回复
@@ -64,9 +66,12 @@ Windows 一键启动（会打开两个新终端窗口）：
 
 ## GitHub Pages 部署
 
-前端通过 `.github/workflows/deploy-pages.yml` 自动构建并发布到 `gh-pages` 分支。
+前端通过 `.github/workflows/deploy-pages.yml` 在 **main** 分支 push 时自动构建并发布。
 
-**注意**：Pages 仅托管静态 UI；用户仍需在本机运行 Bridge 才能实际聊天。
+- **在线地址**：https://gostnort.github.io/ChattingCursor/
+- **Vite base**：`/ChattingCursor/`（见 `apps/web/vite.config.ts`）
+
+**注意**：Pages 仅托管静态 UI；用户仍需在本机运行 Bridge（默认端口 3000，可在网页 **本地 → 配置** 修改）才能实际聊天。Bridge 监听 `127.0.0.1`，不会暴露到公网。
 
 ## crewAI 分支策略
 

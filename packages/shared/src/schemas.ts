@@ -139,3 +139,101 @@ export const historySearchResponseSchema = z.object({
 });
 
 export type HistorySearchResponse = z.infer<typeof historySearchResponseSchema>;
+
+
+/** GET /local/config 响应体 */
+export const localConfigResponseSchema = z.object({
+  bridgeUrl: z.string().min(1),
+  bridgeHost: z.string().min(1),
+  bridgePort: z.number().int().positive(),
+  corsOrigins: z.array(z.string()),
+  historyDir: z.string().min(1),
+  historyRetentionDays: z.number().int().positive(),
+  defaultModel: z.string(),
+  modelsSource: z.enum(["cli", "fallback"]),
+  cli: z.object({
+    available: z.boolean(),
+    command: z.string().optional(),
+    message: z.string().optional(),
+  }),
+  timestamp: z.string().datetime(),
+});
+
+export type LocalConfigResponse = z.infer<typeof localConfigResponseSchema>;
+
+
+/** GET /local/history 会话摘要 */
+export const historySessionSummarySchema = z.object({
+  file: z.string().min(1),
+  sessionId: z.string().min(1),
+  sizeBytes: z.number().int().nonnegative(),
+  modifiedAt: z.string().datetime(),
+});
+
+export type HistorySessionSummary = z.infer<typeof historySessionSummarySchema>;
+
+
+/** GET /local/history 响应体 */
+export const localHistoryListResponseSchema = z.object({
+  historyDir: z.string().min(1),
+  retentionDays: z.number().int().positive(),
+  sessions: z.array(historySessionSummarySchema),
+});
+
+export type LocalHistoryListResponse = z.infer<typeof localHistoryListResponseSchema>;
+
+
+/** GET /local/history/:file 响应体 */
+export const localHistoryContentResponseSchema = z.object({
+  file: z.string().min(1),
+  content: z.string(),
+});
+
+export type LocalHistoryContentResponse = z.infer<typeof localHistoryContentResponseSchema>;
+
+
+/** GET /crews/status 响应体 */
+export const crewStatusResponseSchema = z.object({
+  python: z.object({
+    available: z.boolean(),
+    command: z.string().optional(),
+    message: z.string().optional(),
+  }),
+  crewai: z.object({
+    installed: z.boolean(),
+    version: z.string().optional(),
+    message: z.string().optional(),
+  }),
+  exampleConfig: z.object({
+    valid: z.boolean(),
+    path: z.string().optional(),
+    name: z.string().optional(),
+    message: z.string().optional(),
+  }),
+  scriptPath: z.string().optional(),
+  timestamp: z.string().datetime(),
+});
+
+export type CrewStatusResponse = z.infer<typeof crewStatusResponseSchema>;
+
+
+/** POST /crews/run 请求体 */
+export const crewRunRequestSchema = z.object({
+  crew: z.string().min(1).default("example"),
+  inputs: z.record(z.string()).default({}),
+  dryRun: z.boolean().default(true),
+});
+
+export type CrewRunRequest = z.infer<typeof crewRunRequestSchema>;
+
+
+/** POST /crews/run 响应体 */
+export const crewRunResponseSchema = z.object({
+  crew: z.string().min(1),
+  dryRun: z.boolean(),
+  exitCode: z.number().int(),
+  output: z.string(),
+  parsed: z.record(z.unknown()).optional(),
+});
+
+export type CrewRunResponse = z.infer<typeof crewRunResponseSchema>;

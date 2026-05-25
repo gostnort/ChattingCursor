@@ -22,11 +22,133 @@ pnpm dev:web
 http://127.0.0.1:5173/ChattingCursor/
 ```
 
-确认页面顶部 Bridge URL 为 `http://127.0.0.1:3000`，状态栏显示 **Bridge: 在线 · CLI: 可用**，即可开始聊天。
+确认聊天区状态栏显示 **Bridge: 在线 · CLI: 可用**，即可开始聊天。Bridge URL 在 **本地 → 配置** 中设置（默认 `http://127.0.0.1:3000`）。
 
-聊天区下方会显示 **CLI 终端（原始输出）**，实时展示 `cursor-agent` 子进程的真实 stdout/stderr（非解析后的 SSE 事件）。Bridge 还提供终端专用 SSE：`GET http://127.0.0.1:3000/chat/terminal/:runId`。
+标题旁有 **聊天 | 本地** 切换：聊天页仅对话 UI；本地模式含 **配置** 与 **CLI输出** 两个子页。
+
+**响应式布局**：Web 端不针对单一分辨率（如 375px）写死断点，而是用 `orientation` / `aspect-ratio` 媒体查询、`dvh`/`clamp()` 等流体单位、聊天面板的 **container queries**，以及安全区 `env(safe-area-inset-*)` 适配各尺寸手机与横竖屏。
 
 在聊天框用自然语言搜索本地历史（近 7 天），例如「帮我找之前关于端口的对话」；Bridge 会自动搜索 `~/.chattingcursor/history/*.txt` 并回复，无需单独按钮。也支持 `/search 关键词`。
+
+---
+
+## 页面导航（URL）
+
+| 模式 | URL（开发） | 说明 |
+|------|-------------|------|
+| 聊天 | `http://127.0.0.1:5173/ChattingCursor/` | 默认首页 |
+| 本地 · 配置 | `http://127.0.0.1:5173/ChattingCursor/local/config` | Bridge/历史/crewAI |
+| 本地 · CLI输出 | `http://127.0.0.1:5173/ChattingCursor/local/cli` | Web 查看 CLI 原始输出 |
+
+也可用 hash：`#local/config`、`#local/cli`（首次打开会规范化为 pathname）。
+
+旧链接 `/ChattingCursor/config`、`/ChattingCursor/terminal` 会自动跳转到上述本地子页。
+
+---
+
+## CLI 实时反馈（不在聊天页）
+
+聊天页不嵌入 CLI 输出。可在**本地真实终端**或 **本地 → CLI输出** 查看。
+
+### 方式 A：本地命令（推荐）
+
+在**第三个终端**运行：
+
+```powershell
+cd e:\my_github\ChattingCursor
+pnpm cli:watch <runId>
+```
+
+- 发送聊天消息后，runId 会写入浏览器 `localStorage`（键名 `latestRunId`），也可从 Bridge 日志获取。
+- 不填 runId 时会打印用法说明。
+- 环境变量：`BRIDGE_URL`（默认 `http://127.0.0.1:3000`）、`RUN_ID`。
+
+### 方式 B：Web CLI 输出（本地模式）
+
+```
+http://127.0.0.1:5173/ChattingCursor/local/cli
+```
+
+- 标题旁切换到 **本地**，再点 **CLI输出**。
+- 自动读取最近一次 runId，或手动输入；也可从 **配置** 子页点击「打开 CLI 输出」。
+
+Bridge 终端 SSE（供 cli:watch / CLI输出页使用）：`GET http://127.0.0.1:3000/chat/terminal/:runId`
+
+---
+
+## 本地模式（配置 + CLI输出）
+
+本地功能不是 Python UI，也不是 Cursor 内置面板，而是 Web 前端的 **本地** 顶层视图，数据来自本机 Bridge API。
+
+### 如何打开
+
+1. 先按上文启动 **Bridge**（`pnpm dev:bridge`）和 **Web**（`pnpm dev:web`）。
+2. 打开 `http://127.0.0.1:5173/ChattingCursor/`，点击标题旁 **本地**，再选 **配置** 或 **CLI输出**。
+
+或直接访问：
+
+```
+http://127.0.0.1:5173/ChattingCursor/local/config
+http://127.0.0.1:5173/ChattingCursor/local/cli
+```
+
+### 页面上有什么
+
+| 项目 | 说明 |
+|------|------|
+| Bridge URL | 与聊天页共用（存于浏览器 `localStorage`） |
+| 默认模型 | 来自 `cursor-agent models` 或内置回退列表 |
+| CLI 命令 | 例如 `wsl cursor-agent`（Windows 经 WSL） |
+| 历史目录 | 默认 `~/.chattingcursor/history/` |
+| 保留天数 | 7 天，过期文件自动删除 |
+| CLI 实时反馈 | 说明 + 切换到 CLI输出 子页 / `pnpm cli:watch` |
+| crewAI 编排 | Python / crewAI 安装状态、示例 YAML 是否可 dry-run |
+| 对话历史列表 | **只读**浏览近 7 天内全部 `*.txt` 会话文件 |
+
+### 对应 Bridge API（仅本机）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/local/config` | Bridge/CLI/历史目录/默认模型 |
+| GET | `/local/history` | 列出全部历史文件 |
+| GET | `/local/history/:file` | 读取单个历史文件全文 |
+| GET | `/crews/status` | crewAI / Python / 示例配置状态 |
+| POST | `/crews/run` | 运行 crew（默认 dry-run） |
+
+**安全限制**：`/local/*` 仅接受来自 `127.0.0.1` / `localhost` 的请求；前端也要求 Bridge URL 为本机地址。
+
+---
+
+## crewAI 最小配置（with-crewai 分支）
+
+当前为 **最小可运行集成**，非完整多 Agent 产品化：
+
+1. **依赖**（一次性）：
+
+```powershell
+cd e:\my_github\ChattingCursor
+pnpm crew:setup
+```
+
+或手动：`python -m venv .venv` 后 `pip install -r requirements.txt`
+
+2. **Dry-run 示例**（不调用 LLM，校验 `configs/crews/example.yaml`）：
+
+```powershell
+pnpm crew:run
+```
+
+3. **Bridge API**：
+
+```powershell
+curl -X POST http://127.0.0.1:3000/crews/run -H "Content-Type: application/json" -d "{\"crew\":\"example\",\"inputs\":{\"repo_diff\":\"sample diff\"},\"dryRun\":true}"
+```
+
+4. **真实执行**（需 LLM API Key，如 `OPENAI_API_KEY`）：`dryRun: false` 或 `python scripts/run-crew.py --config configs/crews/example.yaml --execute`
+
+5. **编排层**：`packages/orchestrator` 加载 YAML 并调用 `scripts/run-crew.py`；完整 Chat 流程接入 crew 仍在后续阶段。
+
+本地 **配置** 子页会显示 crewAI 状态（Python 是否可用、crewai 是否安装、example.yaml 是否有效）。
 
 ---
 
@@ -44,7 +166,7 @@ http://127.0.0.1:5173/ChattingCursor/
 
 | 服务 | 端口 | 说明 |
 |------|------|------|
-| Bridge | **3000** | 本地 API，封装 Cursor CLI（**不是 8787**，Hyper-V 占用了 8710–8809） |
+| Bridge | **3000** | 本地 API，封装 Cursor CLI |
 | Web | **5173** | Vite 开发服务器 |
 | 9222 | — | Chrome MCP 调试端口，**用户不需要手动配置** |
 
@@ -54,11 +176,17 @@ http://127.0.0.1:5173/ChattingCursor/
 
 **Bridge 显示离线？**
 - 确认终端 1 中 `pnpm dev:bridge` 正在运行
-- 确认 Bridge URL 输入框为 `http://127.0.0.1:3000`（若之前用过 8787，请手动改回 3000）
+- 确认 Bridge URL 输入框为 `http://127.0.0.1:3000`
 
 **CLI 不可用？**
 - 在 WSL 中运行 `cursor-agent status`，确认已登录
 - 若未登录：`cursor-agent login`
+
+**想看 cursor-agent 原始输出？**
+- 聊天页**没有** CLI 面板；请用 `pnpm cli:watch <runId>` 或 **本地 → CLI输出**（`/ChattingCursor/local/cli`）
+
+**crewAI 显示未安装？**
+- 运行 `pnpm crew:setup` 或 `pip install -r requirements.txt`
 
 **首次使用需安装依赖：**
 

@@ -2,9 +2,9 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <meta http-equiv="refresh" content="0; url=/ChattingCursor/" />
     <script>
-      sessionStorage.redirect = location.href;
+      sessionStorage.redirect = location.pathname + location.search + location.hash;
+      location.replace("/ChattingCursor/");
     </script>
   </head>
   <body></body>

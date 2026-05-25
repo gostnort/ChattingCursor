@@ -63,7 +63,7 @@ export function TerminalPanel({ bridgeUrl, runId }: TerminalPanelProps) {
     return (
       <section className="terminal-panel terminal-panel-idle">
         <h2>CLI 终端（原始输出）</h2>
-        <p className="terminal-hint">发送消息后将在此显示 cursor-agent 子进程的真实 stdout/stderr。</p>
+        <p className="terminal-hint">在聊天页发送消息后，runId 会自动保存；切换到「本地 → CLI输出」可在此查看，或使用 <code>pnpm cli:watch</code> 在本地终端查看。</p>
       </section>
     );
   }

@@ -1,7 +1,11 @@
 import type {
   ChatNewSessionResponse,
   ChatSendResponse,
+  CrewStatusResponse,
   HistorySearchResponse,
+  LocalConfigResponse,
+  LocalHistoryContentResponse,
+  LocalHistoryListResponse,
   ModelsResponse,
   RunEvent,
 } from "@chatting-cursor/shared";
@@ -169,4 +173,58 @@ export async function fetchBridgeHealth(bridgeUrl: string): Promise<BridgeHealth
   } catch {
     return null;
   }
+}
+
+
+/** 判断 Bridge URL 是否指向本机 */
+export function isLocalBridgeUrl(bridgeUrl: string): boolean {
+  try {
+    const url = new URL(bridgeUrl);
+    return url.hostname === "127.0.0.1" || url.hostname === "localhost";
+  } catch {
+    return false;
+  }
+}
+
+
+/** 获取本地配置（仅 localhost Bridge） */
+export async function fetchLocalConfig(bridgeUrl: string): Promise<LocalConfigResponse> {
+  const response = await fetch(`${bridgeUrl}/local/config`);
+  if (!response.ok) {
+    throw new Error(`本地配置不可用 (${response.status})`);
+  }
+  return response.json() as Promise<LocalConfigResponse>;
+}
+
+
+/** 列出全部历史会话文件 */
+export async function fetchHistoryList(bridgeUrl: string): Promise<LocalHistoryListResponse> {
+  const response = await fetch(`${bridgeUrl}/local/history`);
+  if (!response.ok) {
+    throw new Error(`历史列表不可用 (${response.status})`);
+  }
+  return response.json() as Promise<LocalHistoryListResponse>;
+}
+
+
+/** 读取单个历史文件内容 */
+export async function fetchHistoryContent(
+  bridgeUrl: string,
+  file: string,
+): Promise<LocalHistoryContentResponse> {
+  const response = await fetch(`${bridgeUrl}/local/history/${encodeURIComponent(file)}`);
+  if (!response.ok) {
+    throw new Error(`读取历史失败 (${response.status})`);
+  }
+  return response.json() as Promise<LocalHistoryContentResponse>;
+}
+
+
+/** 获取 crewAI 环境状态 */
+export async function fetchCrewStatus(bridgeUrl: string): Promise<CrewStatusResponse> {
+  const response = await fetch(`${bridgeUrl}/crews/status`);
+  if (!response.ok) {
+    throw new Error(`crewAI 状态不可用 (${response.status})`);
+  }
+  return response.json() as Promise<CrewStatusResponse>;
 }

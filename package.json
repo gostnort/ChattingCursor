@@ -8,7 +8,10 @@
     "dev": "pnpm -r --parallel --filter @chatting-cursor/bridge --filter @chatting-cursor/web dev",
     "build": "pnpm -r build",
     "lint": "eslint .",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "pnpm -r typecheck",
+    "cli:watch": "node scripts/cli-watch.mjs",
+    "crew:setup": "python -m venv .venv && .venv\\Scripts\\pip install -r requirements.txt",
+    "crew:run": "python scripts/run-crew.py --config configs/crews/example.yaml --inputs-file configs/crews/example-inputs.json --dry-run"
   },
   "devDependencies": {
     "@eslint/js": "^9.22.0",
