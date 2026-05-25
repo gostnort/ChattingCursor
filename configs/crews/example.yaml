@@ -1,21 +1,49 @@
-name: example-review-crew
+name: example-validation-crew
 process: sequential
 agents:
-  - id: researcher
-    role: 代码研究员
-    goal: 分析变更范围与风险点
-    model: composer-2
-  - id: reviewer
-    role: 审查员
-    goal: 输出结构化审查意见
+  - id: validator
+    role: 代码验证员
+    goal: 运行仓库校验命令并指出构建、类型和 lint 风险
+    backstory: 熟悉前端与 Node monorepo 的本地验证流程。
+    model: gpt-4o-mini
+  - id: browser_checker
+    role: 浏览器验收员
+    goal: 连接 9222 检查页面是否符合要求
+    backstory: 擅长用浏览器快照确认视觉与交互结果。
+    model: gpt-4o-mini
+  - id: reporter
+    role: 结果汇总员
+    goal: 汇总代码校验和页面验收结论
+    backstory: 输出简洁、可执行的结论与后续建议。
+    model: gpt-4o-mini
 tasks:
-  - id: analyze
-    agentId: researcher
-    description: 分析 {{repo_diff}} 中的关键变更
-    expectedOutput: 风险点列表（Markdown）
-  - id: review
-    agentId: reviewer
-    description: 基于分析结果写审查报告
-    expectedOutput: 通过/不通过 + 理由
+  - id: validate_repo
+    agentId: validator
+    description: |
+      针对仓库 {{repo_root}} 运行基础验证。至少检查 lint、typecheck、build 是否通过，
+      并记录失败命令、报错摘要和潜在风险。
+    expectedOutput: 列出通过/失败的命令与修复建议
+  - id: inspect_local_page
+    agentId: browser_checker
+    description: |
+      连接 Chrome 9222，优先检查 {{local_url}}，若不存在则检查当前打开的相关页面。
+      根据 {{acceptance_criteria}} 判断界面是否符合要求，并给出证据。
+    expectedOutput: 本地页面验收结果与关键证据
     contextTaskIds:
-      - analyze
+      - validate_repo
+  - id: inspect_pages
+    agentId: browser_checker
+    description: |
+      连接 Chrome 9222，检查 {{pages_url}} 是否加载到正确页面，并与本地页面差异做简要说明。
+    expectedOutput: GitHub Pages 页面结果与差异说明
+    contextTaskIds:
+      - inspect_local_page
+  - id: summarize
+    agentId: reporter
+    description: |
+      基于前面任务，输出最终结论：当前代码是否可交付、还有哪些阻塞项、下一步建议是什么。
+    expectedOutput: 一段中文总结，包含通过项、失败项、阻塞项
+    contextTaskIds:
+      - validate_repo
+      - inspect_local_page
+      - inspect_pages

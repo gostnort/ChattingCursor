@@ -12,7 +12,7 @@ Local-first 的多 Agent 聊天与测试平台：前端部署在 GitHub Pages，
 2. 终端 2：`pnpm dev:web`
 3. 浏览器打开：`http://127.0.0.1:43210/ChattingCursor/`
 
-确认 Bridge 端口为 `4321`（可在 **本地 → 配置** 修改），状态栏显示 CLI 可用后即可聊天。
+确认 Bridge 端口为 `4321`（可在 **本地 → 配置** 修改）后即可聊天。
 
 在线版（GitHub Pages）：https://gostnort.github.io/ChattingCursor/ — 仅托管前端 UI，聊天仍需在本机运行 Bridge。
 
@@ -22,7 +22,8 @@ Local-first 的多 Agent 聊天与测试平台：前端部署在 GitHub Pages，
 - **apps/bridge**：本地 Node.js 服务（默认 `http://127.0.0.1:4321`），封装 Cursor CLI 子进程
 - **packages/cli-client**：CLI 包装层（v1）；`@cursor/sdk` 计划在 v2 引入
 - **packages/shared**：共享类型与 Zod schema
-- **packages/orchestrator / evaluator**：占位包，后续阶段实现
+- **packages/orchestrator**：crewAI 编排与环境探测
+- **packages/evaluator**：评估占位包
 
 ## 前置条件
 
@@ -47,8 +48,9 @@ pnpm dev:web
 
 浏览器打开 `http://127.0.0.1:43210/ChattingCursor/`，在 **本地 → 配置** 可修改 Bridge 端口（默认 4321）与查看历史文件，确认 CLI 可用后即可聊天。
 
-- **CLI 原始终端**：页面下方「CLI 终端（原始输出）」展示 `cursor-agent` 子进程 stdout/stderr；API：`GET /chat/terminal/:runId`（SSE）
+- **CLI 原始终端**：聊天页不展示 CLI 输出；请在 **本地 → CLI输出** 或单独终端运行 `pnpm cli:watch <runId>` 查看。底层 API：`GET /chat/terminal/:runId`（SSE）
 - **对话内历史搜索**：在聊天框输入如「帮我找之前关于端口的对话」，Bridge 搜索 `~/.chattingcursor/history/`（保留 7 天）并直接回复
+- **历史恢复**：刷新页面后会从浏览器 `localStorage` 恢复消息、会话 ID 与已选模型
 
 Windows 一键启动（会打开两个新终端窗口）：
 
@@ -103,7 +105,7 @@ ChattingCursor/
 | Phase 0 | Monorepo 脚手架 | 完成 |
 | Phase 1 | CLI 聊天 MVP（send + SSE + UI） | 进行中 |
 | Phase 2 | GH Pages 部署验证 | 部分完成（workflow 已加） |
-| Phase 3 | 多 Agent 编排 | 未开始 |
+| Phase 3 | crewAI 最小编排（状态探测 + dry-run + Chrome 9222 校验） | 已开始 |
 | Phase 4 | 测试与评估 | 未开始 |
 | v2 | `@cursor/sdk` 替代/并存 CLI | 未开始 |
 

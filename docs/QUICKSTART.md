@@ -22,7 +22,7 @@ pnpm dev:web
 http://127.0.0.1:43210/ChattingCursor/
 ```
 
-确认聊天区状态栏显示 **Bridge: 在线 · CLI: 可用**，即可开始聊天。Bridge URL 在 **本地 → 配置** 中设置（默认 `http://127.0.0.1:4321`）。
+确认 Bridge 已在 `4321` 端口运行后即可开始聊天。Bridge URL 在 **本地 → 配置** 中设置（默认 `http://127.0.0.1:4321`）。
 
 标题旁有 **聊天 | 本地** 切换：聊天页仅对话 UI；本地模式含 **配置** 与 **CLI输出** 两个子页。
 
@@ -102,7 +102,7 @@ http://127.0.0.1:43210/ChattingCursor/local/cli
 | 历史目录 | 默认 `~/.chattingcursor/history/` |
 | 保留天数 | 7 天，过期文件自动删除 |
 | CLI 实时反馈 | 说明 + 切换到 CLI输出 子页 / `pnpm cli:watch` |
-| crewAI 编排 | Python / crewAI 安装状态、示例 YAML 是否可 dry-run |
+| crewAI 编排 | Python / crewAI / Chrome 9222 状态、示例 YAML 是否可 dry-run |
 | 对话历史列表 | **只读**浏览近 7 天内全部 `*.txt` 会话文件 |
 
 ### 对应 Bridge API（仅本机）
@@ -112,7 +112,7 @@ http://127.0.0.1:43210/ChattingCursor/local/cli
 | GET | `/local/config` | Bridge/CLI/历史目录/默认模型 |
 | GET | `/local/history` | 列出全部历史文件 |
 | GET | `/local/history/:file` | 读取单个历史文件全文 |
-| GET | `/crews/status` | crewAI / Python / 示例配置状态 |
+| GET | `/crews/status` | crewAI / Python / Chrome 9222 / 示例配置状态 |
 | POST | `/crews/run` | 运行 crew（默认 dry-run） |
 
 **安全限制**：`/local/*` 仅接受来自 `127.0.0.1` / `localhost` 的请求；前端也要求 Bridge URL 为本机地址。
@@ -141,14 +141,14 @@ pnpm crew:run
 3. **Bridge API**：
 
 ```powershell
-curl -X POST http://127.0.0.1:4321/crews/run -H "Content-Type: application/json" -d "{\"crew\":\"example\",\"inputs\":{\"repo_diff\":\"sample diff\"},\"dryRun\":true}"
+curl -X POST http://127.0.0.1:4321/crews/run -H "Content-Type: application/json" -d "{\"crew\":\"example\",\"inputs\":{\"repo_root\":\"E:\\\\my_github\\\\ChattingCursor\",\"local_url\":\"http://127.0.0.1:43210/ChattingCursor/\",\"pages_url\":\"https://gostnort.github.io/ChattingCursor/\",\"acceptance_criteria\":\"页面能恢复历史对话\"},\"dryRun\":true}"
 ```
 
 4. **真实执行**（需 LLM API Key，如 `OPENAI_API_KEY`）：`dryRun: false` 或 `python scripts/run-crew.py --config configs/crews/example.yaml --execute`
 
 5. **编排层**：`packages/orchestrator` 加载 YAML 并调用 `scripts/run-crew.py`；完整 Chat 流程接入 crew 仍在后续阶段。
 
-本地 **配置** 子页会显示 crewAI 状态（Python 是否可用、crewai 是否安装、example.yaml 是否有效）。
+本地 **配置** 子页会显示 crewAI 状态（Python 是否可用、crewai 是否安装、Chrome 9222 是否连通、example.yaml 是否有效）。
 
 ---
 

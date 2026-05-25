@@ -3,6 +3,7 @@ import cors from "@fastify/cors";
 import { probeCursorCli } from "@chatting-cursor/cli-client";
 import { loadConfig, isOriginAllowed } from "./config.js";
 import { registerChatRoutes } from "./routes/chat.js";
+import { registerCrewRoutes } from "./routes/crews.js";
 import { registerLocalRoutes } from "./routes/local.js";
 
 
@@ -24,6 +25,7 @@ async function main(): Promise<void> {
     };
   });
   await registerChatRoutes(app);
+  await registerCrewRoutes(app);
   await registerLocalRoutes(app);
   await app.listen({ host: config.host, port: config.port });
   app.log.info(`Bridge 运行于 http://${config.host}:${config.port}`);

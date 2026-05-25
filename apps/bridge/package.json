@@ -4,13 +4,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "pnpm --filter @chatting-cursor/cli-client build && tsx watch src/index.ts",
+    "dev": "pnpm --filter @chatting-cursor/cli-client build && pnpm --filter @chatting-cursor/orchestrator build && tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@chatting-cursor/cli-client": "workspace:*",
+    "@chatting-cursor/orchestrator": "workspace:*",
     "@chatting-cursor/shared": "workspace:*",
     "@fastify/cors": "^11.0.0",
     "fastify": "^5.2.1",
