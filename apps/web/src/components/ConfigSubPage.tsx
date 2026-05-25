@@ -53,6 +53,7 @@ export function ConfigSubPage({ bridgePort, bridgeUrl, onBridgePortChange, onOpe
   const [webPortInput, setWebPortInput] = useState(() => String(getWebPort()));
   const [savedWebPort, setSavedWebPort] = useState(() => getWebPort());
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState(false);
   const normalizedBridgeUrl = useMemo(() => bridgeUrl.replace(/\/$/, ""), [bridgeUrl]);
   const parsedBridgePort = useMemo(() => parsePortInput(bridgePortInput), [bridgePortInput]);
   const parsedWebPort = useMemo(() => parsePortInput(webPortInput), [webPortInput]);
@@ -90,18 +91,32 @@ export function ConfigSubPage({ bridgePort, bridgeUrl, onBridgePortChange, onOpe
 
   useEffect(() => {
     let cancelled = false;
-    const load = async (): Promise<void> => {
-      setLoading(true);
-      setError(null);
-      setLocalConfig(null);
-      setCrewStatus(null);
-      setSessions([]);
-      setSelectedFile(null);
-      setHistoryContent("");
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    const RETRY_INTERVAL_MS = 3000;
+    const clearRetry = (): void => {
+      if (retryTimer !== null) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
+      }
+    };
+    const load = async (initialLoad: boolean): Promise<void> => {
+      if (initialLoad) {
+        setLoading(true);
+        setError(null);
+        setLocalConfig(null);
+        setCrewStatus(null);
+        setSessions([]);
+        setSelectedFile(null);
+        setHistoryContent("");
+      }
       if (!canUseLocalApi) {
         setError("本地配置 API 仅在 Bridge 地址为 127.0.0.1 或 localhost 时可用。");
         setLoading(false);
+        setRetrying(false);
         return;
+      }
+      if (!initialLoad) {
+        setRetrying(true);
       }
       try {
         const [config, history, crew] = await Promise.all([
@@ -115,20 +130,29 @@ export function ConfigSubPage({ bridgePort, bridgeUrl, onBridgePortChange, onOpe
         setLocalConfig(config);
         setSessions(history.sessions);
         setCrewStatus(crew);
+        setError(null);
+        setRetrying(false);
+        clearRetry();
       } catch (loadError) {
         if (!cancelled) {
           const message = loadError instanceof Error ? loadError.message : String(loadError);
           setError(`无法加载本地配置：${message}。请先运行 pnpm dev:bridge（端口 ${bridgePort}）。`);
+          setRetrying(true);
+          clearRetry();
+          retryTimer = setTimeout(() => {
+            void load(false);
+          }, RETRY_INTERVAL_MS);
         }
       } finally {
-        if (!cancelled) {
+        if (!cancelled && initialLoad) {
           setLoading(false);
         }
       }
     };
-    void load();
+    void load(true);
     return () => {
       cancelled = true;
+      clearRetry();
     };
   }, [bridgePort, canUseLocalApi, normalizedBridgeUrl]);
 
@@ -155,7 +179,7 @@ export function ConfigSubPage({ bridgePort, bridgeUrl, onBridgePortChange, onOpe
     setSavedWebPort(defaults.webPort);
     setBridgePortInput(String(defaults.bridgePort));
     setWebPortInput(String(defaults.webPort));
-    setSaveMessage("已恢复默认（Bridge 3000，Web 5173）并应用。");
+    setSaveMessage(`已恢复默认（Bridge ${DEFAULT_BRIDGE_PORT}，Web ${DEFAULT_WEB_PORT}）并应用。`);
   };
 
 
@@ -248,7 +272,12 @@ export function ConfigSubPage({ bridgePort, bridgeUrl, onBridgePortChange, onOpe
         </p>
       </section>
       {loading && <p className="config-hint">加载 Bridge 状态…</p>}
-      {!loading && error && <p className="config-error">{error}</p>}
+      {!loading && error && (
+        <>
+          <p className="config-error">{error}</p>
+          {retrying && <p className="config-hint">Bridge 未连接，每 3 秒自动重试…</p>}
+        </>
+      )}
       {!loading && !error && localConfig && (
         <>
           <section className="config-section">

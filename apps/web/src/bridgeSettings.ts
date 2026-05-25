@@ -2,8 +2,8 @@
 export const BRIDGE_PORT_KEY = "bridgePort";
 export const WEB_PORT_KEY = "webPort";
 export const LEGACY_BRIDGE_URL_KEY = "bridgeUrl";
-export const DEFAULT_BRIDGE_PORT = 3000;
-export const DEFAULT_WEB_PORT = 5173;
+export const DEFAULT_BRIDGE_PORT = 4321;
+export const DEFAULT_WEB_PORT = 43210;
 const BRIDGE_HOST = "127.0.0.1";
 
 

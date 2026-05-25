@@ -2,14 +2,14 @@
 
 ## 用户只需要做 3 步
 
-**终端 1**（启动 Bridge，端口 3000）：
+**终端 1**（启动 Bridge，端口 4321）：
 
 ```powershell
 cd e:\my_github\ChattingCursor
 pnpm dev:bridge
 ```
 
-**终端 2**（启动前端，端口 5173）：
+**终端 2**（启动前端，端口 43210）：
 
 ```powershell
 cd e:\my_github\ChattingCursor
@@ -19,10 +19,10 @@ pnpm dev:web
 **浏览器打开**：
 
 ```
-http://127.0.0.1:5173/ChattingCursor/
+http://127.0.0.1:43210/ChattingCursor/
 ```
 
-确认聊天区状态栏显示 **Bridge: 在线 · CLI: 可用**，即可开始聊天。Bridge URL 在 **本地 → 配置** 中设置（默认 `http://127.0.0.1:3000`）。
+确认聊天区状态栏显示 **Bridge: 在线 · CLI: 可用**，即可开始聊天。Bridge URL 在 **本地 → 配置** 中设置（默认 `http://127.0.0.1:4321`）。
 
 标题旁有 **聊天 | 本地** 切换：聊天页仅对话 UI；本地模式含 **配置** 与 **CLI输出** 两个子页。
 
@@ -36,9 +36,9 @@ http://127.0.0.1:5173/ChattingCursor/
 
 | 模式 | URL（开发） | 说明 |
 |------|-------------|------|
-| 聊天 | `http://127.0.0.1:5173/ChattingCursor/` | 默认首页 |
-| 本地 · 配置 | `http://127.0.0.1:5173/ChattingCursor/local/config` | Bridge/历史/crewAI |
-| 本地 · CLI输出 | `http://127.0.0.1:5173/ChattingCursor/local/cli` | Web 查看 CLI 原始输出 |
+| 聊天 | `http://127.0.0.1:43210/ChattingCursor/` | 默认首页 |
+| 本地 · 配置 | `http://127.0.0.1:43210/ChattingCursor/local/config` | Bridge/历史/crewAI |
+| 本地 · CLI输出 | `http://127.0.0.1:43210/ChattingCursor/local/cli` | Web 查看 CLI 原始输出 |
 
 也可用 hash：`#local/config`、`#local/cli`（首次打开会规范化为 pathname）。
 
@@ -61,18 +61,18 @@ pnpm cli:watch <runId>
 
 - 发送聊天消息后，runId 会写入浏览器 `localStorage`（键名 `latestRunId`），也可从 Bridge 日志获取。
 - 不填 runId 时会打印用法说明。
-- 环境变量：`BRIDGE_URL`（默认 `http://127.0.0.1:3000`）、`RUN_ID`。
+- 环境变量：`BRIDGE_URL`（默认 `http://127.0.0.1:4321`）、`RUN_ID`。
 
 ### 方式 B：Web CLI 输出（本地模式）
 
 ```
-http://127.0.0.1:5173/ChattingCursor/local/cli
+http://127.0.0.1:43210/ChattingCursor/local/cli
 ```
 
 - 标题旁切换到 **本地**，再点 **CLI输出**。
 - 自动读取最近一次 runId，或手动输入；也可从 **配置** 子页点击「打开 CLI 输出」。
 
-Bridge 终端 SSE（供 cli:watch / CLI输出页使用）：`GET http://127.0.0.1:3000/chat/terminal/:runId`
+Bridge 终端 SSE（供 cli:watch / CLI输出页使用）：`GET http://127.0.0.1:4321/chat/terminal/:runId`
 
 ---
 
@@ -83,13 +83,13 @@ Bridge 终端 SSE（供 cli:watch / CLI输出页使用）：`GET http://127.0.0.
 ### 如何打开
 
 1. 先按上文启动 **Bridge**（`pnpm dev:bridge`）和 **Web**（`pnpm dev:web`）。
-2. 打开 `http://127.0.0.1:5173/ChattingCursor/`，点击标题旁 **本地**，再选 **配置** 或 **CLI输出**。
+2. 打开 `http://127.0.0.1:43210/ChattingCursor/`，点击标题旁 **本地**，再选 **配置** 或 **CLI输出**。
 
 或直接访问：
 
 ```
-http://127.0.0.1:5173/ChattingCursor/local/config
-http://127.0.0.1:5173/ChattingCursor/local/cli
+http://127.0.0.1:43210/ChattingCursor/local/config
+http://127.0.0.1:43210/ChattingCursor/local/cli
 ```
 
 ### 页面上有什么
@@ -141,7 +141,7 @@ pnpm crew:run
 3. **Bridge API**：
 
 ```powershell
-curl -X POST http://127.0.0.1:3000/crews/run -H "Content-Type: application/json" -d "{\"crew\":\"example\",\"inputs\":{\"repo_diff\":\"sample diff\"},\"dryRun\":true}"
+curl -X POST http://127.0.0.1:4321/crews/run -H "Content-Type: application/json" -d "{\"crew\":\"example\",\"inputs\":{\"repo_diff\":\"sample diff\"},\"dryRun\":true}"
 ```
 
 4. **真实执行**（需 LLM API Key，如 `OPENAI_API_KEY`）：`dryRun: false` 或 `python scripts/run-crew.py --config configs/crews/example.yaml --execute`
@@ -166,8 +166,8 @@ curl -X POST http://127.0.0.1:3000/crews/run -H "Content-Type: application/json"
 
 | 服务 | 端口 | 说明 |
 |------|------|------|
-| Bridge | **3000** | 本地 API，封装 Cursor CLI |
-| Web | **5173** | Vite 开发服务器 |
+| Bridge | **4321** | 本地 API，封装 Cursor CLI |
+| Web | **43210** | Vite 开发服务器 |
 | 9222 | — | Chrome MCP 调试端口，**用户不需要手动配置** |
 
 ---
@@ -176,7 +176,7 @@ curl -X POST http://127.0.0.1:3000/crews/run -H "Content-Type: application/json"
 
 **Bridge 显示离线？**
 - 确认终端 1 中 `pnpm dev:bridge` 正在运行
-- 确认 Bridge URL 输入框为 `http://127.0.0.1:3000`
+- 确认 Bridge URL 输入框为 `http://127.0.0.1:4321`
 
 **CLI 不可用？**
 - 在 WSL 中运行 `cursor-agent status`，确认已登录

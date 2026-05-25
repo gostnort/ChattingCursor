@@ -32,7 +32,7 @@ export default defineConfig({
   plugins: [react(), redirectRootPlugin()],
   base: "/ChattingCursor/",
   server: {
-    port: 5173,
+    port: 43210,
     host: "127.0.0.1",
   },
 });
