@@ -4,19 +4,20 @@ import type { ChatMessage } from "@chatting-cursor/shared";
 interface MessageBubbleProps {
   message: ChatMessage;
   onSpeak: (text: string) => void;
+  agentLabel?: string;
 }
 
 
 /** 微信风格单条聊天气泡 */
-export function MessageBubble({ message, onSpeak }: MessageBubbleProps) {
+export function MessageBubble({ message, onSpeak, agentLabel = "Agent" }: MessageBubbleProps) {
   const isUser = message.role === "user";
-  const label = isUser ? "你" : "Agent";
+  const label = isUser ? "你" : agentLabel;
 
 
   return (
     <div className={`bubble-row bubble-row-${message.role}`}>
       {!isUser && (
-        <div className="bubble-avatar bubble-avatar-agent" aria-hidden="true">
+        <div className="bubble-avatar bubble-avatar-agent" title={label} aria-hidden="true">
           {label.slice(0, 1)}
         </div>
       )}

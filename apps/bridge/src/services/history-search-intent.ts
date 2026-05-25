@@ -1,17 +1,21 @@
-/** 判断用户消息是否像在请求搜索本地聊天历史 */
+/** 判断用户消息是否像在请求搜索本地聊天历史（需明确提及历史/过往对话） */
 export function hasHistorySearchIntent(prompt: string): boolean {
   const trimmed = prompt.trim();
   if (trimmed.startsWith("/search ")) {
     return true;
   }
-  const intentPatterns = [
-    /(?:帮我|请)?(?:找|搜|搜索|查找|查)(?:一下|下)?/,
+  const historyIntentPatterns = [
+    /(?:帮我|请)?找(?:一下|下)?(?:之前|以前|过往)/,
+    /(?:帮我|请)?(?:搜|搜索|查找)(?:一下|下)?(?:之前|以前|过往|本地)?(?:的)?(?:对话|聊天|记录|历史)/,
     /(?:之前|以前|过往|历史).*(?:对话|聊天|记录|讨论)/,
     /(?:对话|聊天|记录).*(?:之前|以前|历史)/,
     /有没有.*(?:之前|以前|历史)/,
     /还记得.*(?:之前|以前|对话|聊天)/,
+    /(?:本地)?历史(?:对话|聊天|记录)/,
+    /(?:搜索|查找)(?:一下|下)?(?:本地)?(?:历史|聊天记录)/,
+    /(?:帮我|请)?找(?:一下|下)?(?:之前|以前).*(?:关于|有关)/,
   ];
-  return intentPatterns.some((pattern) => pattern.test(trimmed));
+  return historyIntentPatterns.some((pattern) => pattern.test(trimmed));
 }
 
 
@@ -22,10 +26,11 @@ export function extractSearchKeywords(prompt: string): string {
     return trimmed.slice("/search ".length).trim();
   }
   const topicPatterns = [
-    /(?:帮我|请)?(?:找|搜|搜索|查找|查)(?:一下|下)?(?:之前)?(?:关于|有关)?(.+?)(?:的)?(?:对话|聊天记录|历史|记录|讨论)/,
-    /(?:有没有|还记得)(?:之前)?(?:关于|有关)?(.+?)(?:的)?(?:对话|聊天|讨论|记录)/,
+    /(?:帮我|请)?(?:找|搜|搜索|查找|查)(?:一下|下)?(?:之前|以前|过往)?(?:关于|有关)?(.+?)(?:的)?(?:对话|聊天记录|历史|记录|讨论)/,
+    /(?:有没有|还记得)(?:之前|以前)?(?:关于|有关)?(.+?)(?:的)?(?:对话|聊天|讨论|记录)/,
     /(?:搜索|查找)(?:一下|下)?(?:本地)?(?:历史|记录)?[：:]\s*(.+)/,
     /(?:之前|以前).*(?:关于|有关)(.+?)(?:的)?(?:对话|聊天|讨论)/,
+    /(?:帮我|请)?找(?:一下|下)?(?:之前|以前).*(?:关于|有关)(.+)/,
   ];
   for (const pattern of topicPatterns) {
     const match = trimmed.match(pattern);

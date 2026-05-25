@@ -7,6 +7,7 @@ import {
   sendChatMessage,
   subscribeRunEvents,
 } from "../api/bridge";
+import { clearChatState, loadChatState, saveChatState } from "../chatPersistence";
 import { useSpeech } from "../hooks/useSpeech";
 import { MessageBubble } from "./MessageBubble";
 
@@ -24,13 +25,16 @@ const MODEL_STORAGE_KEY = "selectedModel";
 
 /** 最小聊天面板 */
 export function ChatPanel({ bridgeUrl }: ChatPanelProps) {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const restoredState = loadChatState();
+  const [messages, setMessages] = useState<ChatMessage[]>(() => restoredState?.messages ?? []);
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
   const [models, setModels] = useState<ModelInfo[]>([]);
-  const [selectedModel, setSelectedModel] = useState(() => localStorage.getItem(MODEL_STORAGE_KEY) ?? "");
-  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [selectedModel, setSelectedModel] = useState(
+    () => restoredState?.selectedModel ?? localStorage.getItem(MODEL_STORAGE_KEY) ?? "",
+  );
+  const [sessionId, setSessionId] = useState<string | null>(() => restoredState?.sessionId ?? null);
   const assistantBufferRef = useRef("");
   const sseCloseRef = useRef<(() => void) | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -67,6 +71,9 @@ export function ChatPanel({ bridgeUrl }: ChatPanelProps) {
   useEffect(() => {
     let cancelled = false;
     const initSession = async (): Promise<void> => {
+      if (sessionId) {
+        return;
+      }
       try {
         const result = await createChatSession(bridgeUrl);
         if (!cancelled) {
@@ -81,7 +88,15 @@ export function ChatPanel({ bridgeUrl }: ChatPanelProps) {
       cancelled = true;
       sseCloseRef.current?.();
     };
-  }, [bridgeUrl]);
+  }, [bridgeUrl, sessionId]);
+
+
+  useEffect(() => {
+    saveChatState({ messages, sessionId, selectedModel });
+    if (selectedModel) {
+      localStorage.setItem(MODEL_STORAGE_KEY, selectedModel);
+    }
+  }, [messages, sessionId, selectedModel]);
 
 
   useEffect(() => {
@@ -107,6 +122,7 @@ export function ChatPanel({ bridgeUrl }: ChatPanelProps) {
 
   const handleNewChat = async (): Promise<void> => {
     resetChatState();
+    clearChatState();
     try {
       const result = await createChatSession(bridgeUrl);
       setSessionId(result.sessionId);
@@ -114,6 +130,9 @@ export function ChatPanel({ bridgeUrl }: ChatPanelProps) {
       setSessionId(null);
     }
   };
+
+
+  const selectedModelLabel = models.find((item) => item.id === selectedModel)?.label ?? (selectedModel || "Agent");
 
 
   const handleStreamEvent = (event: { type: string; text?: string }): void => {
@@ -252,11 +271,18 @@ export function ChatPanel({ bridgeUrl }: ChatPanelProps) {
         </div>
         <div className="messages">
           {messages.map((message) => (
-            <MessageBubble key={message.id} message={message} onSpeak={speak} />
+            <MessageBubble
+              key={message.id}
+              message={message}
+              onSpeak={speak}
+              agentLabel={selectedModelLabel}
+            />
           ))}
           {showTypingIndicator && (
-            <div className="bubble-row bubble-row-assistant bubble-typing" aria-live="polite" aria-label="Agent 正在输入">
-              <div className="bubble-avatar bubble-avatar-agent" aria-hidden="true">A</div>
+            <div className="bubble-row bubble-row-assistant bubble-typing" aria-live="polite" aria-label={`${selectedModelLabel} 正在输入`}>
+              <div className="bubble-avatar bubble-avatar-agent" title={selectedModelLabel} aria-hidden="true">
+                {selectedModelLabel.slice(0, 1)}
+              </div>
               <div className="bubble-main">
                 <div className="bubble bubble-assistant bubble-assistant-typing">
                   <span className="typing-dot" />
