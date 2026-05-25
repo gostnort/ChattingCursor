@@ -1,0 +1,23 @@
+{
+  "name": "chatting-cursor",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev:bridge": "pnpm --filter @chatting-cursor/bridge dev",
+    "dev:web": "pnpm --filter @chatting-cursor/web dev",
+    "dev": "pnpm -r --parallel --filter @chatting-cursor/bridge --filter @chatting-cursor/web dev",
+    "build": "pnpm -r build",
+    "lint": "eslint .",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.22.0",
+    "eslint": "^9.22.0",
+    "typescript": "^5.8.2",
+    "typescript-eslint": "^8.26.1"
+  },
+  "packageManager": "pnpm@9.15.9",
+  "engines": {
+    "node": ">=20"
+  }
+}

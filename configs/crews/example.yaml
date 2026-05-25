@@ -1,0 +1,21 @@
+name: example-review-crew
+process: sequential
+agents:
+  - id: researcher
+    role: 代码研究员
+    goal: 分析变更范围与风险点
+    model: composer-2
+  - id: reviewer
+    role: 审查员
+    goal: 输出结构化审查意见
+tasks:
+  - id: analyze
+    agentId: researcher
+    description: 分析 {{repo_diff}} 中的关键变更
+    expectedOutput: 风险点列表（Markdown）
+  - id: review
+    agentId: reviewer
+    description: 基于分析结果写审查报告
+    expectedOutput: 通过/不通过 + 理由
+    contextTaskIds:
+      - analyze
