@@ -126,6 +126,8 @@ export class TokenRotationService {
     }
     this.publicBridgeUrl = normalized;
     await this.ensureTodayToken();
+    // ensureTodayToken 可能从文件读回 localhost，写入前恢复隧道地址
+    this.publicBridgeUrl = normalized;
     const filePath = this.getFilePath();
     const existing = await readFile(filePath, "utf8");
     const next = upsertPublicBridgeUrlLine(existing, normalized);

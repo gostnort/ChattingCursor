@@ -10,8 +10,9 @@ $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
 
 $script:BridgeProcess = $null
-$script:TunnelProcess = $null
+$script:TunnelJob = $null
 $script:TunnelUrlApplied = $false
+$script:DetectedTunnelUrl = $null
 $script:ShuttingDown = $false
 $TunnelUrlPattern = [regex]"https://[a-z0-9-]+\.trycloudflare\.com"
 
@@ -27,9 +28,12 @@ function Resolve-CloudflaredExe {
   if ($cmd) {
     return $cmd.Source
   }
+  # winget 默认装到 Program Files (x86)\cloudflared，不一定在 PATH
   $candidates = @(
     "$env:ProgramFiles\Cloudflare\cloudflared\cloudflared.exe",
     "${env:ProgramFiles(x86)}\Cloudflare\cloudflared\cloudflared.exe",
+    "$env:ProgramFiles\cloudflared\cloudflared.exe",
+    "${env:ProgramFiles(x86)}\cloudflared\cloudflared.exe",
     "$env:LOCALAPPDATA\Microsoft\WinGet\Links\cloudflared.exe"
   )
   foreach ($path in $candidates) {
@@ -65,13 +69,38 @@ function Ensure-ProjectReady {
 
 
 function Stop-ChildProcesses {
-  foreach ($proc in @($script:TunnelProcess, $script:BridgeProcess)) {
-    if ($proc -and -not $proc.HasExited) {
-      try {
-        $proc.Kill($true)
-      } catch {
-        # 进程可能已退出
-      }
+  if ($script:TunnelJob) {
+    try {
+      Stop-Job $script:TunnelJob -ErrorAction SilentlyContinue
+      Remove-Job $script:TunnelJob -Force -ErrorAction SilentlyContinue
+    } catch {
+      # 后台任务可能已结束
+    }
+    $script:TunnelJob = $null
+  }
+  if ($script:BridgeProcess -and -not $script:BridgeProcess.HasExited) {
+    try {
+      $script:BridgeProcess.Kill($true)
+    } catch {
+      # 进程可能已退出
+    }
+  }
+}
+
+
+function Receive-TunnelOutput {
+  if (-not $script:TunnelJob) {
+    return
+  }
+  $lines = Receive-Job $script:TunnelJob -Keep -ErrorAction SilentlyContinue
+  foreach ($line in $lines) {
+    if ($null -eq $line) {
+      continue
+    }
+    $text = $line.ToString()
+    if ($text) {
+      Write-Host ('[tunnel] ' + $text)
+      Invoke-TunnelLine -Line $text
     }
   }
 }
@@ -129,8 +158,20 @@ function Invoke-TunnelLine([string]$Line) {
     return
   }
   $url = $match.Value.TrimEnd("/")
+  $script:DetectedTunnelUrl = $url
   Write-Host "检测到隧道地址: $url"
   Set-PublicBridgeUrlInTokenFile -PublicUrl $url
+}
+
+
+function Test-BridgeHealthy {
+  $healthUrl = "http://127.0.0.1:$BridgePort/health"
+  try {
+    $null = Invoke-RestMethod -Uri $healthUrl -Method Get -TimeoutSec 2 -ErrorAction Stop
+    return $true
+  } catch {
+    return $false
+  }
 }
 
 
@@ -178,35 +219,12 @@ function Start-TunnelProcess {
   if (-not $cloudflaredExe) {
     throw "未找到 cloudflared 可执行文件"
   }
-  $psi = New-Object System.Diagnostics.ProcessStartInfo
-  $psi.FileName = $cloudflaredExe
-  $psi.Arguments = "tunnel --url http://127.0.0.1:$BridgePort"
-  $psi.WorkingDirectory = $Root
-  $psi.UseShellExecute = $false
-  $psi.RedirectStandardOutput = $true
-  $psi.RedirectStandardError = $true
-  $psi.CreateNoWindow = $true
-  $proc = [System.Diagnostics.Process]::Start($psi)
-  $script:TunnelProcess = $proc
-  $proc.add_OutputDataReceived({
-    param($sender, $e)
-    try {
-      Invoke-TunnelLine -Line $e.Data
-    } catch {
-      # 异步回调中的错误不能终止主脚本
-    }
-  })
-  $proc.add_ErrorDataReceived({
-    param($sender, $e)
-    try {
-      Invoke-TunnelLine -Line $e.Data
-    } catch {
-      # 异步回调中的错误不能终止主脚本
-    }
-  })
-  $proc.BeginOutputReadLine()
-  $proc.BeginErrorReadLine()
-  return $proc
+  # Windows 上 cloudflared 走 stderr，Process 异步 ReadLine 收不到；用 Job 合并 2>&1
+  $script:TunnelJob = Start-Job -ScriptBlock {
+    param($ExePath, $Port)
+    & $ExePath tunnel --url "http://127.0.0.1:$Port" 2>&1 | ForEach-Object { $_.ToString() }
+  } -ArgumentList $cloudflaredExe, $BridgePort
+  return $script:TunnelJob
 }
 
 
@@ -255,12 +273,17 @@ try {
   # 保持脚本运行，直到用户 Ctrl+C 或子进程退出
   while (-not $script:ShuttingDown) {
     Start-Sleep -Milliseconds 500
-    if ($script:BridgeProcess -and $script:BridgeProcess.HasExited) {
+    Receive-TunnelOutput
+    if ($script:DetectedTunnelUrl -and -not $script:TunnelUrlApplied) {
+      Set-PublicBridgeUrlInTokenFile -PublicUrl $script:DetectedTunnelUrl
+    }
+    if ($script:BridgeProcess -and $script:BridgeProcess.HasExited -and -not (Test-BridgeHealthy)) {
       Write-Host "Bridge 进程已退出，代码: $($script:BridgeProcess.ExitCode)"
       break
     }
-    if ($script:TunnelProcess -and $script:TunnelProcess.HasExited) {
-      Write-Host "cloudflared 已退出，代码: $($script:TunnelProcess.ExitCode)"
+    if ($script:TunnelJob -and $script:TunnelJob.State -in @("Failed", "Stopped", "Completed")) {
+      Receive-TunnelOutput
+      Write-Host "cloudflared 已退出，状态: $($script:TunnelJob.State)"
       break
     }
   }
