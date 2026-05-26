@@ -66,9 +66,19 @@ $env:BRIDGE_PUBLIC_URL="https://bridge.example.com"
 
 ### 3. 配置 token 同步目录
 
+默认：`%USERPROFILE%\.chattingcursor\chattingcursor-token.txt`（与 `history/` 同属 `.chattingcursor`）。
+
+覆盖方式（优先级从高到低）：
+
+1. 环境变量 `CHATTINGCURSOR_TOKEN_SYNC_DIR`
+2. Web **本地 → 配置** 中设置同步目录（写入 `%USERPROFILE%\.chattingcursor\config.json`）
+3. 启动脚本参数 `-TokenSyncDir`
+
 ```powershell
 $env:CHATTINGCURSOR_TOKEN_SYNC_DIR="D:\YourSyncFolder\ChattingCursor"
 ```
+
+**从旧版迁移**：若你曾在 `%USERPROFILE%\ChattingCursorTokenSync` 存放口令，首次使用新默认目录时 Bridge 会自动复制一次；也可手动移动 `chattingcursor-token.txt` 到 `.chattingcursor`。
 
 Bridge 启动后会生成：
 

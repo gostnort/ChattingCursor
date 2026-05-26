@@ -4,9 +4,12 @@ param(
   [string]$Hostname,
   [string]$TunnelName = "chattingcursor-bridge",
   [int]$BridgePort = 4321,
-  [string]$TokenSyncDir = "$HOME\ChattingCursorTokenSync",
+  [string]$TokenSyncDir = "",
   [switch]$SkipBridge
 )
+
+. (Join-Path $PSScriptRoot "Resolve-TokenSyncDir.ps1")
+$TokenSyncDir = Resolve-TokenSyncDir -Override $TokenSyncDir
 
 $Root = Split-Path -Parent $PSScriptRoot
 $CloudflaredDir = Join-Path $HOME ".cloudflared"

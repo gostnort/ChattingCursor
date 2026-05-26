@@ -1,7 +1,11 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import os from "node:os";
 import { randomBytes, timingSafeEqual } from "node:crypto";
+import {
+  getDefaultTokenSyncDir,
+  getLegacyTokenSyncDir,
+} from "../paths.js";
+import { resolveTokenSyncDirectory, saveTokenSyncDirectory } from "./user-config.js";
 
 
 export interface DailyTokenRecord {
@@ -13,11 +17,6 @@ export interface DailyTokenRecord {
 
 function todayStamp(): string {
   return new Date().toISOString().slice(0, 10);
-}
-
-
-function defaultTokenDirectory(): string {
-  return path.join(os.homedir(), "ChattingCursorTokenSync");
 }
 
 
@@ -81,7 +80,7 @@ export class TokenRotationService {
 
 
   constructor(options: { directory?: string; fileName?: string; publicBridgeUrl: string }) {
-    this.directory = options.directory?.trim() || defaultTokenDirectory();
+    this.directory = options.directory?.trim() || resolveTokenSyncDirectory();
     this.fileName = options.fileName?.trim() || "chattingcursor-token.txt";
     this.publicBridgeUrl = options.publicBridgeUrl;
   }
@@ -100,6 +99,7 @@ export class TokenRotationService {
     this.directory = normalized;
     this.cachedRecord = null;
     await mkdir(this.directory, { recursive: true });
+    await saveTokenSyncDirectory(normalized);
     await this.ensureTodayToken();
   }
 
@@ -142,6 +142,32 @@ export class TokenRotationService {
   }
 
 
+  async migrateLegacyTokenFileIfNeeded(): Promise<void> {
+    const targetPath = this.getFilePath();
+    const legacyPath = path.join(getLegacyTokenSyncDir(), this.fileName);
+    if (path.resolve(this.directory) === path.resolve(getLegacyTokenSyncDir())) {
+      return;
+    }
+    if (path.resolve(this.directory) !== path.resolve(getDefaultTokenSyncDir())) {
+      return;
+    }
+    try {
+      await access(targetPath);
+      return;
+    } catch {
+      // 新路径尚无文件，尝试从旧目录迁移
+    }
+    try {
+      await access(legacyPath);
+      await mkdir(this.directory, { recursive: true });
+      await copyFile(legacyPath, targetPath);
+      console.log(`[token] 已从旧目录迁移口令文件: ${legacyPath} -> ${targetPath}`);
+    } catch {
+      // 旧目录无文件则跳过
+    }
+  }
+
+
   async ensureTodayToken(): Promise<DailyTokenRecord> {
     const today = this.getToday();
     if (this.cachedRecord?.date === today) {
@@ -149,6 +175,7 @@ export class TokenRotationService {
     }
     const filePath = this.getFilePath();
     await mkdir(this.directory, { recursive: true });
+    await this.migrateLegacyTokenFileIfNeeded();
     try {
       const existing = await readFile(filePath, "utf8");
       const parsed = parseTokenFile(existing);
@@ -210,7 +237,7 @@ export class TokenRotationService {
 
 
 export const tokenRotationService = new TokenRotationService({
-  directory: process.env.CHATTINGCURSOR_TOKEN_SYNC_DIR,
+  directory: resolveTokenSyncDirectory(),
   fileName: process.env.CHATTINGCURSOR_TOKEN_FILE_NAME,
   publicBridgeUrl: process.env.BRIDGE_PUBLIC_URL?.trim() || "http://127.0.0.1:4321",
 });

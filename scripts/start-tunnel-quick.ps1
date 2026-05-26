@@ -2,9 +2,12 @@
 param(
   [int]$BridgePort = 4321,
   [string]$BridgePublicUrl = "",
-  [string]$TokenSyncDir = "$HOME\ChattingCursorTokenSync",
+  [string]$TokenSyncDir = "",
   [switch]$SkipBridge
 )
+
+. (Join-Path $PSScriptRoot "Resolve-TokenSyncDir.ps1")
+$TokenSyncDir = Resolve-TokenSyncDir -Override $TokenSyncDir
 
 $Root = Split-Path -Parent $PSScriptRoot
 $escapedRoot = $Root.Replace("'", "''")

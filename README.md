@@ -73,7 +73,7 @@ Windows 一键启动（会打开两个新终端窗口）：
 | `BRIDGE_PORT` | `4321` | 监听端口（避开 Hyper-V 保留段） |
 | `BRIDGE_PUBLIC_URL` | `http://127.0.0.1:4321` | 对手机公开的 Bridge 地址 |
 | `BRIDGE_CORS_ORIGINS` | 见 `.env.example` | 允许的前端来源 |
-| `CHATTINGCURSOR_TOKEN_SYNC_DIR` | 空 | 每日 token 文件写入目录 |
+| `CHATTINGCURSOR_TOKEN_SYNC_DIR` | `%USERPROFILE%\.chattingcursor` | 每日 token 文件目录（与历史同级；可在配置页持久化） |
 
 ## GitHub Pages 部署
 

@@ -2,11 +2,13 @@
 param(
   [int]$BridgePort = 4321,
   [int]$WebPort = 43210,
-  [string]$TokenSyncDir = "$HOME\ChattingCursorTokenSync",
+  [string]$TokenSyncDir = "",
   [switch]$WithWeb
 )
 
 $ErrorActionPreference = "Continue"
+. (Join-Path $PSScriptRoot "Resolve-TokenSyncDir.ps1")
+$TokenSyncDir = Resolve-TokenSyncDir -Override $TokenSyncDir
 try {
   [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
   $OutputEncoding = [Console]::OutputEncoding

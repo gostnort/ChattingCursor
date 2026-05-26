@@ -1,8 +1,11 @@
 # 远程模式启动：设置公开 Bridge 地址与 token 同步目录，然后启动 Bridge
 param(
   [string]$BridgePublicUrl = "https://bridge.example.com",
-  [string]$TokenSyncDir = "$HOME\ChattingCursorTokenSync"
+  [string]$TokenSyncDir = ""
 )
+
+. (Join-Path $PSScriptRoot "Resolve-TokenSyncDir.ps1")
+$TokenSyncDir = Resolve-TokenSyncDir -Override $TokenSyncDir
 
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root

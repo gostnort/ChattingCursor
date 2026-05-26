@@ -27,7 +27,7 @@ http://127.0.0.1:43210/ChattingCursor/
 如果你要在**手机**上使用 GitHub Pages：
 
 1. 首次运行 `install.bat`，日常运行 `run.bat`（自动启动 Bridge + 隧道，并更新 token 文件中的公网地址）；需要重启时先运行 `shutdown.bat`，再运行 `run.bat`
-2. 把 token 同步目录放进云盘（默认 `%USERPROFILE%\ChattingCursorTokenSync`）
+2. 需要手机读 token 时，可把 `%USERPROFILE%\.chattingcursor` 放进云盘，或在 **本地 → 配置** 改为云盘路径（会写入 `config.json` 持久化）
 3. 手机 **本地 → 配置** 填入 token 文件里的 `publicBridgeUrl` 与 `token`
 
 详见 `docs/CLOUDFLARE_TUNNEL_SETUP.md`；背景见 `docs/REMOTE_SETUP.md`。

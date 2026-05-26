@@ -29,10 +29,12 @@ import { parseTodayTokenFromContent } from "../tokenFile";
 
 interface ConfigSubPageProps {
   assistantBubbleColors: AssistantBubbleColors;
+  userBubbleBackground: string;
   bridgeUrl: string;
   bridgeToken: string;
   textSizePx: number;
   onAssistantBubbleColorsChange: (colors: AssistantBubbleColors) => void;
+  onUserBubbleBackgroundChange: (color: string) => void;
   onBridgePortChange: (port: number) => void;
   onBridgeTokenChange: (token: string) => void;
   onBridgeUrlChange: (url: string) => void;
@@ -71,10 +73,12 @@ function formatBridgeRequestError(bridgeUrl: string, onGitHubPages: boolean, err
 
 export function ConfigSubPage({
   assistantBubbleColors,
+  userBubbleBackground,
   bridgeUrl,
   bridgeToken,
   textSizePx,
   onAssistantBubbleColorsChange,
+  onUserBubbleBackgroundChange,
   onBridgePortChange,
   onBridgeTokenChange,
   onBridgeUrlChange,
@@ -100,7 +104,7 @@ export function ConfigSubPage({
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [assistantBackgroundInput, setAssistantBackgroundInput] = useState(assistantBubbleColors.background);
   const [assistantTextInput, setAssistantTextInput] = useState(assistantBubbleColors.text);
-  const [assistantBorderInput, setAssistantBorderInput] = useState(assistantBubbleColors.border);
+  const [userBackgroundInput, setUserBackgroundInput] = useState(userBubbleBackground);
   const normalizedBridgeUrl = useMemo(() => normalizeBridgeUrl(bridgeUrl), [bridgeUrl]);
   const normalizedBridgeUrlInput = useMemo(() => normalizeBridgeUrl(bridgeUrlInput), [bridgeUrlInput]);
   const parsedWebPort = useMemo(() => parsePortInput(webPortInput), [webPortInput]);
@@ -135,8 +139,12 @@ export function ConfigSubPage({
   useEffect(() => {
     setAssistantBackgroundInput(assistantBubbleColors.background);
     setAssistantTextInput(assistantBubbleColors.text);
-    setAssistantBorderInput(assistantBubbleColors.border);
   }, [assistantBubbleColors]);
+
+
+  useEffect(() => {
+    setUserBackgroundInput(userBubbleBackground);
+  }, [userBubbleBackground]);
 
 
   useEffect(() => {
@@ -313,6 +321,25 @@ export function ConfigSubPage({
   };
 
 
+  const handleUserBubbleBackgroundChange = (value: string): void => {
+    const normalized = normalizeHexColor(value);
+    if (!normalized) {
+      return;
+    }
+    onUserBubbleBackgroundChange(normalized);
+  };
+
+
+  const handleUserBubbleBackgroundBlur = (value: string): void => {
+    const normalized = normalizeHexColor(value);
+    if (normalized) {
+      setUserBackgroundInput(normalized);
+      return;
+    }
+    setUserBackgroundInput(userBubbleBackground);
+  };
+
+
   const handleAssistantBubbleColorChange = (key: AssistantBubbleColorKey, value: string): void => {
     const normalized = normalizeHexColor(value);
     if (!normalized) {
@@ -446,11 +473,39 @@ export function ConfigSubPage({
       </section>
 
       <section className="config-section">
-        <h2>助手气泡颜色</h2>
+        <h2>气泡颜色</h2>
         <p className="config-hint">
-          下面的十六进制文本框会立即保存到浏览器本地，并实时改变 assistant 气泡背景、文字和边框颜色。
+          下面的十六进制文本框会立即保存到浏览器本地。用户内容底色同时决定 assistant 气泡边框色；assistant 背景色与文字色可单独调整。
         </p>
         <div className="assistant-color-grid">
+          <label className="config-field assistant-color-row" htmlFor="user-bubble-background">
+            <span className="config-field-label">用户内容底色</span>
+            <div className="assistant-color-inputs">
+              <input
+                id="user-bubble-background"
+                type="text"
+                inputMode="text"
+                value={userBackgroundInput}
+                onChange={(event) => {
+                  setUserBackgroundInput(event.target.value);
+                  handleUserBubbleBackgroundChange(event.target.value);
+                }}
+                onBlur={() => handleUserBubbleBackgroundBlur(userBackgroundInput)}
+                placeholder="#95ec69"
+                spellCheck={false}
+              />
+              <input
+                className="config-color-picker"
+                type="color"
+                aria-label="选择用户内容底色"
+                value={userBubbleBackground}
+                onChange={(event) => {
+                  setUserBackgroundInput(event.target.value);
+                  handleUserBubbleBackgroundChange(event.target.value);
+                }}
+              />
+            </div>
+          </label>
           <label className="config-field assistant-color-row" htmlFor="assistant-bubble-background">
             <span className="config-field-label">assistant 背景色</span>
             <div className="assistant-color-inputs">
@@ -507,42 +562,16 @@ export function ConfigSubPage({
               />
             </div>
           </label>
-          <label className="config-field assistant-color-row" htmlFor="assistant-bubble-border">
-            <span className="config-field-label">assistant 边框色</span>
-            <div className="assistant-color-inputs">
-              <input
-                id="assistant-bubble-border"
-                type="text"
-                inputMode="text"
-                value={assistantBorderInput}
-                onChange={(event) => {
-                  setAssistantBorderInput(event.target.value);
-                  handleAssistantBubbleColorChange("border", event.target.value);
-                }}
-                onBlur={() => handleAssistantBubbleColorBlur("border", assistantBorderInput, setAssistantBorderInput)}
-                placeholder="#2ea043"
-                spellCheck={false}
-              />
-              <input
-                className="config-color-picker"
-                type="color"
-                aria-label="选择 assistant 边框色"
-                value={assistantBubbleColors.border}
-                onChange={(event) => {
-                  setAssistantBorderInput(event.target.value);
-                  handleAssistantBubbleColorChange("border", event.target.value);
-                }}
-              />
-            </div>
-          </label>
         </div>
-        <div className="assistant-bubble-preview" aria-live="polite">
+        <div className="bubble-color-preview" aria-live="polite">
+          <div className="user-bubble-preview-bubble">
+            用户预览气泡
+          </div>
           <div
             className="assistant-bubble-preview-bubble"
             style={{
               background: assistantBubbleColors.background,
               color: assistantBubbleColors.text,
-              borderColor: assistantBubbleColors.border,
             }}
           >
             Assistant 预览气泡
@@ -571,7 +600,7 @@ export function ConfigSubPage({
             type="text"
             value={tokenDirectoryInput}
             onChange={(event) => setTokenDirectoryInput(event.target.value)}
-            placeholder="可手动粘贴完整路径，例如 D:\\Sync\\ChattingCursor"
+            placeholder="默认 %USERPROFILE%\\.chattingcursor，或云盘同步目录"
           />
         </label>
         <div className="config-actions token-directory-actions">
@@ -584,7 +613,7 @@ export function ConfigSubPage({
           </button>
         </div>
         <p className="config-hint">
-          远程访问时，请把当天 token 粘贴到上方输入框；这里仅配置同步目录路径。Bridge 会把固定文件名 <code>{tokenFileName}</code> 写入该目录。
+          默认与历史记录同在 <code>%USERPROFILE%\.chattingcursor</code>；远程访问时可改为云盘目录并点「使用这个路径」持久化。Bridge 会写入固定文件名 <code>{tokenFileName}</code>。
         </p>
       </section>
 

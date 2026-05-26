@@ -69,5 +69,5 @@ if (-not $SkipCloudflared) {
 Write-Host ""
 Write-Host "安装完成。"
 Write-Host "下一步: 双击 run.bat 或运行 .\run.bat"
-Write-Host "手机远程: 把 token 同步目录放进云盘，从 chattingcursor-token.txt 复制 URL 与口令。"
+Write-Host "手机远程: 默认 token 在 %USERPROFILE%\.chattingcursor\chattingcursor-token.txt；可放进云盘或于配置页改路径。"
 Write-Host ""

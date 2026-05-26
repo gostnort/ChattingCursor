@@ -11,7 +11,7 @@
 
 然后：
 
-- 把 `%USERPROFILE%\ChattingCursorTokenSync`（或你自定义的同步目录）放进云盘，手机能打开 `chattingcursor-token.txt`
+- 默认 token 文件在 `%USERPROFILE%\.chattingcursor\chattingcursor-token.txt`（与历史记录同级）。若需手机访问，可把该目录或你在配置里指定的云盘路径同步到手机
 - 从该文件复制 **`publicBridgeUrl`** 和 **`token`** 到手机网页 **本地 → 配置**
 
 无需手动复制 trycloudflare 地址到脚本。隧道 URL 每次重启会变，重新 `run.bat` 后 token 文件会自动更新。
