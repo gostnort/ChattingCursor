@@ -63,6 +63,38 @@ function normalizePublicBridgeUrl(url: string): string {
 }
 
 
+function isLoopbackPublicBridgeUrl(url: string): boolean {
+  try {
+    const withProtocol = /^https?:\/\//i.test(url) ? url : `http://${url}`;
+    const parsed = new URL(withProtocol);
+    return parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost";
+  } catch {
+    return false;
+  }
+}
+
+
+function isTrycloudflarePublicBridgeUrl(url: string): boolean {
+  return /trycloudflare\.com/i.test(url);
+}
+
+
+/** 磁盘与内存并存时，优先保留 trycloudflare，避免被 localhost 覆盖 */
+function pickPreferredPublicBridgeUrl(current: string, fromFile?: string): string {
+  const candidates = [current, fromFile].filter((item): item is string => Boolean(item?.trim()));
+  const normalized = candidates.map((item) => normalizePublicBridgeUrl(item));
+  const tunnel = normalized.find(isTrycloudflarePublicBridgeUrl);
+  if (tunnel) {
+    return tunnel;
+  }
+  const remote = normalized.find((item) => !isLoopbackPublicBridgeUrl(item));
+  if (remote) {
+    return remote;
+  }
+  return normalized[0] ?? current;
+}
+
+
 function upsertPublicBridgeUrlLine(content: string, url: string): string {
   const lines = content.split(/\r?\n/);
   let replaced = false;
@@ -193,8 +225,9 @@ export class TokenRotationService {
       const parsed = parseTokenFile(existing);
       if (parsed.date === today && parsed.token) {
         if (parsed.publicBridgeUrl) {
-          this.publicBridgeUrl = parsed.publicBridgeUrl;
-          const upgraded = upsertPublicBridgeUrlLine(existing, parsed.publicBridgeUrl);
+          const preferred = pickPreferredPublicBridgeUrl(this.publicBridgeUrl, parsed.publicBridgeUrl);
+          this.publicBridgeUrl = preferred;
+          const upgraded = upsertPublicBridgeUrlLine(existing, preferred);
           if (upgraded !== existing) {
             const withTrailingNewline = upgraded.endsWith("\n") ? upgraded : `${upgraded}\n`;
             await writeFile(filePath, withTrailingNewline, "utf8");

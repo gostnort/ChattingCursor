@@ -3,6 +3,9 @@ import { tokenRotationService } from "../services/token-rotation.js";
 
 
 export function isLocalRequest(request: FastifyRequest): boolean {
+  if (request.headers["cf-ray"] || request.headers["x-forwarded-for"]) {
+    return false;
+  }
   const address = request.ip;
   return address === "127.0.0.1"
     || address === "::1"

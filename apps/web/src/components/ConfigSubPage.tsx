@@ -65,7 +65,7 @@ function formatBridgeRequestError(bridgeUrl: string, onGitHubPages: boolean, err
     return "当前 Bridge URL 仍是 127.0.0.1 / localhost。若你现在用的是手机，127.0.0.1 指向的是手机自己，不是电脑；GitHub Pages 也不会自动找到你的电脑。请先给电脑上的 Bridge 配置一个可公开访问的 HTTPS 地址，再把这个地址填到 Bridge URL。";
   }
   if (onGitHubPages && !localTarget && networkFailure) {
-    return "远程 Bridge 当前不可达。请确认公网域名 / tunnel 已启动，并且手机浏览器能直接访问这个 Bridge URL。";
+    return "远程 Bridge 当前不可达（隧道不可抵达）。请从云盘 token 文件复制最新的 publicBridgeUrl（须为 https://….trycloudflare.com），确认 run.bat 与 cloudflared 正在运行，并在本页保存后重试。";
   }
   return message;
 }
