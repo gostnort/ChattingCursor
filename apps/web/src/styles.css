@@ -14,6 +14,12 @@
 
   --scroll-panel-max-h: min(26rem, 50dvh);
 
+  --user-text-size: 16px;
+
+  --composer-text-size: var(--user-text-size);
+
+  --bubble-text-size: var(--user-text-size);
+
 }
 
 
@@ -337,6 +343,8 @@ body {
   border-radius: 6px;
 
   border: 1px solid #30363d;
+
+  font-size: var(--user-text-size);
 
   background: #161b22;
 
@@ -804,9 +812,9 @@ body {
 
   margin: 0;
 
-  font-size: 0.95rem;
+  font-size: var(--bubble-text-size);
 
-  line-height: 1.45;
+  line-height: 1.55;
 
 }
 
@@ -888,7 +896,7 @@ body {
 
   width: 100%;
 
-  padding: 0.75rem;
+  padding: 0.9rem 1rem;
 
   border-radius: 6px;
 
@@ -898,11 +906,17 @@ body {
 
   color: inherit;
 
-  resize: vertical;
+  font-size: var(--composer-text-size);
 
-  min-height: 4.5rem;
+  resize: none;
 
-  max-height: min(40dvh, 16rem);
+  min-height: 7rem;
+
+  max-height: min(45dvh, 22rem);
+
+  line-height: 1.5;
+
+  touch-action: pan-y;
 
 }
 
@@ -983,6 +997,8 @@ body {
   background: #161b22;
 
   min-width: 0;
+
+  font-size: var(--user-text-size);
 
 }
 
@@ -1286,7 +1302,7 @@ body {
 
   word-break: break-all;
 
-  font-size: 0.85rem;
+  font-size: var(--user-text-size);
 
 }
 

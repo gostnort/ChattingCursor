@@ -5,6 +5,7 @@ import type {
   ChatSendResponse,
   CrewStatusResponse,
   HistorySearchResponse,
+  LatestRunResponse,
   LocalConfigResponse,
   LocalHistoryContentResponse,
   LocalHistoryListResponse,
@@ -122,6 +123,21 @@ export async function fetchRecentChatSession(bridgeUrl: string, token?: string):
     throw new Error(await readErrorDetail(response, `获取最近会话失败 (${response.status})`));
   }
   return response.json() as Promise<RecentChatSessionResponse>;
+}
+
+
+/** 获取最近一次运行的 runId */
+export async function fetchLatestRun(bridgeUrl: string, token?: string): Promise<LatestRunResponse | null> {
+  const response = await fetch(`${bridgeUrl}/chat/latest-run`, {
+    headers: buildAuthHeaders(token),
+  });
+  if (response.status === 404) {
+    return null;
+  }
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, `获取最新运行失败 (${response.status})`));
+  }
+  return response.json() as Promise<LatestRunResponse>;
 }
 
 

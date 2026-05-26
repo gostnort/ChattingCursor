@@ -11,6 +11,7 @@ export interface StoredRun {
   events: RunEvent[];
   subscribers: Set<(event: RunEvent) => void>;
   createdAt: string;
+  updatedAt: string;
 }
 
 
@@ -26,6 +27,7 @@ export class RunStore {
       events: [],
       subscribers: new Set(),
       createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     };
     this.runs.set(runId, run);
     return run;
@@ -43,6 +45,7 @@ export class RunStore {
       return;
     }
     run.events.push(event);
+    run.updatedAt = event.timestamp;
     if (event.type === "run_started") {
       run.status = "running";
     }
@@ -67,6 +70,16 @@ export class RunStore {
     return () => {
       run.subscribers.delete(listener);
     };
+  }
+
+
+  getRecent(): StoredRun | null {
+    const runs = [...this.runs.values()];
+    if (runs.length === 0) {
+      return null;
+    }
+    runs.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+    return runs[0] ?? null;
   }
 }
 

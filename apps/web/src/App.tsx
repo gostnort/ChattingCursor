@@ -6,6 +6,7 @@ import {
   setBridgeToken,
   setBridgeUrl,
 } from "./bridgeSettings";
+import { getTextSizePx, setTextSizePx } from "./textSizeSettings";
 import { AppHeader } from "./components/AppHeader";
 import { ChatView } from "./components/ChatView";
 import { LocalView } from "./components/LocalView";
@@ -29,6 +30,7 @@ export default function App() {
   const [route, setRoute] = useState<AppRoute>(readRoute);
   const [bridgeUrl, setBridgeUrlState] = useState(() => getBridgeUrl());
   const [bridgeToken, setBridgeTokenState] = useState(() => getBridgeToken());
+  const [textSizePx, setTextSizePxState] = useState(() => getTextSizePx());
   const normalizedBridgeUrl = useMemo(() => bridgeUrl.replace(/\/$/, ""), [bridgeUrl]);
 
 
@@ -51,6 +53,13 @@ export default function App() {
   }, []);
 
 
+  useEffect(() => {
+    document.documentElement.style.setProperty("--user-text-size", `${textSizePx}px`);
+    document.documentElement.style.setProperty("--composer-text-size", `${textSizePx}px`);
+    document.documentElement.style.setProperty("--bubble-text-size", `${textSizePx}px`);
+  }, [textSizePx]);
+
+
   const handleBridgePortChange = (port: number): void => {
     setBridgePort(port);
     setBridgeUrlState(getBridgeUrl());
@@ -66,6 +75,11 @@ export default function App() {
   const handleBridgeTokenChange = (token: string): void => {
     setBridgeToken(token);
     setBridgeTokenState(getBridgeToken());
+  };
+
+
+  const handleTextSizeChange = (size: number): void => {
+    setTextSizePxState(setTextSizePx(size));
   };
 
 
@@ -89,9 +103,11 @@ export default function App() {
           localSub={route.localSub}
           bridgeUrl={bridgeUrl}
           bridgeToken={bridgeToken}
+          textSizePx={textSizePx}
           onBridgePortChange={handleBridgePortChange}
           onBridgeTokenChange={handleBridgeTokenChange}
           onBridgeUrlChange={handleBridgeUrlChange}
+          onTextSizeChange={handleTextSizeChange}
           onLocalSubChange={handleLocalSubChange}
         />
       )}
