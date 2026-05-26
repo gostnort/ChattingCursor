@@ -572,6 +572,8 @@ body {
 
   justify-content: flex-start;
 
+  align-items: stretch;
+
 }
 
 
@@ -632,9 +634,11 @@ body {
 
   gap: 0.35rem;
 
-  max-width: min(85%, 28rem);
+  max-width: min(92%, 44rem);
 
   min-width: 0;
+
+  flex: 1 1 auto;
 
 }
 
@@ -698,11 +702,15 @@ body {
 
 .bubble-assistant {
 
-  background: #f0f0f0;
+  background: #0d1117;
 
-  color: #1a1a1a;
+  color: #f8fafc;
+
+  border: 1px solid #2ea043;
 
   border-bottom-left-radius: 0.2rem;
+
+  flex: 1 1 auto;
 
 }
 
@@ -720,7 +728,7 @@ body {
 
   border: 0.35rem solid transparent;
 
-  border-right-color: #f0f0f0;
+  border-right-color: #2ea043;
 
   border-left: 0;
 
@@ -739,6 +747,8 @@ body {
   padding: 0.75rem 1rem;
 
   min-width: 3.5rem;
+
+  color: #f8fafc;
 
 }
 
@@ -887,7 +897,7 @@ body {
 
   border-radius: 4px;
 
-  background: rgba(0, 0, 0, 0.08);
+  background: rgba(255, 255, 255, 0.12);
 
 }
 
@@ -900,7 +910,7 @@ body {
 
   border-radius: 8px;
 
-  background: rgba(0, 0, 0, 0.08);
+  background: rgba(255, 255, 255, 0.08);
 
 }
 
@@ -931,7 +941,7 @@ body {
 
 .bubble-text td {
 
-  border: 1px solid rgba(128, 128, 128, 0.35);
+  border: 1px solid rgba(46, 160, 67, 0.55);
 
   padding: 0.4rem 0.55rem;
 
@@ -970,6 +980,8 @@ body {
   font-size: 1rem;
 
   line-height: 1;
+
+  align-self: center;
 
 }
 
