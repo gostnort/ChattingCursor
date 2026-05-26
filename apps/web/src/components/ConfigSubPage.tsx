@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { AuthStatusResponse, CrewStatusResponse, HistorySessionSummary, LocalConfigResponse } from "@chatting-cursor/shared";
+import type { AssistantBubbleColorKey, AssistantBubbleColors } from "../assistantBubbleSettings";
+import { normalizeHexColor } from "../assistantBubbleSettings";
 import {
   buildBridgeUrl,
   buildWebDevUrl,
@@ -24,9 +26,11 @@ import {
 
 
 interface ConfigSubPageProps {
+  assistantBubbleColors: AssistantBubbleColors;
   bridgeUrl: string;
   bridgeToken: string;
   textSizePx: number;
+  onAssistantBubbleColorsChange: (colors: AssistantBubbleColors) => void;
   onBridgePortChange: (port: number) => void;
   onBridgeTokenChange: (token: string) => void;
   onBridgeUrlChange: (url: string) => void;
@@ -49,9 +53,11 @@ function parsePortInput(value: string): number | null {
 
 
 export function ConfigSubPage({
+  assistantBubbleColors,
   bridgeUrl,
   bridgeToken,
   textSizePx,
+  onAssistantBubbleColorsChange,
   onBridgePortChange,
   onBridgeTokenChange,
   onBridgeUrlChange,
@@ -75,6 +81,9 @@ export function ConfigSubPage({
   const [webPortInput, setWebPortInput] = useState(() => String(getWebPort()));
   const [savedWebPort, setSavedWebPort] = useState(() => getWebPort());
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [assistantBackgroundInput, setAssistantBackgroundInput] = useState(assistantBubbleColors.background);
+  const [assistantTextInput, setAssistantTextInput] = useState(assistantBubbleColors.text);
+  const [assistantBorderInput, setAssistantBorderInput] = useState(assistantBubbleColors.border);
   const normalizedBridgeUrl = useMemo(() => normalizeBridgeUrl(bridgeUrl), [bridgeUrl]);
   const normalizedBridgeUrlInput = useMemo(() => normalizeBridgeUrl(bridgeUrlInput), [bridgeUrlInput]);
   const parsedWebPort = useMemo(() => parsePortInput(webPortInput), [webPortInput]);
@@ -104,6 +113,13 @@ export function ConfigSubPage({
   useEffect(() => {
     setTokenInput(bridgeToken);
   }, [bridgeToken]);
+
+
+  useEffect(() => {
+    setAssistantBackgroundInput(assistantBubbleColors.background);
+    setAssistantTextInput(assistantBubbleColors.text);
+    setAssistantBorderInput(assistantBubbleColors.border);
+  }, [assistantBubbleColors]);
 
 
   useEffect(() => {
@@ -264,6 +280,32 @@ export function ConfigSubPage({
   };
 
 
+  const handleAssistantBubbleColorChange = (key: AssistantBubbleColorKey, value: string): void => {
+    const normalized = normalizeHexColor(value);
+    if (!normalized) {
+      return;
+    }
+    onAssistantBubbleColorsChange({
+      ...assistantBubbleColors,
+      [key]: normalized,
+    });
+  };
+
+
+  const handleAssistantBubbleColorBlur = (
+    key: AssistantBubbleColorKey,
+    value: string,
+    setValue: (next: string) => void,
+  ): void => {
+    const normalized = normalizeHexColor(value);
+    if (normalized) {
+      setValue(normalized);
+      return;
+    }
+    setValue(assistantBubbleColors[key]);
+  };
+
+
   return (
     <div className="config-sub-page">
       <section className="config-section">
@@ -368,6 +410,111 @@ export function ConfigSubPage({
         <p className="config-hint">
           当前 {textSizePx}px。该设置会立即作用于聊天输入框和对话气泡文字，并保存在浏览器本地。
         </p>
+      </section>
+
+      <section className="config-section">
+        <h2>助手气泡颜色</h2>
+        <p className="config-hint">
+          下面的十六进制文本框会立即保存到浏览器本地，并实时改变 assistant 气泡背景、文字和边框颜色。
+        </p>
+        <div className="assistant-color-grid">
+          <label className="config-field assistant-color-row" htmlFor="assistant-bubble-background">
+            <span className="config-field-label">assistant 背景色</span>
+            <div className="assistant-color-inputs">
+              <input
+                id="assistant-bubble-background"
+                type="text"
+                inputMode="text"
+                value={assistantBackgroundInput}
+                onChange={(event) => {
+                  setAssistantBackgroundInput(event.target.value);
+                  handleAssistantBubbleColorChange("background", event.target.value);
+                }}
+                onBlur={() => handleAssistantBubbleColorBlur("background", assistantBackgroundInput, setAssistantBackgroundInput)}
+                placeholder="#0d1117"
+                spellCheck={false}
+              />
+              <input
+                className="config-color-picker"
+                type="color"
+                aria-label="选择 assistant 背景色"
+                value={assistantBubbleColors.background}
+                onChange={(event) => {
+                  setAssistantBackgroundInput(event.target.value);
+                  handleAssistantBubbleColorChange("background", event.target.value);
+                }}
+              />
+            </div>
+          </label>
+          <label className="config-field assistant-color-row" htmlFor="assistant-bubble-text">
+            <span className="config-field-label">assistant 文字色</span>
+            <div className="assistant-color-inputs">
+              <input
+                id="assistant-bubble-text"
+                type="text"
+                inputMode="text"
+                value={assistantTextInput}
+                onChange={(event) => {
+                  setAssistantTextInput(event.target.value);
+                  handleAssistantBubbleColorChange("text", event.target.value);
+                }}
+                onBlur={() => handleAssistantBubbleColorBlur("text", assistantTextInput, setAssistantTextInput)}
+                placeholder="#f8fafc"
+                spellCheck={false}
+              />
+              <input
+                className="config-color-picker"
+                type="color"
+                aria-label="选择 assistant 文字色"
+                value={assistantBubbleColors.text}
+                onChange={(event) => {
+                  setAssistantTextInput(event.target.value);
+                  handleAssistantBubbleColorChange("text", event.target.value);
+                }}
+              />
+            </div>
+          </label>
+          <label className="config-field assistant-color-row" htmlFor="assistant-bubble-border">
+            <span className="config-field-label">assistant 边框色</span>
+            <div className="assistant-color-inputs">
+              <input
+                id="assistant-bubble-border"
+                type="text"
+                inputMode="text"
+                value={assistantBorderInput}
+                onChange={(event) => {
+                  setAssistantBorderInput(event.target.value);
+                  handleAssistantBubbleColorChange("border", event.target.value);
+                }}
+                onBlur={() => handleAssistantBubbleColorBlur("border", assistantBorderInput, setAssistantBorderInput)}
+                placeholder="#2ea043"
+                spellCheck={false}
+              />
+              <input
+                className="config-color-picker"
+                type="color"
+                aria-label="选择 assistant 边框色"
+                value={assistantBubbleColors.border}
+                onChange={(event) => {
+                  setAssistantBorderInput(event.target.value);
+                  handleAssistantBubbleColorChange("border", event.target.value);
+                }}
+              />
+            </div>
+          </label>
+        </div>
+        <div className="assistant-bubble-preview" aria-live="polite">
+          <div
+            className="assistant-bubble-preview-bubble"
+            style={{
+              background: assistantBubbleColors.background,
+              color: assistantBubbleColors.text,
+              borderColor: assistantBubbleColors.border,
+            }}
+          >
+            Assistant 预览气泡
+          </div>
+        </div>
       </section>
 
       <section className="config-section">

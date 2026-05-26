@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  getAssistantBubbleColors,
+  setAssistantBubbleColors,
+} from "./assistantBubbleSettings";
+import {
   getBridgeToken,
   getBridgeUrl,
   setBridgePort,
@@ -31,6 +35,7 @@ export default function App() {
   const [bridgeUrl, setBridgeUrlState] = useState(() => getBridgeUrl());
   const [bridgeToken, setBridgeTokenState] = useState(() => getBridgeToken());
   const [textSizePx, setTextSizePxState] = useState(() => getTextSizePx());
+  const [assistantBubbleColors, setAssistantBubbleColorsState] = useState(() => getAssistantBubbleColors());
   const normalizedBridgeUrl = useMemo(() => bridgeUrl.replace(/\/$/, ""), [bridgeUrl]);
 
 
@@ -58,6 +63,13 @@ export default function App() {
     document.documentElement.style.setProperty("--composer-text-size", `${textSizePx}px`);
     document.documentElement.style.setProperty("--bubble-text-size", `${textSizePx}px`);
   }, [textSizePx]);
+
+
+  useEffect(() => {
+    document.documentElement.style.setProperty("--assistant-bubble-background", assistantBubbleColors.background);
+    document.documentElement.style.setProperty("--assistant-bubble-text", assistantBubbleColors.text);
+    document.documentElement.style.setProperty("--assistant-bubble-border", assistantBubbleColors.border);
+  }, [assistantBubbleColors]);
 
 
   useEffect(() => {
@@ -106,6 +118,15 @@ export default function App() {
   };
 
 
+  const handleAssistantBubbleColorsChange = (colors: {
+    background: string;
+    text: string;
+    border: string;
+  }): void => {
+    setAssistantBubbleColorsState(setAssistantBubbleColors(colors));
+  };
+
+
   const handleModeChange = (mode: AppMode): void => {
     navigate({ mode, localSub: route.localSub });
   };
@@ -124,9 +145,11 @@ export default function App() {
       ) : (
         <LocalView
           localSub={route.localSub}
+          assistantBubbleColors={assistantBubbleColors}
           bridgeUrl={bridgeUrl}
           bridgeToken={bridgeToken}
           textSizePx={textSizePx}
+          onAssistantBubbleColorsChange={handleAssistantBubbleColorsChange}
           onBridgePortChange={handleBridgePortChange}
           onBridgeTokenChange={handleBridgeTokenChange}
           onBridgeUrlChange={handleBridgeUrlChange}

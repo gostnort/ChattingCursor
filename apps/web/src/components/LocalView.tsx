@@ -1,3 +1,4 @@
+import type { AssistantBubbleColors } from "../assistantBubbleSettings";
 import type { LocalSub } from "../routing";
 import { CliOutputSubPage } from "./CliOutputSubPage";
 import { ConfigSubPage } from "./ConfigSubPage";
@@ -5,9 +6,11 @@ import { ConfigSubPage } from "./ConfigSubPage";
 
 interface LocalViewProps {
   localSub: LocalSub;
+  assistantBubbleColors: AssistantBubbleColors;
   bridgeUrl: string;
   bridgeToken: string;
   textSizePx: number;
+  onAssistantBubbleColorsChange: (colors: AssistantBubbleColors) => void;
   onBridgePortChange: (port: number) => void;
   onBridgeTokenChange: (token: string) => void;
   onBridgeUrlChange: (url: string) => void;
@@ -19,9 +22,11 @@ interface LocalViewProps {
 /** 本地模式根视图（仅含配置 / CLI 输出子导航） */
 export function LocalView({
   localSub,
+  assistantBubbleColors,
   bridgeUrl,
   bridgeToken,
   textSizePx,
+  onAssistantBubbleColorsChange,
   onBridgePortChange,
   onBridgeTokenChange,
   onBridgeUrlChange,
@@ -52,9 +57,11 @@ export function LocalView({
         {localSub === "config" ? (
           <div id="local-config" className="local-sub-panel config-page">
             <ConfigSubPage
+              assistantBubbleColors={assistantBubbleColors}
               bridgeUrl={bridgeUrl}
               bridgeToken={bridgeToken}
               textSizePx={textSizePx}
+              onAssistantBubbleColorsChange={onAssistantBubbleColorsChange}
               onBridgePortChange={onBridgePortChange}
               onBridgeTokenChange={onBridgeTokenChange}
               onBridgeUrlChange={onBridgeUrlChange}
