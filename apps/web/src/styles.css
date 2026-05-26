@@ -607,7 +607,9 @@ body {
 
   justify-content: flex-start;
 
-  align-items: stretch;
+  /* 模型标签与气泡底部对齐，不随气泡拉高而拉伸 */
+
+  align-items: flex-end;
 
 }
 
@@ -616,6 +618,8 @@ body {
 .bubble-avatar {
 
   flex-shrink: 0;
+
+  align-self: flex-end;
 
   min-width: 2.25rem;
 
@@ -1016,7 +1020,9 @@ body {
 
   line-height: 1;
 
-  align-self: center;
+  /* 朗读按钮固定在气泡行底部，便于点击 */
+
+  align-self: flex-end;
 
 }
 
