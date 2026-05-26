@@ -4,14 +4,17 @@ param(
   [string]$TokenSyncDir = "$HOME\ChattingCursorTokenSync"
 )
 
-$ErrorActionPreference = "Stop"
+# Stop 会让异步 stdout 回调里的异常直接终止脚本；主流程用 Continue，关键步骤自行检查
+$ErrorActionPreference = "Continue"
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
 
 $script:BridgeProcess = $null
 $script:TunnelProcess = $null
 $script:TunnelUrlApplied = $false
+$script:ShuttingDown = $false
 $TunnelUrlPattern = [regex]"https://[a-z0-9-]+\.trycloudflare\.com"
+
 
 function Write-Step([string]$Message) {
   Write-Host ""
@@ -60,7 +63,7 @@ function Wait-BridgeReady {
   $healthUrl = "http://127.0.0.1:$BridgePort/health"
   for ($i = 0; $i -lt $MaxSeconds; $i++) {
     try {
-      $null = Invoke-RestMethod -Uri $healthUrl -Method Get -TimeoutSec 2
+      $null = Invoke-RestMethod -Uri $healthUrl -Method Get -TimeoutSec 2 -ErrorAction Stop
       return $true
     } catch {
       Start-Sleep -Seconds 1
@@ -75,21 +78,26 @@ function Set-PublicBridgeUrlInTokenFile([string]$PublicUrl) {
     return
   }
   $body = @{ publicBridgeUrl = $PublicUrl } | ConvertTo-Json
-  $response = Invoke-RestMethod `
-    -Uri "http://127.0.0.1:$BridgePort/local/public-bridge-url" `
-    -Method Post `
-    -ContentType "application/json" `
-    -Body $body
-  $script:TunnelUrlApplied = $true
-  Write-Host ""
-  Write-Host "已写入 token 文件。"
-  Write-Host "公网 Bridge URL: $($response.publicBridgeUrl)"
-  Write-Host "Token 文件路径: $($response.tokenFilePath)"
-  Write-Host ""
-  Write-Host "手机配置: 打开 GitHub Pages -> 本地 -> 配置"
-  Write-Host "  Bridge URL = 上面公网地址"
-  Write-Host "  今日口令 = 从 token 文件复制"
-  Write-Host ""
+  try {
+    $response = Invoke-RestMethod `
+      -Uri "http://127.0.0.1:$BridgePort/local/public-bridge-url" `
+      -Method Post `
+      -ContentType "application/json; charset=utf-8" `
+      -Body $body `
+      -ErrorAction Stop
+    $script:TunnelUrlApplied = $true
+    Write-Host ""
+    Write-Host "已写入 token 文件。"
+    Write-Host "公网 Bridge URL: $($response.publicBridgeUrl)"
+    Write-Host "Token 文件路径: $($response.tokenFilePath)"
+    Write-Host ""
+    Write-Host "手机配置: 打开 GitHub Pages -> 本地 -> 配置"
+    Write-Host "  Bridge URL = 上面公网地址"
+    Write-Host "  今日口令 = 从 token 文件复制"
+    Write-Host ""
+  } catch {
+    Write-Host "写入 token 文件失败: $($_.Exception.Message)"
+  }
 }
 
 
@@ -103,11 +111,7 @@ function Invoke-TunnelLine([string]$Line) {
   }
   $url = $match.Value.TrimEnd("/")
   Write-Host "检测到隧道地址: $url"
-  try {
-    Set-PublicBridgeUrlInTokenFile -PublicUrl $url
-  } catch {
-    Write-Host "写入 token 文件失败: $($_.Exception.Message)"
-  }
+  Set-PublicBridgeUrlInTokenFile -PublicUrl $url
 }
 
 
@@ -125,8 +129,26 @@ function Start-BridgeProcess {
   $psi.CreateNoWindow = $true
   $proc = [System.Diagnostics.Process]::Start($psi)
   $script:BridgeProcess = $proc
-  $proc.add_OutputDataReceived({ param($sender, $e) if ($e.Data) { Write-Host ('[bridge] ' + $e.Data) } })
-  $proc.add_ErrorDataReceived({ param($sender, $e) if ($e.Data) { Write-Host ('[bridge] ' + $e.Data) } })
+  $proc.add_OutputDataReceived({
+    param($sender, $e)
+    try {
+      if ($e.Data) {
+        Write-Host ('[bridge] ' + $e.Data)
+      }
+    } catch {
+      # 异步回调中的错误不能终止主脚本
+    }
+  })
+  $proc.add_ErrorDataReceived({
+    param($sender, $e)
+    try {
+      if ($e.Data) {
+        Write-Host ('[bridge] ' + $e.Data)
+      }
+    } catch {
+      # 异步回调中的错误不能终止主脚本
+    }
+  })
   $proc.BeginOutputReadLine()
   $proc.BeginErrorReadLine()
 }
@@ -143,29 +165,42 @@ function Start-TunnelProcess {
   $psi.CreateNoWindow = $true
   $proc = [System.Diagnostics.Process]::Start($psi)
   $script:TunnelProcess = $proc
-  $proc.add_OutputDataReceived({ param($sender, $e) Invoke-TunnelLine -Line $e.Data })
-  $proc.add_ErrorDataReceived({ param($sender, $e) Invoke-TunnelLine -Line $e.Data })
+  $proc.add_OutputDataReceived({
+    param($sender, $e)
+    try {
+      Invoke-TunnelLine -Line $e.Data
+    } catch {
+      # 异步回调中的错误不能终止主脚本
+    }
+  })
+  $proc.add_ErrorDataReceived({
+    param($sender, $e)
+    try {
+      Invoke-TunnelLine -Line $e.Data
+    } catch {
+      # 异步回调中的错误不能终止主脚本
+    }
+  })
   $proc.BeginOutputReadLine()
   $proc.BeginErrorReadLine()
   return $proc
 }
 
 
-if ([Console]::CancelKeyPress) {
-  [Console]::CancelKeyPress.Add({
+[Console]::TreatControlCAsInput = $false
+[Console]::CancelKeyPress.Add({
   param($sender, $e)
   $e.Cancel = $true
+  $script:ShuttingDown = $true
   Write-Host ""
   Write-Host "正在停止 Bridge 与隧道..."
   Stop-ChildProcesses
-  exit 0
 }) | Out-Null
-}
 
 try {
   Write-Host "=== ChattingCursor 远程启动 ==="
   Write-Host "Token 同步目录: $TokenSyncDir"
-  Write-Host "按 Ctrl+C 停止 Bridge 与隧道。"
+  Write-Host "Stop: press Ctrl+C"
   Write-Host ""
 
   Ensure-ProjectReady
@@ -188,14 +223,19 @@ try {
   Write-Host "Token 文件（启动后自动更新 publicBridgeUrl）: $tokenFile"
 
   Write-Step "启动 cloudflared 快速隧道..."
-  $tunnel = Start-TunnelProcess
+  $null = Start-TunnelProcess
 
-  while (-not $tunnel.HasExited) {
+  # 保持脚本运行，直到用户 Ctrl+C 或子进程退出
+  while (-not $script:ShuttingDown) {
     Start-Sleep -Milliseconds 500
-  }
-  if ($tunnel.ExitCode -ne 0 -and $tunnel.ExitCode -ne $null) {
-    Write-Host "cloudflared 退出，代码: $($tunnel.ExitCode)"
-    exit $tunnel.ExitCode
+    if ($script:BridgeProcess -and $script:BridgeProcess.HasExited) {
+      Write-Host "Bridge 进程已退出，代码: $($script:BridgeProcess.ExitCode)"
+      break
+    }
+    if ($script:TunnelProcess -and $script:TunnelProcess.HasExited) {
+      Write-Host "cloudflared 已退出，代码: $($script:TunnelProcess.ExitCode)"
+      break
+    }
   }
 }
 finally {

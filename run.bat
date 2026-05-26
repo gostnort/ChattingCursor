@@ -4,7 +4,7 @@ cd /d "%~dp0"
 echo.
 echo === ChattingCursor 启动 ===
 echo 将启动 Bridge 与 cloudflared，并自动更新 token 文件中的公网地址。
-echo 按 Ctrl+C 可停止。
+echo Stop: press Ctrl+C
 echo.
 
 where powershell >nul 2>&1

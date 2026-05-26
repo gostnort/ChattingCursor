@@ -3,13 +3,16 @@ import {
   getAssistantBubbleColors,
   setAssistantBubbleColors,
 } from "./assistantBubbleSettings";
+import { fetchLocalTokenFile } from "./api/bridge";
 import {
   getBridgeToken,
   getBridgeUrl,
+  isLocalBridgeUrl,
   setBridgePort,
   setBridgeToken,
   setBridgeUrl,
 } from "./bridgeSettings";
+import { parseTodayTokenFromContent } from "./tokenFile";
 import { getTextSizePx, setTextSizePx } from "./textSizeSettings";
 import { AppHeader } from "./components/AppHeader";
 import { ChatView } from "./components/ChatView";
@@ -70,6 +73,31 @@ export default function App() {
     document.documentElement.style.setProperty("--assistant-bubble-text", assistantBubbleColors.text);
     document.documentElement.style.setProperty("--assistant-bubble-border", assistantBubbleColors.border);
   }, [assistantBubbleColors]);
+
+
+  useEffect(() => {
+    if (!isLocalBridgeUrl(normalizedBridgeUrl)) {
+      return;
+    }
+    let cancelled = false;
+    const syncTokenFromFile = async (): Promise<void> => {
+      try {
+        const tokenFile = await fetchLocalTokenFile(normalizedBridgeUrl, getBridgeToken());
+        const fileToken = parseTodayTokenFromContent(tokenFile.content);
+        if (cancelled || !fileToken || fileToken === getBridgeToken()) {
+          return;
+        }
+        setBridgeToken(fileToken);
+        setBridgeTokenState(fileToken);
+      } catch {
+        // 本机 Bridge 未启动时忽略
+      }
+    };
+    void syncTokenFromFile();
+    return () => {
+      cancelled = true;
+    };
+  }, [normalizedBridgeUrl]);
 
 
   useEffect(() => {

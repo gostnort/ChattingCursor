@@ -20,9 +20,11 @@ import {
   fetchHistoryContent,
   fetchHistoryList,
   fetchLocalConfig,
+  fetchLocalTokenFile,
   updateTokenDirectory,
   verifyBridgeToken,
 } from "../api/bridge";
+import { parseTodayTokenFromContent } from "../tokenFile";
 
 
 interface ConfigSubPageProps {
@@ -166,10 +168,11 @@ export function ConfigSubPage({
           setLoading(false);
           return;
         }
-        const [config, history, crew] = await Promise.all([
+        const [config, history, crew, tokenFile] = await Promise.all([
           fetchLocalConfig(normalizedBridgeUrl, bridgeToken),
           fetchHistoryList(normalizedBridgeUrl, bridgeToken),
           fetchCrewStatus(normalizedBridgeUrl, bridgeToken).catch(() => null),
+          fetchLocalTokenFile(normalizedBridgeUrl, bridgeToken).catch(() => null),
         ]);
         if (cancelled) {
           return;
@@ -179,6 +182,11 @@ export function ConfigSubPage({
         setSessions(history.sessions);
         setCrewStatus(crew);
         setTokenFileName(config.tokenFilePath.split(/[\\/]/).pop() ?? "chattingcursor-token.txt");
+        const fileToken = tokenFile ? parseTodayTokenFromContent(tokenFile.content) : "";
+        if (fileToken && fileToken !== bridgeToken) {
+          setTokenInput(fileToken);
+          onBridgeTokenChange(fileToken);
+        }
       } catch (loadError) {
         if (!cancelled) {
           setError(`无法加载配置：${formatBridgeRequestError(normalizedBridgeUrl, onGitHubPages, loadError)}`);
