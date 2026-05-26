@@ -26,6 +26,31 @@ interface ChatPanelProps {
 const MODEL_STORAGE_KEY = "selectedModel";
 
 
+function shortenModelLabel(label: string): string {
+  const trimmed = label.trim();
+  if (!trimmed) {
+    return "Agent";
+  }
+  const compact = trimmed.replace(/\s*\(.*?\)\s*/g, "").trim();
+  if (/^kimi/i.test(compact)) {
+    return compact.includes("K2.5") ? "Kimi K2.5" : "Kimi";
+  }
+  if (/^gpt/i.test(compact)) {
+    return compact.split(/\s+/).slice(0, 2).join(" ");
+  }
+  if (/^codex/i.test(compact)) {
+    return compact.split(/\s+/).slice(0, 2).join(" ");
+  }
+  if (/^composer/i.test(compact)) {
+    return compact.split(/\s+/).slice(0, 2).join(" ");
+  }
+  if (/^opus/i.test(compact) || /^sonnet/i.test(compact) || /^gemini/i.test(compact)) {
+    return compact.split(/\s+/).slice(0, 2).join(" ");
+  }
+  return compact.length > 12 ? compact.slice(0, 12) : compact;
+}
+
+
 /** 最小聊天面板 */
 export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
   const restoredState = loadChatState();
@@ -40,6 +65,7 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
   );
   const [sessionId, setSessionId] = useState<string | null>(() => restoredState?.sessionId ?? null);
   const assistantBufferRef = useRef("");
+  const currentAssistantLabelRef = useRef("Agent");
   const sseCloseRef = useRef<(() => void) | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -176,7 +202,9 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
   };
 
 
-  const selectedModelLabel = models.find((item) => item.id === selectedModel)?.label ?? (selectedModel || "Agent");
+  const selectedModelLabel = shortenModelLabel(
+    models.find((item) => item.id === selectedModel)?.label ?? (selectedModel || "Agent"),
+  );
 
 
   const handleStreamEvent = (event: { type: string; text?: string }): void => {
@@ -190,7 +218,7 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
       setMessages((prev) => {
         const last = prev[prev.length - 1];
         if (last?.role === "assistant") {
-          return [...prev.slice(0, -1), { ...last, content: assistantBufferRef.current }];
+          return [...prev.slice(0, -1), { ...last, content: assistantBufferRef.current, modelLabel: last.modelLabel ?? currentAssistantLabelRef.current }];
         }
         return [
           ...prev,
@@ -199,6 +227,7 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
             role: "assistant",
             content: assistantBufferRef.current,
             createdAt: new Date().toISOString(),
+            modelLabel: currentAssistantLabelRef.current,
           },
         ];
       });
@@ -209,7 +238,7 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
       setMessages((prev) => {
         const last = prev[prev.length - 1];
         if (last?.role === "assistant") {
-          return [...prev.slice(0, -1), { ...last, content: event.text ?? "" }];
+          return [...prev.slice(0, -1), { ...last, content: event.text ?? "", modelLabel: last.modelLabel ?? currentAssistantLabelRef.current }];
         }
         if (event.text) {
           return [
@@ -219,6 +248,7 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
               role: "assistant",
               content: event.text,
               createdAt: new Date().toISOString(),
+              modelLabel: currentAssistantLabelRef.current,
             },
           ];
         }
@@ -242,6 +272,7 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
     setIsThinking(true);
     setInput("");
     assistantBufferRef.current = "";
+    currentAssistantLabelRef.current = selectedModelLabel;
     sseCloseRef.current?.();
     const userMessage: ChatMessage = {
       id: crypto.randomUUID(),
@@ -253,6 +284,7 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
     try {
       const { runId, sessionId: activeSessionId } = await sendChatMessage(bridgeUrl, prompt, {
         model: selectedModel || undefined,
+        modelLabel: selectedModelLabel,
         sessionId: sessionId ?? undefined,
         token: bridgeToken,
       });
@@ -334,13 +366,13 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
               key={message.id}
               message={message}
               onSpeak={speak}
-              agentLabel={selectedModelLabel}
+              agentLabel={message.modelLabel || selectedModelLabel}
             />
           ))}
           {showTypingIndicator && (
-            <div className="bubble-row bubble-row-assistant bubble-typing" aria-live="polite" aria-label={`${selectedModelLabel} 正在输入`}>
-              <div className="bubble-avatar bubble-avatar-agent" title={selectedModelLabel} aria-hidden="true">
-                {selectedModelLabel.slice(0, 1)}
+            <div className="bubble-row bubble-row-assistant bubble-typing" aria-live="polite" aria-label={`${currentAssistantLabelRef.current} 正在输入`}>
+              <div className="bubble-avatar bubble-avatar-agent" title={currentAssistantLabelRef.current} aria-hidden="true">
+                {currentAssistantLabelRef.current}
               </div>
               <div className="bubble-main">
                 <div className="bubble bubble-assistant bubble-assistant-typing">

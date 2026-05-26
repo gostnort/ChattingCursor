@@ -11,14 +11,14 @@ interface MessageBubbleProps {
 /** 微信风格单条聊天气泡 */
 export function MessageBubble({ message, onSpeak, agentLabel = "Agent" }: MessageBubbleProps) {
   const isUser = message.role === "user";
-  const label = isUser ? "你" : agentLabel;
+  const label = isUser ? "" : agentLabel;
 
 
   return (
     <div className={`bubble-row bubble-row-${message.role}`}>
       {!isUser && (
         <div className="bubble-avatar bubble-avatar-agent" title={label} aria-hidden="true">
-          {label.slice(0, 1)}
+          {label}
         </div>
       )}
       <div className="bubble-main">
@@ -35,11 +35,6 @@ export function MessageBubble({ message, onSpeak, agentLabel = "Agent" }: Messag
           <span aria-hidden="true">🔊</span>
         </button>
       </div>
-      {isUser && (
-        <div className="bubble-avatar bubble-avatar-user" aria-hidden="true">
-          {label}
-        </div>
-      )}
     </div>
   );
 }

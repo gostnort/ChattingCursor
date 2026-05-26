@@ -60,6 +60,29 @@ export default function App() {
   }, [textSizePx]);
 
 
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    if (!viewport) {
+      return;
+    }
+    const updateKeyboardOffset = (): void => {
+      const keyboardOffset = Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop);
+      document.documentElement.style.setProperty("--keyboard-offset", `${keyboardOffset}px`);
+    };
+    updateKeyboardOffset();
+    viewport.addEventListener("resize", updateKeyboardOffset);
+    viewport.addEventListener("scroll", updateKeyboardOffset);
+    window.addEventListener("focusin", updateKeyboardOffset);
+    window.addEventListener("focusout", updateKeyboardOffset);
+    return () => {
+      viewport.removeEventListener("resize", updateKeyboardOffset);
+      viewport.removeEventListener("scroll", updateKeyboardOffset);
+      window.removeEventListener("focusin", updateKeyboardOffset);
+      window.removeEventListener("focusout", updateKeyboardOffset);
+    };
+  }, []);
+
+
   const handleBridgePortChange = (port: number): void => {
     setBridgePort(port);
     setBridgeUrlState(getBridgeUrl());

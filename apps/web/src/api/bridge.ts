@@ -145,7 +145,7 @@ export async function fetchLatestRun(bridgeUrl: string, token?: string): Promise
 export async function sendChatMessage(
   bridgeUrl: string,
   prompt: string,
-  options: { model?: string; sessionId?: string; token?: string } = {},
+  options: { model?: string; modelLabel?: string; sessionId?: string; token?: string } = {},
 ): Promise<ChatSendResponse> {
   const response = await fetch(`${bridgeUrl}/chat/send`, {
     method: "POST",
@@ -153,6 +153,7 @@ export async function sendChatMessage(
     body: JSON.stringify({
       prompt,
       model: options.model,
+      modelLabel: options.modelLabel,
       sessionId: options.sessionId,
     }),
   });
