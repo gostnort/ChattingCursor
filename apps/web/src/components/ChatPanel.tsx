@@ -69,7 +69,7 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
   const sseCloseRef = useRef<(() => void) | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const { speak } = useSpeech();
+  const { toggleSpeak, speakingKey } = useSpeech();
 
 
   const resizeComposer = useCallback((): void => {
@@ -365,7 +365,8 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
             <MessageBubble
               key={message.id}
               message={message}
-              onSpeak={speak}
+              onSpeakToggle={toggleSpeak}
+              isSpeaking={speakingKey === message.id}
               agentLabel={message.modelLabel || selectedModelLabel}
             />
           ))}
