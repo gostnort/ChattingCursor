@@ -71,39 +71,62 @@ function extractAssistantText(payload: Record<string, unknown>): string {
 }
 
 
-/** 解析 stream-json 单行 NDJSON */
-function parseStreamJsonLine(runId: string, line: string, onEvent?: (event: RunEvent) => void): void {
+/** 判断 --stream-partial-output 下是否应采纳该 assistant 事件（避免重复缓冲） */
+function shouldEmitAssistantPayload(payload: Record<string, unknown>): boolean {
+  const hasPartialMarkers = "timestamp_ms" in payload || "model_call_id" in payload;
+  if (!hasPartialMarkers) {
+    return true;
+  }
+  if (payload.model_call_id != null && payload.model_call_id !== "") {
+    return false;
+  }
+  if (!("timestamp_ms" in payload)) {
+    return false;
+  }
+  return true;
+}
+
+
+/** 解析 stream-json 单行 NDJSON；成功解析为结构化事件时返回 true */
+function parseStreamJsonLine(runId: string, line: string, onEvent?: (event: RunEvent) => void): boolean {
   const trimmed = line.trim();
   if (!trimmed) {
-    return;
+    return false;
+  }
+  if (!trimmed.startsWith("{")) {
+    return false;
   }
   try {
     const payload = JSON.parse(trimmed) as Record<string, unknown>;
     const eventType = typeof payload.type === "string" ? payload.type : "unknown";
     if (eventType === "assistant") {
+      if (!shouldEmitAssistantPayload(payload)) {
+        return true;
+      }
       const text = extractAssistantText(payload);
       if (text) {
         onEvent?.(makeEvent(runId, "assistant", { text, data: payload }));
       }
-      return;
+      return true;
     }
     if (eventType === "thinking") {
       const thinkingText = typeof payload.text === "string" ? payload.text : "";
       onEvent?.(makeEvent(runId, "thinking", { text: thinkingText, data: payload }));
-      return;
+      return true;
     }
     if (eventType === "result") {
       const resultText = typeof payload.result === "string" ? payload.result : undefined;
       onEvent?.(makeEvent(runId, "result", { text: resultText, data: payload }));
-      return;
+      return true;
     }
     if (eventType === "tool_call" || eventType === "tool_call_started" || eventType === "tool_call_completed") {
       onEvent?.(makeEvent(runId, "tool_call", { data: payload }));
-      return;
+      return true;
     }
     onEvent?.(makeEvent(runId, "stdout", { data: payload }));
+    return true;
   } catch {
-    onEvent?.(makeEvent(runId, "stdout", { text: trimmed }));
+    return false;
   }
 }
 
@@ -304,30 +327,84 @@ function buildArgs(options: CursorCliRunOptions, argsPrefix: string[], viaWsl: b
 }
 
 
-/** 向缓冲区追加并按行分发 */
+/** 按行切分缓冲区并解析 NDJSON */
+function drainLineBuffer(
+  runId: string,
+  buffer: string,
+  onEvent: ((event: RunEvent) => void) | undefined,
+  mode: "stream-json" | "plain",
+  onPlainLine?: (line: string) => void,
+): string {
+  const lines = buffer.split(/\r?\n/);
+  const remainder = lines.pop() ?? "";
+  for (const line of lines) {
+    if (mode === "stream-json") {
+      const parsed = parseStreamJsonLine(runId, line, onEvent);
+      if (!parsed && onPlainLine) {
+        onPlainLine(line);
+      }
+      continue;
+    }
+    onEvent?.(makeEvent(runId, "stdout", { text: line }));
+  }
+  return remainder;
+}
+
+
+/** 向缓冲区追加并按行分发；close 前须调用 flush 以免丢失末行 result */
 function createLineHandler(
   runId: string,
   onEvent: ((event: RunEvent) => void) | undefined,
   mode: "stream-json" | "plain",
-): (chunk: Buffer, channel: "stdout" | "stderr") => void {
+): { handleChunk: (chunk: Buffer, channel: "stdout" | "stderr") => void; flush: () => void } {
   let stdoutBuffer = "";
-  return (chunk: Buffer, channel: "stdout" | "stderr") => {
-    const text = chunk.toString("utf8");
-    if (channel === "stderr") {
-      onEvent?.(makeEvent(runId, "stderr", { text }));
+  let stderrBuffer = "";
+  const flushChannel = (
+    buffer: string,
+    emitPlain: (line: string) => void,
+  ): void => {
+    if (!buffer.trim()) {
       return;
     }
-    onEvent?.(makeEvent(runId, "raw_stdout", { text }));
-    stdoutBuffer += text;
-    const lines = stdoutBuffer.split(/\r?\n/);
-    stdoutBuffer = lines.pop() ?? "";
-    for (const line of lines) {
-      if (mode === "stream-json") {
-        parseStreamJsonLine(runId, line, onEvent);
-      } else {
-        onEvent?.(makeEvent(runId, "stdout", { text: line }));
+    if (mode === "stream-json") {
+      const parsed = parseStreamJsonLine(runId, buffer, onEvent);
+      if (!parsed) {
+        emitPlain(buffer);
       }
+      return;
     }
+    emitPlain(buffer);
+  };
+  return {
+    handleChunk(chunk: Buffer, channel: "stdout" | "stderr") {
+      const text = chunk.toString("utf8");
+      if (channel === "stderr") {
+        if (mode !== "stream-json") {
+          onEvent?.(makeEvent(runId, "stderr", { text }));
+          return;
+        }
+        stderrBuffer += text;
+        stderrBuffer = drainLineBuffer(runId, stderrBuffer, onEvent, mode, (line) => {
+          onEvent?.(makeEvent(runId, "stderr", { text: `${line}\n` }));
+        });
+        return;
+      }
+      onEvent?.(makeEvent(runId, "raw_stdout", { text }));
+      stdoutBuffer += text;
+      stdoutBuffer = drainLineBuffer(runId, stdoutBuffer, onEvent, mode);
+    },
+    flush() {
+      stdoutBuffer = drainLineBuffer(runId, stdoutBuffer, onEvent, mode);
+      flushChannel(stdoutBuffer, () => undefined);
+      stdoutBuffer = "";
+      stderrBuffer = drainLineBuffer(runId, stderrBuffer, onEvent, mode, (line) => {
+        onEvent?.(makeEvent(runId, "stderr", { text: line }));
+      });
+      flushChannel(stderrBuffer, (line) => {
+        onEvent?.(makeEvent(runId, "stderr", { text: line }));
+      });
+      stderrBuffer = "";
+    },
   };
 }
 
@@ -361,11 +438,12 @@ export async function runCursorCli(options: CursorCliRunOptions): Promise<Cursor
         text: `CLI 运行超时（${timeoutMs}ms）`,
       }));
     }, timeoutMs);
-    const handleChunk = createLineHandler(options.runId, options.onEvent, "stream-json");
-    child.stdout.on("data", (chunk: Buffer) => handleChunk(chunk, "stdout"));
-    child.stderr.on("data", (chunk: Buffer) => handleChunk(chunk, "stderr"));
+    const lineHandler = createLineHandler(options.runId, options.onEvent, "stream-json");
+    child.stdout.on("data", (chunk: Buffer) => lineHandler.handleChunk(chunk, "stdout"));
+    child.stderr.on("data", (chunk: Buffer) => lineHandler.handleChunk(chunk, "stderr"));
     child.on("error", (error) => {
       clearTimeout(timer);
+      lineHandler.flush();
       options.onEvent?.(makeEvent(options.runId, "error", { text: error.message }));
       options.onEvent?.(makeEvent(options.runId, "run_finished", {
         data: { exitCode: null, timedOut: false },
@@ -374,6 +452,7 @@ export async function runCursorCli(options: CursorCliRunOptions): Promise<Cursor
     });
     child.on("close", (exitCode, signal) => {
       clearTimeout(timer);
+      lineHandler.flush();
       options.onEvent?.(makeEvent(options.runId, "run_finished", {
         data: { exitCode, signal, timedOut },
       }));

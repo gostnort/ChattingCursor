@@ -410,7 +410,9 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
       setSessionId(activeSessionId);
       setConnectionError(null);
       localStorage.setItem(LATEST_RUN_ID_KEY, runId);
-      sseCloseRef.current = subscribeRunEvents(bridgeUrl, runId, handleStreamEvent, () => {
+      sseCloseRef.current = subscribeRunEvents(bridgeUrl, runId, handleStreamEvent, (error) => {
+        appendAssistantError(`流式连接失败：${error.message}`);
+        setConnectionError(error.message);
         setIsSending(false);
         setIsThinking(false);
         sseCloseRef.current = null;

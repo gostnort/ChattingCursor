@@ -1,7 +1,9 @@
 ﻿# 一键启动：Bridge + cloudflared 快速隧道，自动写入 token 文件中的 publicBridgeUrl
 param(
   [int]$BridgePort = 4321,
-  [string]$TokenSyncDir = "$HOME\ChattingCursorTokenSync"
+  [int]$WebPort = 43210,
+  [string]$TokenSyncDir = "$HOME\ChattingCursorTokenSync",
+  [switch]$WithWeb
 )
 
 $ErrorActionPreference = "Continue"
@@ -16,6 +18,8 @@ Set-Location $Root
 
 $script:BridgeProcess = $null
 $script:BridgeOwned = $false
+$script:WebProcess = $null
+$script:WebOwned = $false
 $script:TunnelProcess = $null
 $script:TunnelLogPath = Join-Path $env:TEMP "chattingcursor-cloudflared.log"
 $script:TunnelUrlApplied = $false
@@ -112,7 +116,48 @@ function Resolve-PnpmExe {
 }
 
 
+function Start-WebProcess {
+  $pnpmExe = Resolve-PnpmExe
+  $script:WebProcess = Start-Process -FilePath $pnpmExe -ArgumentList "dev:web" -WorkingDirectory $Root -WindowStyle Hidden -PassThru
+  $script:WebOwned = $true
+  Write-Host "Web 进程 PID: $($script:WebProcess.Id) (pnpm: $pnpmExe)"
+}
+
+
+function Wait-WebReady {
+  param([int]$MaxSeconds = 60)
+  $url = "http://127.0.0.1:$WebPort/ChattingCursor/"
+  for ($i = 0; $i -lt $MaxSeconds; $i++) {
+    try {
+      $null = Invoke-WebRequest -Uri $url -Method Get -TimeoutSec 2 -UseBasicParsing -ErrorAction Stop
+      return $true
+    } catch {
+      Start-Sleep -Seconds 1
+    }
+  }
+  return $false
+}
+
+
+function Show-LocalWebHint {
+  Write-Host ""
+  Write-Host "本地聊天页: http://127.0.0.1:$WebPort/ChattingCursor/"
+  if (-not $script:WebOwned) {
+    Write-Host "（未启动 Web 时请在另一终端执行: pnpm dev:web）"
+  }
+  Write-Host ""
+}
+
+
 function Stop-ChildProcesses {
+  if ($script:WebOwned -and $script:WebProcess -and -not $script:WebProcess.HasExited) {
+    try {
+      & taskkill /PID $script:WebProcess.Id /T /F *>$null
+    } catch {
+      # Web 进程可能已退出
+    }
+    $script:WebProcess = $null
+  }
   if ($script:TunnelProcess -and -not $script:TunnelProcess.HasExited) {
     try {
       & taskkill /PID $script:TunnelProcess.Id /T /F *>$null
@@ -539,6 +584,18 @@ try {
   }
   Write-Ok "Bridge 本地健康: http://127.0.0.1:$BridgePort/health"
 
+  if ($WithWeb) {
+    Write-Step "启动 Web (端口 $WebPort)..."
+    Start-WebProcess
+    if (Wait-WebReady) {
+      Write-Ok "Web 本地可访问: http://127.0.0.1:$WebPort/ChattingCursor/"
+    } else {
+      Write-Fail "Web 在限定时间内未就绪，可手动执行 pnpm dev:web"
+    }
+  } else {
+    Show-LocalWebHint
+  }
+
   Write-Step "启动 cloudflared 快速隧道..."
   Start-TunnelProcess
 
@@ -574,6 +631,7 @@ try {
   }
 
   Write-Ok "启动流程完成，服务持续运行中。"
+  Show-LocalWebHint
   Write-Host ""
 
   while (-not $script:ShuttingDown) {
