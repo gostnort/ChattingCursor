@@ -142,6 +142,19 @@ export async function registerChatRoutes(app: FastifyInstance): Promise<void> {
   });
 
 
+  app.get("/chat/latest-run", async (_request, reply) => {
+    const run = runStore.getRecent();
+    if (!run) {
+      return reply.status(404).send({ error: "latest_run_not_found" });
+    }
+    return reply.send({
+      runId: run.runId,
+      status: run.status,
+      updatedAt: run.updatedAt,
+    });
+  });
+
+
   app.post("/chat/send", async (request, reply) => {
     const parsed = chatSendRequestSchema.safeParse(request.body);
     if (!parsed.success) {

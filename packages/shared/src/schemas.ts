@@ -115,6 +115,16 @@ export const recentChatSessionResponseSchema = z.object({
 export type RecentChatSessionResponse = z.infer<typeof recentChatSessionResponseSchema>;
 
 
+/** GET /chat/latest-run 响应体 */
+export const latestRunResponseSchema = z.object({
+  runId: z.string().min(1),
+  status: z.enum(["pending", "running", "finished", "error"]),
+  updatedAt: z.string().datetime(),
+});
+
+export type LatestRunResponse = z.infer<typeof latestRunResponseSchema>;
+
+
 /** GET /models 单项 */
 export const modelInfoSchema = z.object({
   id: z.string().min(1),

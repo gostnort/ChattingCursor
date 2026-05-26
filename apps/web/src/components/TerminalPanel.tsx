@@ -14,6 +14,7 @@ interface TerminalPanelProps {
 export function TerminalPanel({ bridgeUrl, bridgeToken, runId }: TerminalPanelProps) {
   const [lines, setLines] = useState<string[]>([]);
   const [commandLine, setCommandLine] = useState<string>("");
+  const [panelError, setPanelError] = useState<string | null>(null);
   const preRef = useRef<HTMLPreElement>(null);
 
 
@@ -21,10 +22,12 @@ export function TerminalPanel({ bridgeUrl, bridgeToken, runId }: TerminalPanelPr
     if (!runId) {
       setLines([]);
       setCommandLine("");
+      setPanelError(null);
       return;
     }
     setLines([]);
     setCommandLine("");
+    setPanelError(null);
     const close = subscribeTerminalEvents(bridgeUrl, runId, (event: RunEvent) => {
       if (event.type === "run_started") {
         const data = event.data as { command?: string; args?: string[]; prompt?: string } | undefined;
@@ -47,7 +50,9 @@ export function TerminalPanel({ bridgeUrl, bridgeToken, runId }: TerminalPanelPr
         const code = data?.exitCode;
         setLines((prev) => [...prev, `\n[进程结束 exit=${code ?? "?"}]`]);
       }
-    }, undefined, bridgeToken);
+    }, (error) => {
+      setPanelError(error.message);
+    }, bridgeToken);
     return close;
   }, [bridgeToken, bridgeUrl, runId]);
 
@@ -73,6 +78,7 @@ export function TerminalPanel({ bridgeUrl, bridgeToken, runId }: TerminalPanelPr
   return (
     <section className="terminal-panel">
       <h2>CLI 终端（原始输出）</h2>
+      {panelError && <p className="config-error">CLI 输出不可用：{panelError}</p>}
       {commandLine && <pre className="terminal-command">{commandLine}</pre>}
       <pre ref={preRef} className="terminal-output">{lines.join("")}</pre>
     </section>

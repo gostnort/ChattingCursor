@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatMessage, ModelInfo } from "@chatting-cursor/shared";
 import {
   createChatSession,
@@ -42,7 +42,21 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
   const assistantBufferRef = useRef("");
   const sseCloseRef = useRef<(() => void) | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const { speak } = useSpeech();
+
+
+  const resizeComposer = useCallback((): void => {
+    const textarea = textareaRef.current;
+    if (!textarea) {
+      return;
+    }
+    textarea.style.height = "auto";
+    const maxHeight = Math.min(window.innerHeight * 0.45, 352);
+    const nextHeight = Math.min(textarea.scrollHeight, maxHeight);
+    textarea.style.height = `${Math.max(nextHeight, 112)}px`;
+    textarea.style.overflowY = textarea.scrollHeight > maxHeight ? "auto" : "hidden";
+  }, []);
 
 
   useEffect(() => {
@@ -124,6 +138,13 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages, isSending, isThinking]);
+
+
+  useEffect(() => {
+    resizeComposer();
+    window.addEventListener("resize", resizeComposer);
+    return () => window.removeEventListener("resize", resizeComposer);
+  }, [input, resizeComposer]);
 
 
   const handleModelChange = (value: string): void => {
@@ -334,10 +355,12 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
         </div>
         <div className="composer input-area">
           <textarea
+            ref={textareaRef}
             value={input}
             onChange={(event) => setInput(event.target.value)}
+            onInput={() => resizeComposer()}
             placeholder="输入消息…（例如：帮我找之前关于端口的对话）"
-            rows={3}
+            rows={4}
             disabled={isSending}
           />
           <button

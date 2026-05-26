@@ -11,6 +11,7 @@ import {
   setWebPort,
 } from "../bridgeSettings";
 import { GITHUB_PAGES_URL, isGitHubPages } from "../environment";
+import { DEFAULT_TEXT_SIZE_PX, MAX_TEXT_SIZE_PX } from "../textSizeSettings";
 import {
   fetchAuthStatus,
   fetchCrewStatus,
@@ -25,9 +26,11 @@ import {
 interface ConfigSubPageProps {
   bridgeUrl: string;
   bridgeToken: string;
+  textSizePx: number;
   onBridgePortChange: (port: number) => void;
   onBridgeTokenChange: (token: string) => void;
   onBridgeUrlChange: (url: string) => void;
+  onTextSizeChange: (size: number) => void;
   onOpenCli: () => void;
 }
 
@@ -48,9 +51,11 @@ function parsePortInput(value: string): number | null {
 export function ConfigSubPage({
   bridgeUrl,
   bridgeToken,
+  textSizePx,
   onBridgePortChange,
   onBridgeTokenChange,
   onBridgeUrlChange,
+  onTextSizeChange,
   onOpenCli,
 }: ConfigSubPageProps) {
   const onGitHubPages = isGitHubPages();
@@ -331,6 +336,25 @@ export function ConfigSubPage({
             网页端口仅作本地开发参考；修改并保存后需重启 <code>pnpm dev:web</code>。当前参考地址：<code>{buildWebDevUrl(previewWebPort)}</code>
           </p>
         )}
+      </section>
+
+      <section className="config-section">
+        <h2>文字大小</h2>
+        <label className="config-field" htmlFor="text-size-slider">
+          <span className="config-field-label">当前字号</span>
+          <input
+            id="text-size-slider"
+            type="range"
+            min={DEFAULT_TEXT_SIZE_PX}
+            max={MAX_TEXT_SIZE_PX}
+            step={1}
+            value={textSizePx}
+            onChange={(event) => onTextSizeChange(Number.parseInt(event.target.value, 10))}
+          />
+        </label>
+        <p className="config-hint">
+          当前 {textSizePx}px。该设置会立即作用于聊天输入框和对话气泡文字，并保存在浏览器本地。
+        </p>
       </section>
 
       <section className="config-section">

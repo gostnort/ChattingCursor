@@ -7,9 +7,11 @@ interface LocalViewProps {
   localSub: LocalSub;
   bridgeUrl: string;
   bridgeToken: string;
+  textSizePx: number;
   onBridgePortChange: (port: number) => void;
   onBridgeTokenChange: (token: string) => void;
   onBridgeUrlChange: (url: string) => void;
+  onTextSizeChange: (size: number) => void;
   onLocalSubChange: (sub: LocalSub) => void;
 }
 
@@ -19,9 +21,11 @@ export function LocalView({
   localSub,
   bridgeUrl,
   bridgeToken,
+  textSizePx,
   onBridgePortChange,
   onBridgeTokenChange,
   onBridgeUrlChange,
+  onTextSizeChange,
   onLocalSubChange,
 }: LocalViewProps) {
   return (
@@ -50,9 +54,11 @@ export function LocalView({
             <ConfigSubPage
               bridgeUrl={bridgeUrl}
               bridgeToken={bridgeToken}
+              textSizePx={textSizePx}
               onBridgePortChange={onBridgePortChange}
               onBridgeTokenChange={onBridgeTokenChange}
               onBridgeUrlChange={onBridgeUrlChange}
+              onTextSizeChange={onTextSizeChange}
               onOpenCli={() => onLocalSubChange("cli")}
             />
           </div>
