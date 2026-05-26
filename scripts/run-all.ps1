@@ -22,8 +22,27 @@ function Write-Step([string]$Message) {
 }
 
 
+function Resolve-CloudflaredExe {
+  $cmd = Get-Command cloudflared -ErrorAction SilentlyContinue
+  if ($cmd) {
+    return $cmd.Source
+  }
+  $candidates = @(
+    "$env:ProgramFiles\Cloudflare\cloudflared\cloudflared.exe",
+    "${env:ProgramFiles(x86)}\Cloudflare\cloudflared\cloudflared.exe",
+    "$env:LOCALAPPDATA\Microsoft\WinGet\Links\cloudflared.exe"
+  )
+  foreach ($path in $candidates) {
+    if ($path -and (Test-Path $path)) {
+      return $path
+    }
+  }
+  return $null
+}
+
+
 function Test-CloudflaredInstalled {
-  return [bool](Get-Command cloudflared -ErrorAction SilentlyContinue)
+  return [bool](Resolve-CloudflaredExe)
 }
 
 
@@ -155,8 +174,12 @@ function Start-BridgeProcess {
 
 
 function Start-TunnelProcess {
+  $cloudflaredExe = Resolve-CloudflaredExe
+  if (-not $cloudflaredExe) {
+    throw "未找到 cloudflared 可执行文件"
+  }
   $psi = New-Object System.Diagnostics.ProcessStartInfo
-  $psi.FileName = "cloudflared"
+  $psi.FileName = $cloudflaredExe
   $psi.Arguments = "tunnel --url http://127.0.0.1:$BridgePort"
   $psi.WorkingDirectory = $Root
   $psi.UseShellExecute = $false
@@ -187,15 +210,19 @@ function Start-TunnelProcess {
 }
 
 
-[Console]::TreatControlCAsInput = $false
-[Console]::CancelKeyPress.Add({
-  param($sender, $e)
-  $e.Cancel = $true
-  $script:ShuttingDown = $true
-  Write-Host ""
-  Write-Host "正在停止 Bridge 与隧道..."
-  Stop-ChildProcesses
-}) | Out-Null
+try {
+  [Console]::TreatControlCAsInput = $false
+  [Console]::CancelKeyPress.Add({
+    param($sender, $e)
+    $e.Cancel = $true
+    $script:ShuttingDown = $true
+    Write-Host ""
+    Write-Host "正在停止 Bridge 与隧道..."
+    Stop-ChildProcesses
+  }) | Out-Null
+} catch {
+  # 非交互终端无法注册 Ctrl+C，依赖进程退出或外部结束
+}
 
 try {
   Write-Host "=== ChattingCursor 远程启动 ==="
