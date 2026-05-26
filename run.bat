@@ -4,6 +4,7 @@ cd /d "%~dp0"
 echo.
 echo === ChattingCursor 启动 ===
 echo 将启动 Bridge 与 cloudflared，并自动更新 token 文件中的公网地址。
+echo 重新启动: 先运行 shutdown.bat，再运行 run.bat
 echo Stop: press Ctrl+C
 echo.
 
@@ -15,6 +16,12 @@ if errorlevel 1 (
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\run-all.ps1" %*
 set EXITCODE=%ERRORLEVEL%
+if "%EXITCODE%"=="2" (
+  echo.
+  echo 端口 4321 已被占用，请先运行 shutdown.bat 关闭后台服务后再试。
+  pause
+  exit /b 2
+)
 if not "%EXITCODE%"=="0" (
   echo.
   echo 启动失败，退出码 %EXITCODE%

@@ -164,6 +164,21 @@ function Invoke-TunnelLine([string]$Line) {
 }
 
 
+function Test-PortInUse([int]$Port) {
+  try {
+    $conn = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
+    if ($conn) {
+      return $true
+    }
+  } catch {
+    # 回退 netstat
+  }
+  $pattern = ":$Port\s"
+  $lines = netstat -ano -p tcp 2>$null | Select-String "LISTENING" | Select-String $pattern
+  return [bool]$lines
+}
+
+
 function Test-BridgeHealthy {
   $healthUrl = "http://127.0.0.1:$BridgePort/health"
   try {
@@ -253,6 +268,14 @@ try {
   if (-not (Test-CloudflaredInstalled)) {
     Write-Host "未找到 cloudflared。请先运行 install.bat"
     exit 1
+  }
+
+  if (Test-PortInUse -Port $BridgePort) {
+    Write-Host ""
+    Write-Host "警告: 端口 $BridgePort 已被占用。"
+    Write-Host "若上次未正常退出，请先运行 shutdown.bat，再运行 run.bat。"
+    Write-Host ""
+    exit 2
   }
 
   Write-Step "启动 Bridge (端口 $BridgePort)..."
