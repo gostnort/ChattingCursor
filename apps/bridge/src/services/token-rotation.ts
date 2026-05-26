@@ -21,9 +21,9 @@ function defaultTokenDirectory(): string {
 }
 
 
-function parseTokenFile(content: string): { date?: string; token?: string } {
+function parseTokenFile(content: string): { date?: string; token?: string; publicBridgeUrl?: string } {
   const lines = content.split(/\r?\n/);
-  const parsed: { date?: string; token?: string } = {};
+  const parsed: { date?: string; token?: string; publicBridgeUrl?: string } = {};
   for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed) {
@@ -41,8 +41,35 @@ function parseTokenFile(content: string): { date?: string; token?: string } {
     if (key === "token") {
       parsed.token = value;
     }
+    if (key === "publicbridgeurl") {
+      parsed.publicBridgeUrl = value;
+    }
   }
   return parsed;
+}
+
+
+function upsertPublicBridgeUrlLine(content: string, url: string): string {
+  const lines = content.split(/\r?\n/);
+  let replaced = false;
+  const updated = lines.map((line) => {
+    const trimmed = line.trim().toLowerCase();
+    if (trimmed.startsWith("publicbridgeurl:")) {
+      replaced = true;
+      return `publicBridgeUrl: ${url}`;
+    }
+    return line;
+  });
+  if (!replaced) {
+    const insertAt = updated.findIndex((line) => line.trim().toLowerCase().startsWith("generatedat:"));
+    const line = `publicBridgeUrl: ${url}`;
+    if (insertAt >= 0) {
+      updated.splice(insertAt + 1, 0, line);
+    } else {
+      updated.unshift(line);
+    }
+  }
+  return updated.join("\n");
 }
 
 
@@ -87,6 +114,27 @@ export class TokenRotationService {
   }
 
 
+  getPublicBridgeUrl(): string {
+    return this.publicBridgeUrl;
+  }
+
+
+  async updatePublicBridgeUrl(url: string): Promise<string> {
+    const normalized = url.trim().replace(/\/+$/, "");
+    if (!normalized) {
+      throw new Error("公开 Bridge URL 不能为空");
+    }
+    this.publicBridgeUrl = normalized;
+    await this.ensureTodayToken();
+    const filePath = this.getFilePath();
+    const existing = await readFile(filePath, "utf8");
+    const next = upsertPublicBridgeUrlLine(existing, normalized);
+    const withTrailingNewline = next.endsWith("\n") ? next : `${next}\n`;
+    await writeFile(filePath, withTrailingNewline, "utf8");
+    return normalized;
+  }
+
+
   getToday(): string {
     return todayStamp();
   }
@@ -103,6 +151,9 @@ export class TokenRotationService {
       const existing = await readFile(filePath, "utf8");
       const parsed = parseTokenFile(existing);
       if (parsed.date === today && parsed.token) {
+        if (parsed.publicBridgeUrl) {
+          this.publicBridgeUrl = parsed.publicBridgeUrl;
+        }
         this.cachedRecord = {
           date: today,
           token: parsed.token,

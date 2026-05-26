@@ -30,9 +30,6 @@ export function initPortSettingsForEnvironment(): void {
     return;
   }
   localStorage.removeItem(WEB_PORT_KEY);
-  if (!localStorage.getItem(REMOTE_BRIDGE_URL_KEY) && !localStorage.getItem(LEGACY_BRIDGE_URL_KEY) && !localStorage.getItem(BRIDGE_PORT_KEY)) {
-    setBridgeUrl(buildBridgeUrl(DEFAULT_BRIDGE_PORT));
-  }
 }
 
 
@@ -65,6 +62,9 @@ export function getBridgeUrl(): string {
   const storedPort = localStorage.getItem(BRIDGE_PORT_KEY);
   if (storedPort) {
     return buildBridgeUrl(parsePort(storedPort, DEFAULT_BRIDGE_PORT));
+  }
+  if (isGitHubPages()) {
+    return "";
   }
   return buildBridgeUrl(DEFAULT_BRIDGE_PORT);
 }
@@ -176,7 +176,6 @@ export function resetPortSettings(): { bridgePort: number; webPort: number } {
   localStorage.removeItem(LEGACY_BRIDGE_URL_KEY);
   if (isGitHubPages()) {
     localStorage.removeItem(WEB_PORT_KEY);
-    setBridgeUrl(buildBridgeUrl(DEFAULT_BRIDGE_PORT));
     return { bridgePort: DEFAULT_BRIDGE_PORT, webPort: DEFAULT_WEB_PORT };
   }
   localStorage.removeItem(WEB_PORT_KEY);

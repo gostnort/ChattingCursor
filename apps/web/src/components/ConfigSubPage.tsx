@@ -52,6 +52,21 @@ function parsePortInput(value: string): number | null {
 }
 
 
+function formatBridgeRequestError(bridgeUrl: string, onGitHubPages: boolean, error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const normalized = normalizeBridgeUrl(bridgeUrl);
+  const localTarget = isLocalBridgeUrl(normalized);
+  const networkFailure = /failed to fetch|networkerror|network error|load failed|fetch resource/i.test(message);
+  if (onGitHubPages && localTarget && networkFailure) {
+    return "当前 Bridge URL 仍是 127.0.0.1 / localhost。若你现在用的是手机，127.0.0.1 指向的是手机自己，不是电脑；GitHub Pages 也不会自动找到你的电脑。请先给电脑上的 Bridge 配置一个可公开访问的 HTTPS 地址，再把这个地址填到 Bridge URL。";
+  }
+  if (onGitHubPages && !localTarget && networkFailure) {
+    return "远程 Bridge 当前不可达。请确认公网域名 / tunnel 已启动，并且手机浏览器能直接访问这个 Bridge URL。";
+  }
+  return message;
+}
+
+
 export function ConfigSubPage({
   assistantBubbleColors,
   bridgeUrl,
@@ -166,8 +181,7 @@ export function ConfigSubPage({
         setTokenFileName(config.tokenFilePath.split(/[\\/]/).pop() ?? "chattingcursor-token.txt");
       } catch (loadError) {
         if (!cancelled) {
-          const message = loadError instanceof Error ? loadError.message : String(loadError);
-          setError(`无法加载配置：${message}`);
+          setError(`无法加载配置：${formatBridgeRequestError(normalizedBridgeUrl, onGitHubPages, loadError)}`);
         }
       } finally {
         if (!cancelled) {
@@ -195,6 +209,18 @@ export function ConfigSubPage({
       return;
     }
     const remoteTarget = !isLocalBridgeUrl(normalizedBridgeUrlInput);
+    if (onGitHubPages && remoteTarget) {
+      try {
+        const parsedUrl = new URL(normalizedBridgeUrlInput);
+        if (parsedUrl.protocol !== "https:") {
+          setSaveMessage("GitHub Pages 上的远程 Bridge URL 必须使用 https://；http:// 会被浏览器当作不安全请求拦截。");
+          return;
+        }
+      } catch {
+        setSaveMessage("请输入有效的 Bridge URL。");
+        return;
+      }
+    }
     if (remoteTarget && !tokenInput.trim()) {
       setSaveMessage("远程 Bridge 必须填写当天口令。");
       return;
@@ -207,8 +233,7 @@ export function ConfigSubPage({
       try {
         await verifyBridgeToken(normalizedBridgeUrlInput, tokenInput.trim());
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        setSaveMessage(`口令验证失败：${message}`);
+        setSaveMessage(`口令验证失败：${formatBridgeRequestError(normalizedBridgeUrlInput, onGitHubPages, error)}`);
         return;
       }
     }
@@ -236,10 +261,10 @@ export function ConfigSubPage({
   const handleResetDefaults = (): void => {
     const defaults = resetPortSettings();
     onBridgePortChange(defaults.bridgePort);
-    onBridgeUrlChange(buildBridgeUrl(defaults.bridgePort));
+    onBridgeUrlChange(onGitHubPages ? "" : buildBridgeUrl(defaults.bridgePort));
     onBridgeTokenChange("");
     setSavedWebPort(defaults.webPort);
-    setBridgeUrlInput(buildBridgeUrl(defaults.bridgePort));
+    setBridgeUrlInput(onGitHubPages ? "" : buildBridgeUrl(defaults.bridgePort));
     setTokenInput("");
     setWebPortInput(String(defaults.webPort));
     setSaveMessage("已恢复默认连接配置。");

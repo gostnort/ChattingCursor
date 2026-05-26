@@ -26,13 +26,11 @@ http://127.0.0.1:43210/ChattingCursor/
 
 如果你要在**手机**上使用 GitHub Pages：
 
-1. 电脑继续运行 `pnpm dev:bridge`
-2. 给 Bridge 配一个公网地址（例如 tunnel 域名）
-3. 在手机打开 GitHub Pages 后，到 **本地 → 配置** 填入：
-   - `Bridge URL`
-   - 当天口令（从同步文件查看）
+1. 首次运行 `install.bat`，日常运行 `run.bat`（自动启动 Bridge + 隧道，并更新 token 文件中的公网地址）
+2. 把 token 同步目录放进云盘（默认 `%USERPROFILE%\ChattingCursorTokenSync`）
+3. 手机 **本地 → 配置** 填入 token 文件里的 `publicBridgeUrl` 与 `token`
 
-完整远程配置见 `docs/REMOTE_SETUP.md`。
+详见 `docs/CLOUDFLARE_TUNNEL_SETUP.md`；背景见 `docs/REMOTE_SETUP.md`。
 
 标题旁有 **聊天 | 本地** 切换：聊天页仅对话 UI；本地模式含 **配置** 与 **CLI输出** 两个子页。
 

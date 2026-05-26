@@ -1,17 +1,15 @@
 import type { FastifyInstance } from "fastify";
-import { loadConfig } from "../config.js";
 import { tokenRotationService } from "../services/token-rotation.js";
 
 
 /** 注册远程口令相关路由 */
 export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
   app.get("/auth/status", async (_request, reply) => {
-    const config = loadConfig();
     const record = await tokenRotationService.ensureTodayToken();
     return reply.send({
       enabled: true,
       tokenDate: record.date,
-      publicBridgeUrl: config.publicBridgeUrl,
+      publicBridgeUrl: tokenRotationService.getPublicBridgeUrl(),
       tokenFilePath: record.filePath,
       timestamp: new Date().toISOString(),
     });

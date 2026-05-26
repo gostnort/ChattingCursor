@@ -16,13 +16,25 @@
 
 ## 推荐方式
 
+**零基础请直接看：[CLOUDFLARE_TUNNEL_SETUP.md](./CLOUDFLARE_TUNNEL_SETUP.md)**（含安装脚本与逐步操作）。
+
 推荐使用 tunnel，例如：
 
-- Cloudflare Tunnel
+- **Cloudflare Tunnel**（本项目已提供 `scripts/install-cloudflared.ps1`、`start-tunnel-quick.ps1`、`start-tunnel-named.ps1`）
 - Tailscale Funnel
 - 你自己的反向代理 / FRP / ngrok
 
 项目代码本身不强绑某一种 tunnel，只要求你最终得到一个可在手机浏览器访问的 Bridge 地址。
+
+### 最快试通（无需域名）
+
+```powershell
+cd e:\my_github\ChattingCursor
+.\scripts\install-cloudflared.ps1
+.\scripts\start-tunnel-quick.ps1
+```
+
+终端里出现 `https://....trycloudflare.com` 后，在手机 GitHub Pages **本地 → 配置** 填入该 Bridge URL 与当天口令即可。
 
 ## 电脑侧配置
 

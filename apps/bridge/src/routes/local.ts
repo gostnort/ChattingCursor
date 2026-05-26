@@ -1,6 +1,9 @@
 import type { FastifyInstance } from "fastify";
 import { listCursorModels, probeCursorCli } from "@chatting-cursor/cli-client";
-import { localTokenDirectoryUpdateRequestSchema } from "@chatting-cursor/shared";
+import {
+  localPublicBridgeUrlUpdateRequestSchema,
+  localTokenDirectoryUpdateRequestSchema,
+} from "@chatting-cursor/shared";
 import { loadConfig } from "../config.js";
 import { isLocalRequest } from "../middleware/auth.js";
 import { historyStore } from "../services/history-store.js";
@@ -29,7 +32,7 @@ export async function registerLocalRoutes(app: FastifyInstance): Promise<void> {
     const defaultModel = models.models.find((item) => item.isDefault)?.id ?? models.models[0]?.id ?? "";
     return reply.send({
       bridgeUrl: `http://${config.host}:${config.port}`,
-      publicBridgeUrl: config.publicBridgeUrl,
+      publicBridgeUrl: tokenRotationService.getPublicBridgeUrl(),
       bridgeHost: config.host,
       bridgePort: config.port,
       corsOrigins: config.corsOrigins,
@@ -61,6 +64,24 @@ export async function registerLocalRoutes(app: FastifyInstance): Promise<void> {
       fileName: tokenFile.fileName,
       tokenDate: tokenFile.date,
       content: tokenFile.content,
+    });
+  });
+
+
+  app.post("/local/public-bridge-url", async (request, reply) => {
+    const parsed = localPublicBridgeUrlUpdateRequestSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.status(400).send({
+        error: "invalid_request",
+        message: parsed.error.message,
+      });
+    }
+    const publicBridgeUrl = await tokenRotationService.updatePublicBridgeUrl(parsed.data.publicBridgeUrl);
+    const record = await tokenRotationService.ensureTodayToken();
+    return reply.send({
+      publicBridgeUrl,
+      tokenFilePath: record.filePath,
+      tokenDate: record.date,
     });
   });
 

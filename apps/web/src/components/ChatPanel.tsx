@@ -130,6 +130,7 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
   );
   const [sessionId, setSessionId] = useState<string | null>(() => restoredState?.sessionId ?? null);
   const assistantBufferRef = useRef("");
+  const stderrBufferRef = useRef("");
   const currentAssistantLabelRef = useRef("Agent");
   const sseCloseRef = useRef<(() => void) | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -154,6 +155,11 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
   useEffect(() => {
     let cancelled = false;
     const loadModels = async (): Promise<void> => {
+      if (!bridgeUrl) {
+        setModels([]);
+        setConnectionError("请先到“本地 → 配置”填写可访问的 Bridge URL。手机使用 GitHub Pages 时，这里必须是你电脑的公网 Bridge 地址。");
+        return;
+      }
       try {
         const result = await fetchModels(bridgeUrl, bridgeToken);
         if (cancelled) {
@@ -186,6 +192,10 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
   useEffect(() => {
     let cancelled = false;
     const initSession = async (): Promise<void> => {
+      if (!bridgeUrl) {
+        setSessionId(null);
+        return;
+      }
       if (sessionId) {
         return;
       }
@@ -262,9 +272,24 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
     sseCloseRef.current?.();
     sseCloseRef.current = null;
     assistantBufferRef.current = "";
+    stderrBufferRef.current = "";
     setMessages([]);
     setIsSending(false);
     setIsThinking(false);
+  };
+
+
+  const appendAssistantError = (content: string): void => {
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content,
+        createdAt: new Date().toISOString(),
+        modelLabel: currentAssistantLabelRef.current,
+      },
+    ]);
   };
 
 
@@ -288,9 +313,14 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
   );
 
 
-  const handleStreamEvent = (event: { type: string; text?: string }): void => {
+  const handleStreamEvent = (event: { type: string; text?: string; data?: Record<string, unknown> }): void => {
     if (event.type === "thinking") {
       setIsThinking(true);
+      return;
+    }
+    if ((event.type === "stderr" || event.type === "error") && event.text) {
+      setIsThinking(false);
+      stderrBufferRef.current = `${stderrBufferRef.current}${event.text}`.trim();
       return;
     }
     if (event.type === "assistant" && event.text) {
@@ -340,6 +370,13 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
       setIsSending(false);
       setIsThinking(false);
       sseCloseRef.current = null;
+      const exitCode = typeof event.data?.exitCode === "number" ? event.data.exitCode : null;
+      if (!assistantBufferRef.current && stderrBufferRef.current) {
+        appendAssistantError(`CLI 运行失败：${stderrBufferRef.current}`);
+      } else if (!assistantBufferRef.current && exitCode !== null && exitCode !== 0) {
+        appendAssistantError(`CLI 运行失败（exit=${exitCode}）。`);
+      }
+      stderrBufferRef.current = "";
     }
   };
 
@@ -353,6 +390,7 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
     setIsThinking(true);
     setInput("");
     assistantBufferRef.current = "";
+    stderrBufferRef.current = "";
     currentAssistantLabelRef.current = selectedModelLabel;
     sseCloseRef.current?.();
     const userMessage: ChatMessage = {
