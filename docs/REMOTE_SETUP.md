@@ -16,13 +16,25 @@
 
 ## 推荐方式
 
+**零基础请直接看：[CLOUDFLARE_TUNNEL_SETUP.md](./CLOUDFLARE_TUNNEL_SETUP.md)**（含安装脚本与逐步操作）。
+
 推荐使用 tunnel，例如：
 
-- Cloudflare Tunnel
+- **Cloudflare Tunnel**（本项目已提供 `scripts/install-cloudflared.ps1`、`start-tunnel-quick.ps1`、`start-tunnel-named.ps1`）
 - Tailscale Funnel
 - 你自己的反向代理 / FRP / ngrok
 
 项目代码本身不强绑某一种 tunnel，只要求你最终得到一个可在手机浏览器访问的 Bridge 地址。
+
+### 最快试通（无需域名）
+
+```powershell
+cd e:\my_github\ChattingCursor
+.\scripts\install-cloudflared.ps1
+.\scripts\start-tunnel-quick.ps1
+```
+
+终端里出现 `https://....trycloudflare.com` 后，在手机 GitHub Pages **本地 → 配置** 填入该 Bridge URL 与当天口令即可。
 
 ## 电脑侧配置
 
@@ -54,9 +66,19 @@ $env:BRIDGE_PUBLIC_URL="https://bridge.example.com"
 
 ### 3. 配置 token 同步目录
 
+默认：`%USERPROFILE%\.chattingcursor\chattingcursor-token.txt`（与 `history/` 同属 `.chattingcursor`）。
+
+覆盖方式（优先级从高到低）：
+
+1. 环境变量 `CHATTINGCURSOR_TOKEN_SYNC_DIR`
+2. Web **本地 → 配置** 中设置同步目录（写入 `%USERPROFILE%\.chattingcursor\config.json`）
+3. 启动脚本参数 `-TokenSyncDir`
+
 ```powershell
 $env:CHATTINGCURSOR_TOKEN_SYNC_DIR="D:\YourSyncFolder\ChattingCursor"
 ```
+
+**从旧版迁移**：若你曾在 `%USERPROFILE%\ChattingCursorTokenSync` 存放口令，首次使用新默认目录时 Bridge 会自动复制一次；也可手动移动 `chattingcursor-token.txt` 到 `.chattingcursor`。
 
 Bridge 启动后会生成：
 

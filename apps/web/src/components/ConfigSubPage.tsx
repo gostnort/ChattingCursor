@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { AuthStatusResponse, CrewStatusResponse, HistorySessionSummary, LocalConfigResponse } from "@chatting-cursor/shared";
+import type { AssistantBubbleColorKey, AssistantBubbleColors } from "../assistantBubbleSettings";
+import { normalizeHexColor } from "../assistantBubbleSettings";
 import {
   buildBridgeUrl,
   buildWebDevUrl,
@@ -18,15 +20,21 @@ import {
   fetchHistoryContent,
   fetchHistoryList,
   fetchLocalConfig,
+  fetchLocalTokenFile,
   updateTokenDirectory,
   verifyBridgeToken,
 } from "../api/bridge";
+import { parseTodayTokenFromContent } from "../tokenFile";
 
 
 interface ConfigSubPageProps {
+  assistantBubbleColors: AssistantBubbleColors;
+  userBubbleBackground: string;
   bridgeUrl: string;
   bridgeToken: string;
   textSizePx: number;
+  onAssistantBubbleColorsChange: (colors: AssistantBubbleColors) => void;
+  onUserBubbleBackgroundChange: (color: string) => void;
   onBridgePortChange: (port: number) => void;
   onBridgeTokenChange: (token: string) => void;
   onBridgeUrlChange: (url: string) => void;
@@ -48,10 +56,29 @@ function parsePortInput(value: string): number | null {
 }
 
 
+function formatBridgeRequestError(bridgeUrl: string, onGitHubPages: boolean, error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const normalized = normalizeBridgeUrl(bridgeUrl);
+  const localTarget = isLocalBridgeUrl(normalized);
+  const networkFailure = /failed to fetch|networkerror|network error|load failed|fetch resource/i.test(message);
+  if (onGitHubPages && localTarget && networkFailure) {
+    return "当前 Bridge URL 仍是 127.0.0.1 / localhost。若你现在用的是手机，127.0.0.1 指向的是手机自己，不是电脑；GitHub Pages 也不会自动找到你的电脑。请先给电脑上的 Bridge 配置一个可公开访问的 HTTPS 地址，再把这个地址填到 Bridge URL。";
+  }
+  if (onGitHubPages && !localTarget && networkFailure) {
+    return "远程 Bridge 当前不可达。请确认公网域名 / tunnel 已启动，并且手机浏览器能直接访问这个 Bridge URL。";
+  }
+  return message;
+}
+
+
 export function ConfigSubPage({
+  assistantBubbleColors,
+  userBubbleBackground,
   bridgeUrl,
   bridgeToken,
   textSizePx,
+  onAssistantBubbleColorsChange,
+  onUserBubbleBackgroundChange,
   onBridgePortChange,
   onBridgeTokenChange,
   onBridgeUrlChange,
@@ -75,6 +102,9 @@ export function ConfigSubPage({
   const [webPortInput, setWebPortInput] = useState(() => String(getWebPort()));
   const [savedWebPort, setSavedWebPort] = useState(() => getWebPort());
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [assistantBackgroundInput, setAssistantBackgroundInput] = useState(assistantBubbleColors.background);
+  const [assistantTextInput, setAssistantTextInput] = useState(assistantBubbleColors.text);
+  const [userBackgroundInput, setUserBackgroundInput] = useState(userBubbleBackground);
   const normalizedBridgeUrl = useMemo(() => normalizeBridgeUrl(bridgeUrl), [bridgeUrl]);
   const normalizedBridgeUrlInput = useMemo(() => normalizeBridgeUrl(bridgeUrlInput), [bridgeUrlInput]);
   const parsedWebPort = useMemo(() => parsePortInput(webPortInput), [webPortInput]);
@@ -107,6 +137,17 @@ export function ConfigSubPage({
 
 
   useEffect(() => {
+    setAssistantBackgroundInput(assistantBubbleColors.background);
+    setAssistantTextInput(assistantBubbleColors.text);
+  }, [assistantBubbleColors]);
+
+
+  useEffect(() => {
+    setUserBackgroundInput(userBubbleBackground);
+  }, [userBubbleBackground]);
+
+
+  useEffect(() => {
     if (!saveMessage) {
       return;
     }
@@ -135,10 +176,11 @@ export function ConfigSubPage({
           setLoading(false);
           return;
         }
-        const [config, history, crew] = await Promise.all([
+        const [config, history, crew, tokenFile] = await Promise.all([
           fetchLocalConfig(normalizedBridgeUrl, bridgeToken),
           fetchHistoryList(normalizedBridgeUrl, bridgeToken),
           fetchCrewStatus(normalizedBridgeUrl, bridgeToken).catch(() => null),
+          fetchLocalTokenFile(normalizedBridgeUrl, bridgeToken).catch(() => null),
         ]);
         if (cancelled) {
           return;
@@ -148,10 +190,14 @@ export function ConfigSubPage({
         setSessions(history.sessions);
         setCrewStatus(crew);
         setTokenFileName(config.tokenFilePath.split(/[\\/]/).pop() ?? "chattingcursor-token.txt");
+        const fileToken = tokenFile ? parseTodayTokenFromContent(tokenFile.content) : "";
+        if (fileToken && fileToken !== bridgeToken) {
+          setTokenInput(fileToken);
+          onBridgeTokenChange(fileToken);
+        }
       } catch (loadError) {
         if (!cancelled) {
-          const message = loadError instanceof Error ? loadError.message : String(loadError);
-          setError(`无法加载配置：${message}`);
+          setError(`无法加载配置：${formatBridgeRequestError(normalizedBridgeUrl, onGitHubPages, loadError)}`);
         }
       } finally {
         if (!cancelled) {
@@ -179,6 +225,18 @@ export function ConfigSubPage({
       return;
     }
     const remoteTarget = !isLocalBridgeUrl(normalizedBridgeUrlInput);
+    if (onGitHubPages && remoteTarget) {
+      try {
+        const parsedUrl = new URL(normalizedBridgeUrlInput);
+        if (parsedUrl.protocol !== "https:") {
+          setSaveMessage("GitHub Pages 上的远程 Bridge URL 必须使用 https://；http:// 会被浏览器当作不安全请求拦截。");
+          return;
+        }
+      } catch {
+        setSaveMessage("请输入有效的 Bridge URL。");
+        return;
+      }
+    }
     if (remoteTarget && !tokenInput.trim()) {
       setSaveMessage("远程 Bridge 必须填写当天口令。");
       return;
@@ -191,8 +249,7 @@ export function ConfigSubPage({
       try {
         await verifyBridgeToken(normalizedBridgeUrlInput, tokenInput.trim());
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        setSaveMessage(`口令验证失败：${message}`);
+        setSaveMessage(`口令验证失败：${formatBridgeRequestError(normalizedBridgeUrlInput, onGitHubPages, error)}`);
         return;
       }
     }
@@ -220,10 +277,10 @@ export function ConfigSubPage({
   const handleResetDefaults = (): void => {
     const defaults = resetPortSettings();
     onBridgePortChange(defaults.bridgePort);
-    onBridgeUrlChange(buildBridgeUrl(defaults.bridgePort));
+    onBridgeUrlChange(onGitHubPages ? "" : buildBridgeUrl(defaults.bridgePort));
     onBridgeTokenChange("");
     setSavedWebPort(defaults.webPort);
-    setBridgeUrlInput(buildBridgeUrl(defaults.bridgePort));
+    setBridgeUrlInput(onGitHubPages ? "" : buildBridgeUrl(defaults.bridgePort));
     setTokenInput("");
     setWebPortInput(String(defaults.webPort));
     setSaveMessage("已恢复默认连接配置。");
@@ -261,6 +318,51 @@ export function ConfigSubPage({
       const message = error instanceof Error ? error.message : String(error);
       setSaveMessage(`设置目录失败：${message}`);
     }
+  };
+
+
+  const handleUserBubbleBackgroundChange = (value: string): void => {
+    const normalized = normalizeHexColor(value);
+    if (!normalized) {
+      return;
+    }
+    onUserBubbleBackgroundChange(normalized);
+  };
+
+
+  const handleUserBubbleBackgroundBlur = (value: string): void => {
+    const normalized = normalizeHexColor(value);
+    if (normalized) {
+      setUserBackgroundInput(normalized);
+      return;
+    }
+    setUserBackgroundInput(userBubbleBackground);
+  };
+
+
+  const handleAssistantBubbleColorChange = (key: AssistantBubbleColorKey, value: string): void => {
+    const normalized = normalizeHexColor(value);
+    if (!normalized) {
+      return;
+    }
+    onAssistantBubbleColorsChange({
+      ...assistantBubbleColors,
+      [key]: normalized,
+    });
+  };
+
+
+  const handleAssistantBubbleColorBlur = (
+    key: AssistantBubbleColorKey,
+    value: string,
+    setValue: (next: string) => void,
+  ): void => {
+    const normalized = normalizeHexColor(value);
+    if (normalized) {
+      setValue(normalized);
+      return;
+    }
+    setValue(assistantBubbleColors[key]);
   };
 
 
@@ -371,6 +473,113 @@ export function ConfigSubPage({
       </section>
 
       <section className="config-section">
+        <h2>气泡颜色</h2>
+        <p className="config-hint">
+          下面的十六进制文本框会立即保存到浏览器本地。用户内容底色同时决定 assistant 气泡边框色；assistant 背景色与文字色可单独调整。
+        </p>
+        <div className="assistant-color-grid">
+          <label className="config-field assistant-color-row" htmlFor="user-bubble-background">
+            <span className="config-field-label">用户内容底色</span>
+            <div className="assistant-color-inputs">
+              <input
+                id="user-bubble-background"
+                type="text"
+                inputMode="text"
+                value={userBackgroundInput}
+                onChange={(event) => {
+                  setUserBackgroundInput(event.target.value);
+                  handleUserBubbleBackgroundChange(event.target.value);
+                }}
+                onBlur={() => handleUserBubbleBackgroundBlur(userBackgroundInput)}
+                placeholder="#95ec69"
+                spellCheck={false}
+              />
+              <input
+                className="config-color-picker"
+                type="color"
+                aria-label="选择用户内容底色"
+                value={userBubbleBackground}
+                onChange={(event) => {
+                  setUserBackgroundInput(event.target.value);
+                  handleUserBubbleBackgroundChange(event.target.value);
+                }}
+              />
+            </div>
+          </label>
+          <label className="config-field assistant-color-row" htmlFor="assistant-bubble-background">
+            <span className="config-field-label">assistant 背景色</span>
+            <div className="assistant-color-inputs">
+              <input
+                id="assistant-bubble-background"
+                type="text"
+                inputMode="text"
+                value={assistantBackgroundInput}
+                onChange={(event) => {
+                  setAssistantBackgroundInput(event.target.value);
+                  handleAssistantBubbleColorChange("background", event.target.value);
+                }}
+                onBlur={() => handleAssistantBubbleColorBlur("background", assistantBackgroundInput, setAssistantBackgroundInput)}
+                placeholder="#0d1117"
+                spellCheck={false}
+              />
+              <input
+                className="config-color-picker"
+                type="color"
+                aria-label="选择 assistant 背景色"
+                value={assistantBubbleColors.background}
+                onChange={(event) => {
+                  setAssistantBackgroundInput(event.target.value);
+                  handleAssistantBubbleColorChange("background", event.target.value);
+                }}
+              />
+            </div>
+          </label>
+          <label className="config-field assistant-color-row" htmlFor="assistant-bubble-text">
+            <span className="config-field-label">assistant 文字色</span>
+            <div className="assistant-color-inputs">
+              <input
+                id="assistant-bubble-text"
+                type="text"
+                inputMode="text"
+                value={assistantTextInput}
+                onChange={(event) => {
+                  setAssistantTextInput(event.target.value);
+                  handleAssistantBubbleColorChange("text", event.target.value);
+                }}
+                onBlur={() => handleAssistantBubbleColorBlur("text", assistantTextInput, setAssistantTextInput)}
+                placeholder="#f8fafc"
+                spellCheck={false}
+              />
+              <input
+                className="config-color-picker"
+                type="color"
+                aria-label="选择 assistant 文字色"
+                value={assistantBubbleColors.text}
+                onChange={(event) => {
+                  setAssistantTextInput(event.target.value);
+                  handleAssistantBubbleColorChange("text", event.target.value);
+                }}
+              />
+            </div>
+          </label>
+        </div>
+        <div className="bubble-color-preview" aria-live="polite">
+          <div className="user-bubble-preview-bubble">
+            用户预览气泡
+          </div>
+          <div
+            className="assistant-bubble-preview-bubble"
+            style={{
+              background: assistantBubbleColors.background,
+              color: assistantBubbleColors.text,
+            }}
+          >
+            Assistant 预览气泡
+          </div>
+        </div>
+      </section>
+
+      <section className="config-section">
         <h2>每日口令</h2>
         {authStatus ? (
           <dl className="config-grid">
@@ -391,7 +600,7 @@ export function ConfigSubPage({
             type="text"
             value={tokenDirectoryInput}
             onChange={(event) => setTokenDirectoryInput(event.target.value)}
-            placeholder="可手动粘贴完整路径，例如 D:\\Sync\\ChattingCursor"
+            placeholder="默认 %USERPROFILE%\\.chattingcursor，或云盘同步目录"
           />
         </label>
         <div className="config-actions token-directory-actions">
@@ -404,7 +613,7 @@ export function ConfigSubPage({
           </button>
         </div>
         <p className="config-hint">
-          远程访问时，请把当天 token 粘贴到上方输入框；这里仅配置同步目录路径。Bridge 会把固定文件名 <code>{tokenFileName}</code> 写入该目录。
+          默认与历史记录同在 <code>%USERPROFILE%\.chattingcursor</code>；远程访问时可改为云盘目录并点「使用这个路径」持久化。Bridge 会写入固定文件名 <code>{tokenFileName}</code>。
         </p>
       </section>
 

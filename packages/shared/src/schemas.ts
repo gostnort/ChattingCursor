@@ -230,6 +230,24 @@ export const localTokenDirectoryUpdateResponseSchema = z.object({
 export type LocalTokenDirectoryUpdateResponse = z.infer<typeof localTokenDirectoryUpdateResponseSchema>;
 
 
+/** POST /local/public-bridge-url 请求体 */
+export const localPublicBridgeUrlUpdateRequestSchema = z.object({
+  publicBridgeUrl: z.string().url(),
+});
+
+export type LocalPublicBridgeUrlUpdateRequest = z.infer<typeof localPublicBridgeUrlUpdateRequestSchema>;
+
+
+/** POST /local/public-bridge-url 响应体 */
+export const localPublicBridgeUrlUpdateResponseSchema = z.object({
+  publicBridgeUrl: z.string().min(1),
+  tokenFilePath: z.string().min(1),
+  tokenDate: z.string().min(1),
+});
+
+export type LocalPublicBridgeUrlUpdateResponse = z.infer<typeof localPublicBridgeUrlUpdateResponseSchema>;
+
+
 /** GET /local/token-file 响应体 */
 export const localTokenFileResponseSchema = z.object({
   fileName: z.string().min(1),

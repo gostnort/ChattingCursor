@@ -24,7 +24,7 @@ async function main(): Promise<void> {
     return {
       status: "ok",
       cli,
-      publicBridgeUrl: config.publicBridgeUrl,
+      publicBridgeUrl: tokenRotationService.getPublicBridgeUrl(),
       timestamp: new Date().toISOString(),
     };
   });

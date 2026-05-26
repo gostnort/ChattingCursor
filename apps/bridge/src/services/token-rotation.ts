@@ -1,7 +1,11 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import os from "node:os";
 import { randomBytes, timingSafeEqual } from "node:crypto";
+import {
+  getDefaultTokenSyncDir,
+  getLegacyTokenSyncDir,
+} from "../paths.js";
+import { resolveTokenSyncDirectory, saveTokenSyncDirectory } from "./user-config.js";
 
 
 export interface DailyTokenRecord {
@@ -16,14 +20,9 @@ function todayStamp(): string {
 }
 
 
-function defaultTokenDirectory(): string {
-  return path.join(os.homedir(), "ChattingCursorTokenSync");
-}
-
-
-function parseTokenFile(content: string): { date?: string; token?: string } {
+function parseTokenFile(content: string): { date?: string; token?: string; publicBridgeUrl?: string } {
   const lines = content.split(/\r?\n/);
-  const parsed: { date?: string; token?: string } = {};
+  const parsed: { date?: string; token?: string; publicBridgeUrl?: string } = {};
   for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed) {
@@ -41,8 +40,35 @@ function parseTokenFile(content: string): { date?: string; token?: string } {
     if (key === "token") {
       parsed.token = value;
     }
+    if (key === "publicbridgeurl") {
+      parsed.publicBridgeUrl = value;
+    }
   }
   return parsed;
+}
+
+
+function upsertPublicBridgeUrlLine(content: string, url: string): string {
+  const lines = content.split(/\r?\n/);
+  let replaced = false;
+  const updated = lines.map((line) => {
+    const trimmed = line.trim().toLowerCase();
+    if (trimmed.startsWith("publicbridgeurl:")) {
+      replaced = true;
+      return `publicBridgeUrl: ${url}`;
+    }
+    return line;
+  });
+  if (!replaced) {
+    const insertAt = updated.findIndex((line) => line.trim().toLowerCase().startsWith("generatedat:"));
+    const line = `publicBridgeUrl: ${url}`;
+    if (insertAt >= 0) {
+      updated.splice(insertAt + 1, 0, line);
+    } else {
+      updated.unshift(line);
+    }
+  }
+  return updated.join("\n");
 }
 
 
@@ -54,7 +80,7 @@ export class TokenRotationService {
 
 
   constructor(options: { directory?: string; fileName?: string; publicBridgeUrl: string }) {
-    this.directory = options.directory?.trim() || defaultTokenDirectory();
+    this.directory = options.directory?.trim() || resolveTokenSyncDirectory();
     this.fileName = options.fileName?.trim() || "chattingcursor-token.txt";
     this.publicBridgeUrl = options.publicBridgeUrl;
   }
@@ -73,6 +99,7 @@ export class TokenRotationService {
     this.directory = normalized;
     this.cachedRecord = null;
     await mkdir(this.directory, { recursive: true });
+    await saveTokenSyncDirectory(normalized);
     await this.ensureTodayToken();
   }
 
@@ -87,8 +114,57 @@ export class TokenRotationService {
   }
 
 
+  getPublicBridgeUrl(): string {
+    return this.publicBridgeUrl;
+  }
+
+
+  async updatePublicBridgeUrl(url: string): Promise<string> {
+    const normalized = url.trim().replace(/\/+$/, "");
+    if (!normalized) {
+      throw new Error("公开 Bridge URL 不能为空");
+    }
+    this.publicBridgeUrl = normalized;
+    await this.ensureTodayToken();
+    // ensureTodayToken 可能从文件读回 localhost，写入前恢复隧道地址
+    this.publicBridgeUrl = normalized;
+    const filePath = this.getFilePath();
+    const existing = await readFile(filePath, "utf8");
+    const next = upsertPublicBridgeUrlLine(existing, normalized);
+    const withTrailingNewline = next.endsWith("\n") ? next : `${next}\n`;
+    await writeFile(filePath, withTrailingNewline, "utf8");
+    return normalized;
+  }
+
+
   getToday(): string {
     return todayStamp();
+  }
+
+
+  async migrateLegacyTokenFileIfNeeded(): Promise<void> {
+    const targetPath = this.getFilePath();
+    const legacyPath = path.join(getLegacyTokenSyncDir(), this.fileName);
+    if (path.resolve(this.directory) === path.resolve(getLegacyTokenSyncDir())) {
+      return;
+    }
+    if (path.resolve(this.directory) !== path.resolve(getDefaultTokenSyncDir())) {
+      return;
+    }
+    try {
+      await access(targetPath);
+      return;
+    } catch {
+      // 新路径尚无文件，尝试从旧目录迁移
+    }
+    try {
+      await access(legacyPath);
+      await mkdir(this.directory, { recursive: true });
+      await copyFile(legacyPath, targetPath);
+      console.log(`[token] 已从旧目录迁移口令文件: ${legacyPath} -> ${targetPath}`);
+    } catch {
+      // 旧目录无文件则跳过
+    }
   }
 
 
@@ -99,10 +175,14 @@ export class TokenRotationService {
     }
     const filePath = this.getFilePath();
     await mkdir(this.directory, { recursive: true });
+    await this.migrateLegacyTokenFileIfNeeded();
     try {
       const existing = await readFile(filePath, "utf8");
       const parsed = parseTokenFile(existing);
       if (parsed.date === today && parsed.token) {
+        if (parsed.publicBridgeUrl) {
+          this.publicBridgeUrl = parsed.publicBridgeUrl;
+        }
         this.cachedRecord = {
           date: today,
           token: parsed.token,
@@ -157,7 +237,7 @@ export class TokenRotationService {
 
 
 export const tokenRotationService = new TokenRotationService({
-  directory: process.env.CHATTINGCURSOR_TOKEN_SYNC_DIR,
+  directory: resolveTokenSyncDirectory(),
   fileName: process.env.CHATTINGCURSOR_TOKEN_FILE_NAME,
   publicBridgeUrl: process.env.BRIDGE_PUBLIC_URL?.trim() || "http://127.0.0.1:4321",
 });

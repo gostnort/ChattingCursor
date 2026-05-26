@@ -1,11 +1,18 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  getAssistantBubbleColors,
+  setAssistantBubbleColors,
+} from "./assistantBubbleSettings";
+import { fetchLocalTokenFile } from "./api/bridge";
+import {
   getBridgeToken,
   getBridgeUrl,
+  isLocalBridgeUrl,
   setBridgePort,
   setBridgeToken,
   setBridgeUrl,
 } from "./bridgeSettings";
+import { parseTodayTokenFromContent } from "./tokenFile";
 import { getTextSizePx, setTextSizePx } from "./textSizeSettings";
 import { AppHeader } from "./components/AppHeader";
 import { ChatView } from "./components/ChatView";
@@ -31,6 +38,7 @@ export default function App() {
   const [bridgeUrl, setBridgeUrlState] = useState(() => getBridgeUrl());
   const [bridgeToken, setBridgeTokenState] = useState(() => getBridgeToken());
   const [textSizePx, setTextSizePxState] = useState(() => getTextSizePx());
+  const [assistantBubbleColors, setAssistantBubbleColorsState] = useState(() => getAssistantBubbleColors());
   const normalizedBridgeUrl = useMemo(() => bridgeUrl.replace(/\/$/, ""), [bridgeUrl]);
 
 
@@ -58,6 +66,38 @@ export default function App() {
     document.documentElement.style.setProperty("--composer-text-size", `${textSizePx}px`);
     document.documentElement.style.setProperty("--bubble-text-size", `${textSizePx}px`);
   }, [textSizePx]);
+
+
+  useEffect(() => {
+    document.documentElement.style.setProperty("--assistant-bubble-background", assistantBubbleColors.background);
+    document.documentElement.style.setProperty("--assistant-bubble-text", assistantBubbleColors.text);
+    document.documentElement.style.setProperty("--assistant-bubble-border", assistantBubbleColors.border);
+  }, [assistantBubbleColors]);
+
+
+  useEffect(() => {
+    if (!isLocalBridgeUrl(normalizedBridgeUrl)) {
+      return;
+    }
+    let cancelled = false;
+    const syncTokenFromFile = async (): Promise<void> => {
+      try {
+        const tokenFile = await fetchLocalTokenFile(normalizedBridgeUrl, getBridgeToken());
+        const fileToken = parseTodayTokenFromContent(tokenFile.content);
+        if (cancelled || !fileToken || fileToken === getBridgeToken()) {
+          return;
+        }
+        setBridgeToken(fileToken);
+        setBridgeTokenState(fileToken);
+      } catch {
+        // 本机 Bridge 未启动时忽略
+      }
+    };
+    void syncTokenFromFile();
+    return () => {
+      cancelled = true;
+    };
+  }, [normalizedBridgeUrl]);
 
 
   useEffect(() => {
@@ -106,6 +146,15 @@ export default function App() {
   };
 
 
+  const handleAssistantBubbleColorsChange = (colors: {
+    background: string;
+    text: string;
+    border: string;
+  }): void => {
+    setAssistantBubbleColorsState(setAssistantBubbleColors(colors));
+  };
+
+
   const handleModeChange = (mode: AppMode): void => {
     navigate({ mode, localSub: route.localSub });
   };
@@ -124,9 +173,11 @@ export default function App() {
       ) : (
         <LocalView
           localSub={route.localSub}
+          assistantBubbleColors={assistantBubbleColors}
           bridgeUrl={bridgeUrl}
           bridgeToken={bridgeToken}
           textSizePx={textSizePx}
+          onAssistantBubbleColorsChange={handleAssistantBubbleColorsChange}
           onBridgePortChange={handleBridgePortChange}
           onBridgeTokenChange={handleBridgeTokenChange}
           onBridgeUrlChange={handleBridgeUrlChange}

@@ -1,3 +1,8 @@
+# 复制到 %USERPROFILE%\.cloudflared\config.yml 后再改
+# 创建隧道: cloudflared tunnel create chattingcursor-bridge
+# 绑定 DNS: cloudflared tunnel route dns chattingcursor-bridge bridge.你的域名.com
+# 详细步骤: docs/CLOUDFLARE_TUNNEL_SETUP.md
+
 tunnel: YOUR_TUNNEL_ID
 credentials-file: C:\Users\YOUR_USER\.cloudflared\YOUR_TUNNEL_ID.json
 

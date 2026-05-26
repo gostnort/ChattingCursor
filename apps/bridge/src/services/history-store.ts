@@ -1,6 +1,6 @@
 import { mkdir, readdir, readFile, writeFile, unlink, stat } from "node:fs/promises";
 import path from "node:path";
-import os from "node:os";
+import { getDefaultHistoryDir } from "../paths.js";
 
 
 export const HISTORY_RETENTION_DAYS = 7;
@@ -13,7 +13,7 @@ export class HistoryStore {
 
 
   constructor(dir?: string) {
-    this.dir = dir ?? path.join(os.homedir(), ".chattingcursor", "history");
+    this.dir = dir ?? getDefaultHistoryDir();
   }
 
 

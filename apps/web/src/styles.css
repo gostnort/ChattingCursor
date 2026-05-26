@@ -20,6 +20,12 @@
 
   --bubble-text-size: var(--user-text-size);
 
+  --assistant-bubble-background: #0d1117;
+
+  --assistant-bubble-text: #f8fafc;
+
+  --assistant-bubble-border: #2ea043;
+
   --keyboard-offset: 0px;
 
 }
@@ -414,6 +420,20 @@ body {
 
   min-width: 0;
 
+  font-size: var(--user-text-size);
+
+}
+
+
+
+.model-select-label {
+
+  flex-shrink: 0;
+
+  white-space: nowrap;
+
+  font-size: var(--user-text-size);
+
 }
 
 
@@ -432,7 +452,7 @@ body {
 
   width: 100%;
 
-  padding: 0.5rem;
+  padding: 0.8rem 0.9rem;
 
   border-radius: 6px;
 
@@ -442,6 +462,19 @@ body {
 
   color: inherit;
 
+  font: inherit;
+
+  line-height: 1.35;
+
+  min-height: 3.2rem;
+
+}
+
+
+.model-select select option {
+
+  font-size: var(--user-text-size);
+
 }
 
 
@@ -450,9 +483,9 @@ body {
 
   flex-shrink: 0;
 
-  min-width: 5rem;
+  min-width: 5.75rem;
 
-  padding: 0.5rem 0.75rem;
+  padding: 0.8rem 0.9rem;
 
   border: 1px solid #30363d;
 
@@ -465,6 +498,8 @@ body {
   cursor: pointer;
 
   white-space: nowrap;
+
+  font-size: var(--user-text-size);
 
 }
 
@@ -572,6 +607,8 @@ body {
 
   justify-content: flex-start;
 
+  align-items: stretch;
+
 }
 
 
@@ -632,9 +669,11 @@ body {
 
   gap: 0.35rem;
 
-  max-width: min(85%, 28rem);
+  max-width: min(92%, 44rem);
 
   min-width: 0;
+
+  flex: 1 1 auto;
 
 }
 
@@ -698,11 +737,15 @@ body {
 
 .bubble-assistant {
 
-  background: #f0f0f0;
+  background: var(--assistant-bubble-background);
 
-  color: #1a1a1a;
+  color: var(--assistant-bubble-text);
+
+  border: 1px solid var(--assistant-bubble-border);
 
   border-bottom-left-radius: 0.2rem;
+
+  flex: 1 1 auto;
 
 }
 
@@ -720,7 +763,7 @@ body {
 
   border: 0.35rem solid transparent;
 
-  border-right-color: #f0f0f0;
+  border-right-color: var(--assistant-bubble-border);
 
   border-left: 0;
 
@@ -739,6 +782,8 @@ body {
   padding: 0.75rem 1rem;
 
   min-width: 3.5rem;
+
+  color: var(--assistant-bubble-text);
 
 }
 
@@ -760,7 +805,7 @@ body {
 
   border-radius: 50%;
 
-  background: #8b949e;
+  background: var(--assistant-bubble-border);
 
   animation: typing-bounce 1.2s ease-in-out infinite;
 
@@ -887,7 +932,7 @@ body {
 
   border-radius: 4px;
 
-  background: rgba(0, 0, 0, 0.08);
+  background: rgba(255, 255, 255, 0.12);
 
 }
 
@@ -900,7 +945,7 @@ body {
 
   border-radius: 8px;
 
-  background: rgba(0, 0, 0, 0.08);
+  background: rgba(255, 255, 255, 0.08);
 
 }
 
@@ -931,7 +976,7 @@ body {
 
 .bubble-text td {
 
-  border: 1px solid rgba(128, 128, 128, 0.35);
+  border: 1px solid rgba(46, 160, 67, 0.55);
 
   padding: 0.4rem 0.55rem;
 
@@ -970,6 +1015,8 @@ body {
   font-size: 1rem;
 
   line-height: 1;
+
+  align-self: center;
 
 }
 
@@ -1561,6 +1608,92 @@ body {
   gap: 0.35rem;
 
   margin-bottom: 0.75rem;
+
+}
+
+
+
+.assistant-color-grid {
+
+  display: flex;
+
+  flex-direction: column;
+
+  gap: 0.75rem;
+
+  margin-bottom: 0.75rem;
+
+}
+
+
+
+.assistant-color-row {
+
+  gap: 0.4rem;
+
+}
+
+
+
+.assistant-color-inputs {
+
+  display: flex;
+
+  gap: 0.75rem;
+
+  align-items: center;
+
+}
+
+
+
+.assistant-color-inputs input[type="text"] {
+
+  flex: 1 1 auto;
+
+}
+
+
+
+.config-color-picker {
+
+  width: 3.5rem !important;
+
+  min-width: 3.5rem;
+
+  height: 2.5rem;
+
+  padding: 0.2rem !important;
+
+  cursor: pointer;
+
+}
+
+
+
+.assistant-bubble-preview {
+
+  display: flex;
+
+  justify-content: flex-start;
+
+}
+
+
+
+.assistant-bubble-preview-bubble {
+
+  max-width: min(100%, 20rem);
+
+  padding: 0.75rem 1rem;
+
+  border: 1px solid var(--assistant-bubble-border);
+
+  border-radius: 1rem 1rem 1rem 0.25rem;
+
+  box-shadow: 0 0.35rem 1rem rgba(0, 0, 0, 0.18);
+
+  word-break: break-word;
 
 }
 
