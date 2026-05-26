@@ -418,6 +418,16 @@ body {
 
 
 
+.model-select-label {
+
+  flex-shrink: 0;
+
+  white-space: nowrap;
+
+}
+
+
+
 .model-select select {
 
   width: 100%;
@@ -1500,7 +1510,7 @@ body {
 
   width: 100%;
 
-  max-width: 12rem;
+  max-width: none;
 
   padding: 0.5rem;
 
@@ -1511,6 +1521,14 @@ body {
   background: #0d1117;
 
   color: inherit;
+
+}
+
+
+
+.config-input-compact {
+
+  max-width: 12rem;
 
 }
 
@@ -1599,6 +1617,24 @@ body {
 .config-action-secondary {
 
   min-width: 7rem;
+
+}
+
+
+
+.token-directory-actions {
+
+  margin-top: 0.5rem;
+
+}
+
+
+
+.token-directory-action {
+
+  width: 100%;
+
+  max-width: none;
 
 }
 
