@@ -443,16 +443,12 @@ function Start-TunnelProcess {
     Remove-Item $script:TunnelLogPath -Force -ErrorAction SilentlyContinue
   }
   $script:TunnelLogOffset = 0
-  # cloudflared 主要写 stderr；重定向到日志文件避免管道缓冲区塞满导致进程退出
-  $tunnelCmd = "`"$cloudflaredExe`" tunnel --url http://127.0.0.1:$BridgePort"
-  $psi = New-Object System.Diagnostics.ProcessStartInfo
-  $psi.FileName = "cmd.exe"
-  $psi.Arguments = "/c $tunnelCmd > `"$($script:TunnelLogPath)`" 2>&1"
-  $psi.WorkingDirectory = $Root
-  $psi.UseShellExecute = $false
-  $psi.CreateNoWindow = $true
-  $script:TunnelProcess = [System.Diagnostics.Process]::Start($psi)
-  Write-Host "cloudflared: $cloudflaredExe"
+  # cloudflared 日志走 stderr；Start-Process 重定向到文件，避免管道缓冲区塞满
+  $script:TunnelProcess = Start-Process -FilePath $cloudflaredExe `
+    -ArgumentList @("tunnel", "--url", "http://127.0.0.1:$BridgePort") `
+    -RedirectStandardError $script:TunnelLogPath `
+    -NoNewWindow -PassThru
+  Write-Host "cloudflared: $cloudflaredExe (PID $($script:TunnelProcess.Id))"
   Write-Host "隧道日志: $($script:TunnelLogPath)"
 }
 

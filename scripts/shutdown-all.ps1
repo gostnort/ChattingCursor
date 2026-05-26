@@ -68,7 +68,7 @@ function Test-BridgeCommandLine([string]$CommandLine) {
     return $false
   }
   return (
-    $CommandLine -match 'dev:bridge|@chatting-cursor/bridge|apps\\bridge|tsx watch src\\index\.ts'
+    $CommandLine -match 'dev:bridge|@chatting-cursor/bridge|apps\\bridge|tsx(\s+watch)?\s+src\\index\.ts|apps/bridge.*src/index\.ts'
   )
 }
 
