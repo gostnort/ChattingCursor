@@ -5,11 +5,17 @@ import type { RunEvent } from "@chatting-cursor/shared";
 import { chatSendRequestSchema } from "@chatting-cursor/shared";
 import { loadConfig, resolveCorsOrigin } from "../config.js";
 import { requireRemoteToken } from "../middleware/auth.js";
+import { openGoogleSearchInChrome } from "../services/chrome-google-search.js";
 import {
   extractSearchKeywords,
   formatHistorySearchReply,
   hasHistorySearchIntent,
 } from "../services/history-search-intent.js";
+import {
+  extractWebSearchQuery,
+  formatWebSearchReply,
+  hasWebSearchIntent,
+} from "../services/web-search-intent.js";
 import { historyStore } from "../services/history-store.js";
 import { runStore } from "../services/run-store.js";
 import { sessionStore } from "../services/session-store.js";
@@ -42,19 +48,20 @@ const TERMINAL_EVENT_TYPES = new Set<RunEvent["type"]>([
 ]);
 
 
-/** 完成一次仅搜索历史的 run（不调用 cursor-agent） */
-function finishHistorySearchRun(
+/** 完成一次不调用 cursor-agent 的直连回复 run */
+function finishDirectReplyRun(
   runId: string,
   sessionId: string,
   prompt: string,
   replyText: string,
+  source: "history_search" | "chrome_web_search",
   modelLabel?: string,
 ): void {
   runStore.appendEvent(runId, {
     runId,
     type: "run_started",
     timestamp: new Date().toISOString(),
-    data: { source: "history_search", prompt },
+    data: { source, prompt },
   });
   runStore.appendEvent(runId, {
     runId,
@@ -72,7 +79,7 @@ function finishHistorySearchRun(
     runId,
     type: "run_finished",
     timestamp: new Date().toISOString(),
-    data: { exitCode: 0, source: "history_search" },
+    data: { exitCode: 0, source },
   });
 }
 
@@ -185,10 +192,35 @@ export async function registerChatRoutes(app: FastifyInstance): Promise<void> {
       const query = extractSearchKeywords(prompt);
       void historyStore.search(query).then((hits) => {
         const replyText = formatHistorySearchReply(query, hits);
-        finishHistorySearchRun(runId, session.sessionId, prompt, replyText, modelLabel);
+        finishDirectReplyRun(runId, session.sessionId, prompt, replyText, "history_search", modelLabel);
       }).catch((error: unknown) => {
         const message = error instanceof Error ? error.message : String(error);
-        finishHistorySearchRun(runId, session.sessionId, prompt, `搜索本地历史失败：${message}`, modelLabel);
+        finishDirectReplyRun(
+          runId,
+          session.sessionId,
+          prompt,
+          `搜索本地历史失败：${message}`,
+          "history_search",
+          modelLabel,
+        );
+      });
+      return reply.send({ runId, sessionId: session.sessionId });
+    }
+    if (hasWebSearchIntent(prompt)) {
+      const query = extractWebSearchQuery(prompt);
+      void openGoogleSearchInChrome(query).then((result) => {
+        const replyText = formatWebSearchReply(query, result);
+        finishDirectReplyRun(runId, session.sessionId, prompt, replyText, "chrome_web_search", modelLabel);
+      }).catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        finishDirectReplyRun(
+          runId,
+          session.sessionId,
+          prompt,
+          `Chrome 联网搜索失败：${message}`,
+          "chrome_web_search",
+          modelLabel,
+        );
       });
       return reply.send({ runId, sessionId: session.sessionId });
     }

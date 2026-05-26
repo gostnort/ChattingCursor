@@ -107,6 +107,22 @@ ChattingCursor/
 └── .github/workflows/
 ```
 
+## Chrome 联网搜索（非 Kimi 模型）
+
+仅 Kimi 可通过 API 联网搜索。其他模型在对话里提到「搜索网页」「网上查」「核实」等时，Bridge 会检测意图并在本机 Chrome（远程调试 **9222**）打开 Google 搜索页。
+
+**启动 Chrome（Windows 示例）：**
+
+```text
+"C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222
+```
+
+可选环境变量：`CHROME_DEBUG_ENDPOINT`（默认 `http://127.0.0.1:9222`）。
+
+**触发示例：** `/websearch React 19`、`/google 天气`、「帮我在网上搜一下…」、「核实一下这个说法」。
+
+本地聊天历史仍用 `/search …` 或带「历史/聊天记录」的表述，不会走 Google。
+
 ## 路线图
 
 | 阶段 | 内容 | 状态 |
