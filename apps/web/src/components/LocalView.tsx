@@ -7,10 +7,12 @@ import { ConfigSubPage } from "./ConfigSubPage";
 interface LocalViewProps {
   localSub: LocalSub;
   assistantBubbleColors: AssistantBubbleColors;
+  userBubbleBackground: string;
   bridgeUrl: string;
   bridgeToken: string;
   textSizePx: number;
   onAssistantBubbleColorsChange: (colors: AssistantBubbleColors) => void;
+  onUserBubbleBackgroundChange: (color: string) => void;
   onBridgePortChange: (port: number) => void;
   onBridgeTokenChange: (token: string) => void;
   onBridgeUrlChange: (url: string) => void;
@@ -23,10 +25,12 @@ interface LocalViewProps {
 export function LocalView({
   localSub,
   assistantBubbleColors,
+  userBubbleBackground,
   bridgeUrl,
   bridgeToken,
   textSizePx,
   onAssistantBubbleColorsChange,
+  onUserBubbleBackgroundChange,
   onBridgePortChange,
   onBridgeTokenChange,
   onBridgeUrlChange,
@@ -58,10 +62,12 @@ export function LocalView({
           <div id="local-config" className="local-sub-panel config-page">
             <ConfigSubPage
               assistantBubbleColors={assistantBubbleColors}
+              userBubbleBackground={userBubbleBackground}
               bridgeUrl={bridgeUrl}
               bridgeToken={bridgeToken}
               textSizePx={textSizePx}
               onAssistantBubbleColorsChange={onAssistantBubbleColorsChange}
+              onUserBubbleBackgroundChange={onUserBubbleBackgroundChange}
               onBridgePortChange={onBridgePortChange}
               onBridgeTokenChange={onBridgeTokenChange}
               onBridgeUrlChange={onBridgeUrlChange}

@@ -3,6 +3,7 @@ import {
   getAssistantBubbleColors,
   setAssistantBubbleColors,
 } from "./assistantBubbleSettings";
+import { getUserBubbleBackground, setUserBubbleBackground } from "./userBubbleSettings";
 import { fetchLocalTokenFile } from "./api/bridge";
 import {
   getBridgeToken,
@@ -39,6 +40,7 @@ export default function App() {
   const [bridgeToken, setBridgeTokenState] = useState(() => getBridgeToken());
   const [textSizePx, setTextSizePxState] = useState(() => getTextSizePx());
   const [assistantBubbleColors, setAssistantBubbleColorsState] = useState(() => getAssistantBubbleColors());
+  const [userBubbleBackground, setUserBubbleBackgroundState] = useState(() => getUserBubbleBackground());
   const normalizedBridgeUrl = useMemo(() => bridgeUrl.replace(/\/$/, ""), [bridgeUrl]);
 
 
@@ -66,6 +68,11 @@ export default function App() {
     document.documentElement.style.setProperty("--composer-text-size", `${textSizePx}px`);
     document.documentElement.style.setProperty("--bubble-text-size", `${textSizePx}px`);
   }, [textSizePx]);
+
+
+  useEffect(() => {
+    document.documentElement.style.setProperty("--user-bubble-background", userBubbleBackground);
+  }, [userBubbleBackground]);
 
 
   useEffect(() => {
@@ -155,6 +162,11 @@ export default function App() {
   };
 
 
+  const handleUserBubbleBackgroundChange = (color: string): void => {
+    setUserBubbleBackgroundState(setUserBubbleBackground(color));
+  };
+
+
   const handleModeChange = (mode: AppMode): void => {
     navigate({ mode, localSub: route.localSub });
   };
@@ -174,10 +186,12 @@ export default function App() {
         <LocalView
           localSub={route.localSub}
           assistantBubbleColors={assistantBubbleColors}
+          userBubbleBackground={userBubbleBackground}
           bridgeUrl={bridgeUrl}
           bridgeToken={bridgeToken}
           textSizePx={textSizePx}
           onAssistantBubbleColorsChange={handleAssistantBubbleColorsChange}
+          onUserBubbleBackgroundChange={handleUserBubbleBackgroundChange}
           onBridgePortChange={handleBridgePortChange}
           onBridgeTokenChange={handleBridgeTokenChange}
           onBridgeUrlChange={handleBridgeUrlChange}
