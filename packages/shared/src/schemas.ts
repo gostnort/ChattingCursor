@@ -43,6 +43,7 @@ export const chatMessageSchema = z.object({
   role: z.enum(["user", "assistant", "system"]),
   content: z.string(),
   createdAt: z.string().datetime().optional(),
+  modelLabel: z.string().optional(),
 });
 
 export type ChatMessage = z.infer<typeof chatMessageSchema>;
@@ -80,6 +81,7 @@ export type RunEvent = z.infer<typeof runEventSchema>;
 export const chatSendRequestSchema = z.object({
   prompt: z.string().min(1),
   model: z.string().optional(),
+  modelLabel: z.string().optional(),
   workspace: z.string().optional(),
   sessionId: z.string().optional(),
 });

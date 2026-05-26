@@ -48,6 +48,7 @@ function finishHistorySearchRun(
   sessionId: string,
   prompt: string,
   replyText: string,
+  modelLabel?: string,
 ): void {
   runStore.appendEvent(runId, {
     runId,
@@ -65,6 +66,7 @@ function finishHistorySearchRun(
     role: "assistant",
     content: replyText,
     timestamp: new Date().toISOString(),
+    modelLabel,
   });
   runStore.appendEvent(runId, {
     runId,
@@ -137,6 +139,7 @@ export async function registerChatRoutes(app: FastifyInstance): Promise<void> {
         role: message.role,
         content: message.content,
         createdAt: message.timestamp,
+        modelLabel: message.modelLabel,
       })),
     });
   });
@@ -170,7 +173,7 @@ export async function registerChatRoutes(app: FastifyInstance): Promise<void> {
     const session = sessionStore.getOrCreate(parsed.data.sessionId);
     const runId = uuidv4();
     runStore.create(runId);
-    const { prompt, model, workspace } = parsed.data;
+    const { prompt, model, modelLabel, workspace } = parsed.data;
     const startedAt = new Date().toISOString();
     sessionStore.setModel(session.sessionId, model);
     sessionStore.appendMessage(session.sessionId, {
@@ -182,10 +185,10 @@ export async function registerChatRoutes(app: FastifyInstance): Promise<void> {
       const query = extractSearchKeywords(prompt);
       void historyStore.search(query).then((hits) => {
         const replyText = formatHistorySearchReply(query, hits);
-        finishHistorySearchRun(runId, session.sessionId, prompt, replyText);
+        finishHistorySearchRun(runId, session.sessionId, prompt, replyText, modelLabel);
       }).catch((error: unknown) => {
         const message = error instanceof Error ? error.message : String(error);
-        finishHistorySearchRun(runId, session.sessionId, prompt, `搜索本地历史失败：${message}`);
+        finishHistorySearchRun(runId, session.sessionId, prompt, `搜索本地历史失败：${message}`, modelLabel);
       });
       return reply.send({ runId, sessionId: session.sessionId });
     }
@@ -208,6 +211,7 @@ export async function registerChatRoutes(app: FastifyInstance): Promise<void> {
           role: "assistant",
           content: assistantText,
           timestamp: new Date().toISOString(),
+          modelLabel,
         });
         await historyStore.appendTurn(session.sessionId, prompt, assistantText, session.createdAt);
       }
