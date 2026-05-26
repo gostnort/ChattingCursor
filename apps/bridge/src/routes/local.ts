@@ -77,11 +77,10 @@ export async function registerLocalRoutes(app: FastifyInstance): Promise<void> {
       });
     }
     const publicBridgeUrl = await tokenRotationService.updatePublicBridgeUrl(parsed.data.publicBridgeUrl);
-    const record = await tokenRotationService.ensureTodayToken();
     return reply.send({
       publicBridgeUrl,
-      tokenFilePath: record.filePath,
-      tokenDate: record.date,
+      tokenFilePath: tokenRotationService.getFilePath(),
+      tokenDate: tokenRotationService.getToday(),
     });
   });
 

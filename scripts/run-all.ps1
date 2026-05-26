@@ -137,6 +137,31 @@ function Get-TokenFilePath {
 }
 
 
+function Get-TokenFilePathResolved {
+  $path = Get-TokenFilePath
+  if (Test-Path $path) {
+    return (Resolve-Path -LiteralPath $path).Path
+  }
+  return [System.IO.Path]::GetFullPath($path)
+}
+
+
+function Show-TokenFileOpenReminder {
+  param([string]$PublicUrl)
+  $resolved = Get-TokenFilePathResolved
+  Write-Host ""
+  Write-Host "----------------------------------------"
+  Write-Host "Token 文件完整路径:"
+  Write-Host "  $resolved"
+  Write-Host "publicBridgeUrl 行:"
+  Write-Host "  publicBridgeUrl: $PublicUrl"
+  Write-Host ""
+  Write-Host "请用记事本或 VS Code 打开上述路径；若已在编辑器中打开，请重新加载/关闭再开以看到最新内容。"
+  Write-Host "----------------------------------------"
+  Write-Host ""
+}
+
+
 function Test-TokenFileHasTrycloudflareUrl {
   param([string]$FilePath = (Get-TokenFilePath))
   if (-not (Test-Path $FilePath)) {
@@ -208,8 +233,14 @@ function Set-PublicBridgeUrlInTokenFile([string]$PublicUrl) {
     return $true
   }
   $normalized = $PublicUrl.Trim().TrimEnd("/")
+  try {
+    Write-PublicBridgeUrlToTokenFileDirect -PublicUrl $normalized
+    Write-Ok "已直接写入 token 文件（优先落盘）"
+  } catch {
+    Write-Fail "直接写入 token 文件失败: $($_.Exception.Message)"
+    return $false
+  }
   $body = @{ publicBridgeUrl = $normalized } | ConvertTo-Json
-  $apiOk = $false
   try {
     $response = Invoke-RestMethod `
       -Uri "http://127.0.0.1:$BridgePort/local/public-bridge-url" `
@@ -217,28 +248,30 @@ function Set-PublicBridgeUrlInTokenFile([string]$PublicUrl) {
       -ContentType "application/json; charset=utf-8" `
       -Body $body `
       -ErrorAction Stop
-    $apiOk = $true
-    Write-Ok "Bridge API 已写入 publicBridgeUrl: $($response.publicBridgeUrl)"
-    Write-Host "     Token 文件: $($response.tokenFilePath)"
-  } catch {
-    Write-Fail "Bridge API 写入失败: $($_.Exception.Message)"
-    Write-Host "     将尝试直接写入 token 文件..."
-    try {
-      Write-PublicBridgeUrlToTokenFileDirect -PublicUrl $normalized
-      Write-Ok "已直接写入 token 文件（API 回退）"
-    } catch {
-      Write-Fail "直接写入 token 文件也失败: $($_.Exception.Message)"
-      return $false
+    Write-Ok "Bridge API 已同步 publicBridgeUrl: $($response.publicBridgeUrl)"
+    if ($response.tokenFilePath) {
+      Write-Host "     Bridge 使用的 Token 文件: $($response.tokenFilePath)"
     }
+    $apiUrl = [string]$response.publicBridgeUrl
+    if ($apiUrl -and $apiUrl -notmatch 'trycloudflare\.com') {
+      Write-Host "     警告: Bridge 内存中的 URL 仍为本地地址，已以磁盘文件为准。"
+      Write-PublicBridgeUrlToTokenFileDirect -PublicUrl $normalized
+    }
+  } catch {
+    Write-Fail "Bridge API 同步失败（磁盘文件已写入）: $($_.Exception.Message)"
   }
   if (-not (Test-TokenFileHasTrycloudflareUrl)) {
     Write-Fail "token 文件中未找到 trycloudflare 公网地址"
     return $false
   }
   $onDisk = Get-TokenFilePublicUrl
+  if ($onDisk -ne $normalized) {
+    Write-Fail "token 文件 URL 与隧道不一致: $onDisk"
+    return $false
+  }
   Write-Ok "token 文件已包含公网 URL: $onDisk"
   $script:TunnelUrlApplied = $true
-  Write-Host ""
+  Show-TokenFileOpenReminder -PublicUrl $onDisk
   Write-Host "手机配置: GitHub Pages -> 本地 -> 配置"
   Write-Host "  Bridge URL = $onDisk"
   Write-Host "  今日口令 = 从 token 文件复制"
@@ -471,7 +504,7 @@ $exitCode = 0
 try {
   Write-Host "=== ChattingCursor 远程启动 ==="
   Write-Host "Token 同步目录: $TokenSyncDir"
-  Write-Host "Token 文件: $(Get-TokenFilePath)"
+  Write-Host "Token 文件完整路径: $(Get-TokenFilePathResolved)"
   Write-Host "Stop: press Ctrl+C"
   Write-Host ""
 
