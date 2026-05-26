@@ -179,6 +179,21 @@ function Stop-ChildProcesses {
 }
 
 
+function Ensure-HttpsPublicBridgeUrl([string]$Url) {
+  $normalized = $Url.Trim().TrimEnd("/")
+  if ($normalized -match '^https?://') {
+    if ($normalized -match '^http://[a-z0-9-]+\.trycloudflare\.com') {
+      return $normalized -replace '^http://', 'https://'
+    }
+    return $normalized
+  }
+  if ($normalized -match '^[a-z0-9-]+\.trycloudflare\.com$') {
+    return "https://$normalized"
+  }
+  return $normalized
+}
+
+
 function Get-TokenFilePath {
   return Join-Path $TokenSyncDir "chattingcursor-token.txt"
 }
@@ -279,7 +294,7 @@ function Set-PublicBridgeUrlInTokenFile([string]$PublicUrl) {
   if ($script:TunnelUrlApplied) {
     return $true
   }
-  $normalized = $PublicUrl.Trim().TrimEnd("/")
+  $normalized = Ensure-HttpsPublicBridgeUrl $PublicUrl
   try {
     Write-PublicBridgeUrlToTokenFileDirect -PublicUrl $normalized
     Write-Ok "已直接写入 token 文件（优先落盘）"

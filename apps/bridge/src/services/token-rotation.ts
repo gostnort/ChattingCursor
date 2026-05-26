@@ -41,10 +41,25 @@ function parseTokenFile(content: string): { date?: string; token?: string; publi
       parsed.token = value;
     }
     if (key === "publicbridgeurl") {
-      parsed.publicBridgeUrl = value;
+      parsed.publicBridgeUrl = normalizePublicBridgeUrl(value);
     }
   }
   return parsed;
+}
+
+
+function normalizePublicBridgeUrl(url: string): string {
+  const trimmed = url.trim().replace(/\/+$/, "");
+  if (!trimmed) {
+    throw new Error("公开 Bridge URL 不能为空");
+  }
+  if (/^https?:\/\//i.test(trimmed)) {
+    return trimmed;
+  }
+  if (/^[a-z0-9-]+\.trycloudflare\.com$/i.test(trimmed)) {
+    return `https://${trimmed}`;
+  }
+  return trimmed;
 }
 
 
@@ -120,10 +135,7 @@ export class TokenRotationService {
 
 
   async updatePublicBridgeUrl(url: string): Promise<string> {
-    const normalized = url.trim().replace(/\/+$/, "");
-    if (!normalized) {
-      throw new Error("公开 Bridge URL 不能为空");
-    }
+    const normalized = normalizePublicBridgeUrl(url);
     this.publicBridgeUrl = normalized;
     await this.ensureTodayToken();
     // ensureTodayToken 可能从文件读回 localhost，写入前恢复隧道地址
@@ -182,6 +194,11 @@ export class TokenRotationService {
       if (parsed.date === today && parsed.token) {
         if (parsed.publicBridgeUrl) {
           this.publicBridgeUrl = parsed.publicBridgeUrl;
+          const upgraded = upsertPublicBridgeUrlLine(existing, parsed.publicBridgeUrl);
+          if (upgraded !== existing) {
+            const withTrailingNewline = upgraded.endsWith("\n") ? upgraded : `${upgraded}\n`;
+            await writeFile(filePath, withTrailingNewline, "utf8");
+          }
         }
         this.cachedRecord = {
           date: today,
