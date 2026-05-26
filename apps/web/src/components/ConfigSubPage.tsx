@@ -11,7 +11,7 @@ import {
   setWebPort,
 } from "../bridgeSettings";
 import { GITHUB_PAGES_URL, isGitHubPages } from "../environment";
-import { DEFAULT_TEXT_SIZE_PX, MAX_TEXT_SIZE_PX } from "../textSizeSettings";
+import { MAX_TEXT_SIZE_PX, MIN_TEXT_SIZE_PX } from "../textSizeSettings";
 import {
   fetchAuthStatus,
   fetchCrewStatus,
@@ -279,11 +279,24 @@ export function ConfigSubPage({
               placeholder={onGitHubPages ? "https://bridge.example.com" : "http://127.0.0.1:4321"}
             />
           </label>
+          <label className="config-field" htmlFor="bridge-token">
+            <span className="config-field-label">当天口令（远程访问时填写）</span>
+            <input
+              id="bridge-token"
+              type="text"
+              value={tokenInput}
+              onChange={(event) => setTokenInput(event.target.value)}
+              placeholder="访问远程 Bridge / GitHub Pages 时，粘贴当天 token"
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </label>
           {!onGitHubPages && (
             <label className="config-field" htmlFor="web-port">
               <span className="config-field-label">网页接收端口（Vite dev）</span>
               <input
                 id="web-port"
+                className="config-input-compact"
                 type="number"
                 min={1}
                 max={65535}
@@ -345,7 +358,7 @@ export function ConfigSubPage({
           <input
             id="text-size-slider"
             type="range"
-            min={DEFAULT_TEXT_SIZE_PX}
+            min={MIN_TEXT_SIZE_PX}
             max={MAX_TEXT_SIZE_PX}
             step={1}
             value={textSizePx}
@@ -367,8 +380,6 @@ export function ConfigSubPage({
             <dd>{authStatus.publicBridgeUrl}</dd>
             <dt>固定文件名</dt>
             <dd>{tokenFileName}</dd>
-            <dt>同步目录</dt>
-            <dd>{tokenDirectoryInput ? `${tokenDirectoryInput}/${tokenFileName}` : "未配置"}</dd>
           </dl>
         ) : (
           <p className="config-hint">连接 Bridge 后会显示当天口令文件位置。</p>
@@ -383,17 +394,17 @@ export function ConfigSubPage({
             placeholder="可手动粘贴完整路径，例如 D:\\Sync\\ChattingCursor"
           />
         </label>
-        <div className="config-actions">
+        <div className="config-actions token-directory-actions">
           <button
             type="button"
-            className="btn-secondary config-action-secondary"
+            className="btn-secondary config-action-secondary token-directory-action"
             onClick={() => void handleApplyTokenDirectoryPath()}
           >
             使用这个路径
           </button>
         </div>
         <p className="config-hint">
-          页面不会显示 token 内容。请从同步文件里查看当天 token，并在需要时粘贴到聊天页；这里仅配置同步目录路径。Bridge 会把固定文件名 <code>{tokenFileName}</code> 写入该目录。
+          远程访问时，请把当天 token 粘贴到上方输入框；这里仅配置同步目录路径。Bridge 会把固定文件名 <code>{tokenFileName}</code> 写入该目录。
         </p>
       </section>
 

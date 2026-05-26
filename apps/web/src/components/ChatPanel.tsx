@@ -327,7 +327,7 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
       <section className="chat-panel">
         <div className="toolbar">
           <label className="model-select">
-            模型
+            <span className="model-select-label">模型</span>
             <select
               value={selectedModel}
               onChange={(event) => handleModelChange(event.target.value)}
