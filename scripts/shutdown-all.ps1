@@ -121,27 +121,85 @@ function Stop-ProcessSafe([int]$ProcessId, [string]$Label) {
   if ($ProcessId -le 0) {
     return $false
   }
+  $proc = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+  if (-not $proc) {
+    return $false
+  }
+  # 优先结束整棵进程树，避免只杀掉 cmd/pnpm 而 node 仍占用端口
+  & taskkill /PID $ProcessId /T /F *>$null
+  if ($LASTEXITCODE -eq 0) {
+    Write-Host "  已结束 $Label (PID $ProcessId，含子进程)"
+    return $true
+  }
   try {
-    $proc = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
-    if (-not $proc) {
-      return $false
-    }
     Stop-Process -Id $ProcessId -Force -ErrorAction Stop
     Write-Host "  已结束 $Label (PID $ProcessId)"
     return $true
   } catch {
-    try {
-      & taskkill /PID $ProcessId /T /F *>$null
-      if ($LASTEXITCODE -eq 0) {
-        Write-Host "  已结束 $Label (PID $ProcessId，含子进程)"
-        return $true
-      }
-    } catch {
-      # taskkill 失败则忽略
-    }
     Write-Host "  无法结束 $Label (PID $ProcessId): $($_.Exception.Message)"
     return $false
   }
+}
+
+
+function Test-ProjectPortListener([string]$CommandLine, [int]$ProcessId) {
+  if (Test-BridgeCommandLine -CommandLine $CommandLine) {
+    return $true
+  }
+  if ($CommandLine -and ($CommandLine -match $RootPattern)) {
+    return $true
+  }
+  # 父进程已被结束时，子 node 可能拿不到完整命令行，向上查找是否属于本项目
+  try {
+    $currentId = $ProcessId
+    for ($depth = 0; $depth -lt 5; $depth++) {
+      $parent = Get-CimInstance Win32_Process -Filter "ProcessId = $currentId" -ErrorAction SilentlyContinue
+      if (-not $parent) {
+        break
+      }
+      $parentCmd = $parent.CommandLine
+      if ($parentCmd -and ($parentCmd -match $RootPattern)) {
+        return $true
+      }
+      if (-not $parent.ParentProcessId -or $parent.ParentProcessId -le 4) {
+        break
+      }
+      $currentId = [int]$parent.ParentProcessId
+    }
+  } catch {
+    return $false
+  }
+  return $false
+}
+
+
+function Clear-PortListeners([int]$Port, [int]$MaxWaitSeconds = 15) {
+  $deadline = (Get-Date).AddSeconds($MaxWaitSeconds)
+  while ((Get-Date) -lt $deadline) {
+    $pids = @(Get-ListenerPids -Port $Port)
+    if ($pids.Count -eq 0) {
+      return $true
+    }
+    foreach ($procId in $pids) {
+      $cmd = Get-ProcessCommandLine -ProcessId $procId
+      if (Test-ProjectPortListener -CommandLine $cmd -ProcessId $procId) {
+        Stop-ProcessSafe -ProcessId $procId -Label "端口 $Port 监听进程" | Out-Null
+      }
+    }
+    Start-Sleep -Milliseconds 500
+  }
+  return -not (Test-PortInUse -Port $Port)
+}
+
+
+function Wait-PortReleased([int]$Port, [int]$MaxWaitSeconds = 10) {
+  for ($i = 0; $i -lt ($MaxWaitSeconds * 2); $i++) {
+    if (-not (Test-PortInUse -Port $Port)) {
+      return $true
+    }
+    Start-Sleep -Milliseconds 500
+  }
+  return -not (Test-PortInUse -Port $Port)
 }
 
 
@@ -215,6 +273,9 @@ if ($bridgePids.Count -eq 0) {
   }
 }
 
+# 结束仍占用 Bridge 端口的残留 node/cmd 子进程
+$null = Clear-PortListeners -Port $BridgePort -MaxWaitSeconds 15
+
 Write-Step "停止 cloudflared 隧道..."
 $cloudPids = @($candidatePids.GetEnumerator() | Where-Object { $_.Value -eq "cloudflared" } | ForEach-Object { $_.Key })
 if ($cloudPids.Count -eq 0) {
@@ -255,11 +316,13 @@ if ($runAllPids.Count -gt 0) {
   }
 }
 
-Start-Sleep -Milliseconds 500
+$null = Wait-PortReleased -Port $BridgePort -MaxWaitSeconds 10
 
 Write-Step "端口检查..."
 if (Test-PortInUse -Port $BridgePort) {
-  Write-Host "  警告: 端口 $BridgePort 仍被占用，可能有非本项目进程或需稍后再试。"
+  $stalePids = @(Get-ListenerPids -Port $BridgePort)
+  Write-Host "  警告: 端口 $BridgePort 仍被占用 (PID: $($stalePids -join ', '))。"
+  Write-Host "  可能是非本项目进程，请手动结束后再运行 run.bat。"
 } else {
   Write-Host "  端口 $BridgePort 已释放。"
 }

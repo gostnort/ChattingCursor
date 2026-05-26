@@ -164,18 +164,65 @@ function Invoke-TunnelLine([string]$Line) {
 }
 
 
-function Test-PortInUse([int]$Port) {
+function Get-ListenerPids([int]$Port) {
+  $pids = @()
   try {
-    $conn = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
-    if ($conn) {
+    $pids = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue |
+      Select-Object -ExpandProperty OwningProcess -Unique)
+  } catch {
+    # Get-NetTCPConnection 不可用时回退 netstat
+  }
+  if ($pids.Count -eq 0) {
+    $pattern = ":$Port\s"
+    $lines = netstat -ano -p tcp 2>$null | Select-String "LISTENING" | Select-String $pattern
+    foreach ($line in $lines) {
+      $parts = ($line.ToString().Trim() -split "\s+")
+      if ($parts.Length -ge 1) {
+        $pidText = $parts[-1]
+        if ($pidText -match '^\d+$') {
+          $pids += [int]$pidText
+        }
+      }
+    }
+    $pids = @($pids | Select-Object -Unique)
+  }
+  return $pids
+}
+
+
+function Test-PortInUse([int]$Port) {
+  return (Get-ListenerPids -Port $Port).Count -gt 0
+}
+
+
+function Clear-StaleBridgePort {
+  param([int]$MaxWaitSeconds = 20)
+  Write-Host ""
+  Write-Host "端口 $BridgePort 已被占用，正在尝试清理残留进程..."
+  Write-Host "（也可先运行 shutdown.bat）"
+  Write-Host ""
+  & "$PSScriptRoot\shutdown-all.ps1" -SkipWeb
+  $deadline = (Get-Date).AddSeconds($MaxWaitSeconds)
+  while ((Get-Date) -lt $deadline) {
+    if (-not (Test-PortInUse -Port $BridgePort)) {
       return $true
     }
-  } catch {
-    # 回退 netstat
+    Start-Sleep -Milliseconds 500
   }
-  $pattern = ":$Port\s"
-  $lines = netstat -ano -p tcp 2>$null | Select-String "LISTENING" | Select-String $pattern
-  return [bool]$lines
+  return -not (Test-PortInUse -Port $BridgePort)
+}
+
+
+function Resolve-PnpmExe {
+  $cmd = Get-Command pnpm.cmd -ErrorAction SilentlyContinue
+  if ($cmd) {
+    return $cmd.Source
+  }
+  $cmd = Get-Command pnpm -ErrorAction SilentlyContinue
+  if ($cmd) {
+    return $cmd.Source
+  }
+  return "pnpm"
 }
 
 
@@ -195,8 +242,8 @@ function Start-BridgeProcess {
   $env:BRIDGE_PUBLIC_URL = "http://127.0.0.1:$BridgePort"
   $env:BRIDGE_PORT = "$BridgePort"
   $psi = New-Object System.Diagnostics.ProcessStartInfo
-  $psi.FileName = "cmd.exe"
-  $psi.Arguments = "/c pnpm dev:bridge"
+  $psi.FileName = Resolve-PnpmExe
+  $psi.Arguments = "dev:bridge"
   $psi.WorkingDirectory = $Root
   $psi.UseShellExecute = $false
   $psi.RedirectStandardOutput = $true
@@ -271,11 +318,15 @@ try {
   }
 
   if (Test-PortInUse -Port $BridgePort) {
-    Write-Host ""
-    Write-Host "警告: 端口 $BridgePort 已被占用。"
-    Write-Host "若上次未正常退出，请先运行 shutdown.bat，再运行 run.bat。"
-    Write-Host ""
-    exit 2
+    if (-not (Clear-StaleBridgePort)) {
+      $stalePids = @(Get-ListenerPids -Port $BridgePort)
+      Write-Host ""
+      Write-Host "错误: 端口 $BridgePort 仍被占用 (PID: $($stalePids -join ', '))。"
+      Write-Host "请先运行 shutdown.bat，或手动结束上述进程后再运行 run.bat。"
+      Write-Host ""
+      exit 2
+    }
+    Write-Host "端口 $BridgePort 已释放，继续启动。"
   }
 
   Write-Step "启动 Bridge (端口 $BridgePort)..."
