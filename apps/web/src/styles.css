@@ -414,6 +414,8 @@ body {
 
   min-width: 0;
 
+  font-size: var(--user-text-size);
+
 }
 
 
@@ -424,6 +426,8 @@ body {
 
   white-space: nowrap;
 
+  font-size: var(--user-text-size);
+
 }
 
 
@@ -432,7 +436,7 @@ body {
 
   width: 100%;
 
-  padding: 0.5rem;
+  padding: 0.8rem 0.9rem;
 
   border-radius: 6px;
 
@@ -442,6 +446,19 @@ body {
 
   color: inherit;
 
+  font: inherit;
+
+  line-height: 1.35;
+
+  min-height: 3.2rem;
+
+}
+
+
+.model-select select option {
+
+  font-size: var(--user-text-size);
+
 }
 
 
@@ -450,9 +467,9 @@ body {
 
   flex-shrink: 0;
 
-  min-width: 5rem;
+  min-width: 5.75rem;
 
-  padding: 0.5rem 0.75rem;
+  padding: 0.8rem 0.9rem;
 
   border: 1px solid #30363d;
 
@@ -465,6 +482,8 @@ body {
   cursor: pointer;
 
   white-space: nowrap;
+
+  font-size: var(--user-text-size);
 
 }
 

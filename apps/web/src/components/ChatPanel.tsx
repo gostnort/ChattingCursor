@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChatMessage, ModelInfo } from "@chatting-cursor/shared";
 import {
   createChatSession,
@@ -51,6 +51,71 @@ function shortenModelLabel(label: string): string {
 }
 
 
+function normalizeModelBase(label: string): string {
+  return label.replace(/\s*\(.*?\)\s*/g, "").trim();
+}
+
+
+function extractModelGroupKey(label: string): string {
+  const base = normalizeModelBase(label);
+  if (/^auto$/i.test(base)) {
+    return "auto";
+  }
+  const parts = base.match(/[A-Za-z]+(?:\d+(?:\.\d+)?)?|\d+(?:\.\d+)?[A-Za-z]*/g) ?? [];
+  if (parts.length >= 2) {
+    return parts.slice(0, 2).join("|").toLowerCase();
+  }
+  if (parts.length > 0) {
+    return parts.join("|").toLowerCase();
+  }
+  return base.toLowerCase();
+}
+
+
+function compressModelOptions(source: ModelInfo[]): {
+  models: ModelInfo[];
+  aliases: Map<string, string>;
+} {
+  const groups = new Map<string, ModelInfo[]>();
+  for (const model of source) {
+    const key = extractModelGroupKey(model.label);
+    const group = groups.get(key) ?? [];
+    group.push(model);
+    groups.set(key, group);
+  }
+  const compressed: ModelInfo[] = [];
+  const aliases = new Map<string, string>();
+  for (const group of groups.values()) {
+    const representative = [...group].sort((left, right) => {
+      const leftBase = normalizeModelBase(left.label);
+      const rightBase = normalizeModelBase(right.label);
+      return leftBase.length - rightBase.length || left.label.length - right.label.length;
+    })[0];
+    if (!representative) {
+      continue;
+    }
+    const hasDefault = group.some((item) => item.isDefault);
+    compressed.push({
+      ...representative,
+      isDefault: hasDefault || representative.isDefault,
+    });
+    for (const item of group) {
+      aliases.set(item.id, representative.id);
+    }
+  }
+  compressed.sort((left, right) => {
+    if (left.isDefault && !right.isDefault) {
+      return -1;
+    }
+    if (!left.isDefault && right.isDefault) {
+      return 1;
+    }
+    return normalizeModelBase(left.label).localeCompare(normalizeModelBase(right.label));
+  });
+  return { models: compressed, aliases };
+}
+
+
 /** 最小聊天面板 */
 export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
   const restoredState = loadChatState();
@@ -70,6 +135,7 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const { toggleSpeak, speakingKey } = useSpeech();
+  const compressedModels = useMemo(() => compressModelOptions(models), [models]);
 
 
   const resizeComposer = useCallback((): void => {
@@ -97,10 +163,11 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
         setModels(result.models);
         const stored = localStorage.getItem(MODEL_STORAGE_KEY);
         const defaultModel = result.models.find((item) => item.isDefault)?.id ?? result.models[0]?.id ?? "";
+        const aliasMap = compressModelOptions(result.models).aliases;
         if (stored && result.models.some((item) => item.id === stored)) {
-          setSelectedModel(stored);
+          setSelectedModel(aliasMap.get(stored) ?? stored);
         } else if (defaultModel) {
-          setSelectedModel(defaultModel);
+          setSelectedModel(aliasMap.get(defaultModel) ?? defaultModel);
         }
       } catch (error) {
         if (!cancelled) {
@@ -128,7 +195,7 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
           setSessionId(recent.sessionId);
           setMessages(recent.messages);
           if (recent.model) {
-            setSelectedModel(recent.model);
+            setSelectedModel(compressedModels.aliases.get(recent.model) ?? recent.model);
           }
           setConnectionError(null);
           return;
@@ -150,7 +217,7 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
       cancelled = true;
       sseCloseRef.current?.();
     };
-  }, [bridgeToken, bridgeUrl, sessionId]);
+  }, [bridgeToken, bridgeUrl, compressedModels.aliases, sessionId]);
 
 
   useEffect(() => {
@@ -159,6 +226,18 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
       localStorage.setItem(MODEL_STORAGE_KEY, selectedModel);
     }
   }, [messages, sessionId, selectedModel]);
+
+
+  useEffect(() => {
+    if (!selectedModel) {
+      return;
+    }
+    const mapped = compressedModels.aliases.get(selectedModel);
+    if (mapped && mapped !== selectedModel) {
+      setSelectedModel(mapped);
+      localStorage.setItem(MODEL_STORAGE_KEY, mapped);
+    }
+  }, [compressedModels.aliases, selectedModel]);
 
 
   useEffect(() => {
@@ -203,7 +282,9 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
 
 
   const selectedModelLabel = shortenModelLabel(
-    models.find((item) => item.id === selectedModel)?.label ?? (selectedModel || "Agent"),
+    compressedModels.models.find((item) => item.id === selectedModel)?.label
+      ?? models.find((item) => item.id === selectedModel)?.label
+      ?? (selectedModel || "Agent"),
   );
 
 
@@ -333,10 +414,10 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
               onChange={(event) => handleModelChange(event.target.value)}
               disabled={isSending || models.length === 0}
             >
-              {models.length === 0 ? (
+              {compressedModels.models.length === 0 ? (
                 <option value="">加载中…</option>
               ) : (
-                models.map((model) => (
+                compressedModels.models.map((model) => (
                   <option key={model.id} value={model.id}>
                     {model.label}{model.isDefault ? " (默认)" : ""}
                   </option>
