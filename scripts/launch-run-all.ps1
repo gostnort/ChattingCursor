@@ -1,4 +1,4 @@
-﻿# 在隐藏窗口中启动 run-all.ps1，轮询日志直到启动完成或失败，然后退出（不阻塞控制台）。
+# 在隐藏窗口中启动 run-all.ps1，轮询日志直到启动完成或失败，然后退出（不阻塞控制台）。
 param(
   [switch]$NoWeb,
   [Parameter(ValueFromRemainingArguments = $true)]
