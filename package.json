@@ -11,10 +11,7 @@
     "typecheck": "pnpm --filter @chatting-cursor/shared build && pnpm -r typecheck",
     "test:bridge": "pnpm --filter @chatting-cursor/cli-client build && pnpm --filter @chatting-cursor/bridge test",
     "cli:watch": "node scripts/cli-watch.mjs",
-    "quality:watch": "node scripts/quality-watch.mjs",
-    "crew:setup": "python -m venv .venv && .venv\\Scripts\\pip install -r requirements.txt",
-    "crew:status": ".venv\\Scripts\\python scripts/run-crew.py --status",
-    "crew:run": ".venv\\Scripts\\python scripts/run-crew.py --config configs/crews/example.yaml --inputs-file configs/crews/example-inputs.json --dry-run"
+    "quality:watch": "node scripts/quality-watch.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.22.0",

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { AuthStatusResponse, CrewStatusResponse, HistorySessionSummary, LocalConfigResponse } from "@chatting-cursor/shared";
+import type { AuthStatusResponse, HistorySessionSummary, LocalConfigResponse } from "@chatting-cursor/shared";
 import type { AssistantBubbleColorKey, AssistantBubbleColors } from "../assistantBubbleSettings";
 import { normalizeHexColor } from "../assistantBubbleSettings";
 import {
@@ -16,8 +16,7 @@ import { GITHUB_PAGES_URL, isGitHubPages, isLocalWebOrigin } from "../environmen
 import { MAX_TEXT_SIZE_PX, MIN_TEXT_SIZE_PX } from "../textSizeSettings";
 import {
   fetchAuthStatus,
-  fetchCloudflareTunnelConfig,
-  fetchCrewStatus,
+  fetchCloudflareTunnelConfig,
   fetchHistoryContent,
   fetchHistoryList,
   fetchLocalConfig,
@@ -100,8 +99,7 @@ export function ConfigSubPage({
 }: ConfigSubPageProps) {
   const onGitHubPages = isGitHubPages();
   const [authStatus, setAuthStatus] = useState<AuthStatusResponse | null>(null);
-  const [localConfig, setLocalConfig] = useState<LocalConfigResponse | null>(null);
-  const [crewStatus, setCrewStatus] = useState<CrewStatusResponse | null>(null);
+  const [localConfig, setLocalConfig] = useState<LocalConfigResponse | null>(null);
   const [sessions, setSessions] = useState<HistorySessionSummary[]>([]);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [historyContent, setHistoryContent] = useState("");
@@ -184,18 +182,16 @@ export function ConfigSubPage({
         }
         setAuthStatus(auth);
         if (!isLocalBridgeUrl(normalizedBridgeUrl)) {
-          setLocalConfig(null);
-          setCrewStatus(null);
+          setLocalConfig(null);
           setSessions([]);
           setSelectedFile(null);
           setHistoryContent("");
           setLoading(false);
           return;
         }
-        const [config, history, crew, tokenFile, tunnelConfig] = await Promise.all([
+        const [config, history, tokenFile, tunnelConfig] = await Promise.all([
           fetchLocalConfig(normalizedBridgeUrl, bridgeToken),
           fetchHistoryList(normalizedBridgeUrl, bridgeToken),
-          fetchCrewStatus(normalizedBridgeUrl, bridgeToken).catch(() => null),
           fetchLocalTokenFile(normalizedBridgeUrl, bridgeToken).catch(() => null),
           fetchCloudflareTunnelConfig(normalizedBridgeUrl, bridgeToken).catch(() => null),
         ]);
@@ -204,8 +200,7 @@ export function ConfigSubPage({
         }
         setLocalConfig(config);
         setTokenDirectoryInput(config.tokenFilePath.replace(new RegExp(`[\\\\/]${config.tokenFilePath.split(/[\\\\/]/).pop() ?? ""}$`), ""));
-        setSessions(history.sessions);
-        setCrewStatus(crew);
+        setSessions(history.sessions);
         if (tunnelConfig) {
           const merged: CloudflareTunnelLocalSettings = {
             tunnelName: tunnelConfig.tunnelName?.trim() ?? "",
@@ -804,29 +799,7 @@ export function ConfigSubPage({
             </button>
           </section>
 
-          <section className="config-section">
-            <h2>crewAI 编排</h2>
-            {crewStatus ? (
-              <dl className="config-grid">
-                <dt>Python</dt>
-                <dd>{crewStatus.python.available ? (crewStatus.python.command ?? "可用") : (crewStatus.python.message ?? "不可用")}</dd>
-                <dt>crewAI</dt>
-                <dd>{crewStatus.crewai.installed ? `已安装 (${crewStatus.crewai.version ?? "未知版本"})` : (crewStatus.crewai.message ?? "未安装")}</dd>
-                <dt>Chrome 验证</dt>
-                <dd>
-                  {crewStatus.chrome.available
-                    ? `${crewStatus.chrome.endpoint}（${crewStatus.chrome.pages ?? 0} 个页面）`
-                    : (crewStatus.chrome.message ?? "未连接 9222")}
-                </dd>
-                <dt>示例配置</dt>
-                <dd>{crewStatus.exampleConfig.valid ? crewStatus.exampleConfig.path : (crewStatus.exampleConfig.message ?? "无效")}</dd>
-                <dt>运行方式</dt>
-                <dd><code>pnpm crew:run</code>（dry-run）· <code>POST /crews/run</code></dd>
-              </dl>
-            ) : (
-              <p className="config-hint">crewAI 状态不可用。</p>
-            )}
-          </section>
+          
         </>
       )}
 

@@ -6,7 +6,6 @@ import { loadConfig, isOriginAllowed } from "./config.js";
 import { inspectChromeEndpoint } from "./services/chrome-google-search.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerChatRoutes } from "./routes/chat.js";
-import { registerCrewRoutes } from "./routes/crews.js";
 import { registerLocalRoutes } from "./routes/local.js";
 import { tokenRotationService } from "./services/token-rotation.js";
 
@@ -43,7 +42,6 @@ async function main(): Promise<void> {
   });
   await registerAuthRoutes(app);
   await registerChatRoutes(app);
-  await registerCrewRoutes(app);
   await registerLocalRoutes(app);
   await app.listen({ host: config.host, port: config.port });
   app.log.info(`Bridge 运行于 http://${config.host}:${config.port}`);

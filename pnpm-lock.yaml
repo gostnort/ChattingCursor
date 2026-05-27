@@ -26,9 +26,6 @@ importers:
       '@chatting-cursor/cli-client':
         specifier: workspace:*
         version: link:../../packages/cli-client
-      '@chatting-cursor/orchestrator':
-        specifier: workspace:*
-        version: link:../../packages/orchestrator
       '@chatting-cursor/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -111,22 +108,6 @@ importers:
         specifier: workspace:*
         version: link:../shared
     devDependencies:
-      typescript:
-        specifier: ^5.8.2
-        version: 5.9.3
-
-  packages/orchestrator:
-    dependencies:
-      '@chatting-cursor/shared':
-        specifier: workspace:*
-        version: link:../shared
-      yaml:
-        specifier: ^2.9.0
-        version: 2.9.0
-    devDependencies:
-      '@types/node':
-        specifier: ^22.13.10
-        version: 22.19.19
       typescript:
         specifier: ^5.8.2
         version: 5.9.3
@@ -4689,7 +4670,8 @@ snapshots:
 
   yallist@4.0.0: {}
 
-  yaml@2.9.0: {}
+  yaml@2.9.0:
+    optional: true
 
   yocto-queue@0.1.0: {}
 

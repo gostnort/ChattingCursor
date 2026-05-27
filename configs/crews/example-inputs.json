@@ -1,6 +1,0 @@
-{
-  "repo_root": "E:\\my_github\\ChattingCursor",
-  "local_url": "http://127.0.0.1:43210/ChattingCursor/",
-  "pages_url": "https://gostnort.github.io/ChattingCursor/",
-  "acceptance_criteria": "页面能恢复历史对话，顶部不显示“与 Cursor Agent 对话。”，聊天与本地视图可切换，按钮与输入区完整显示。"
-}

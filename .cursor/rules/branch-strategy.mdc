@@ -1,4 +1,4 @@
----
+﻿---
 description: Branch policy for main vs crewAI reference code
 alwaysApply: false
 ---
@@ -7,10 +7,8 @@ alwaysApply: false
 
 ## main branch
 
-- `crewAI/` is listed in `.gitignore` and is **not** committed on main
-- Use for releases, GitHub Pages, and external collaboration
-
-You may still keep a local `crewAI/` folder for reading; it does not affect core chat development.
+- **main at v0.2+ carries no crewAI application code** (no `configs/crews/`, `packages/orchestrator/`, bridge `/crews` routes, or `crewAI/` tree on this branch).
+- Use for releases, GitHub Pages, and external collaboration.
 
 ## dev / feature branches (e.g. `with-crewai`)
 
@@ -24,7 +22,7 @@ When building multi-agent orchestration:
 
 - main stays small without 3000+ reference files
 - Feature branches can mirror crewAI Agent / Task / Crew / Event patterns in TypeScript
-- ChattingCursor does **not** require the crewAI Python runtime for core chat; it is optional tooling
+- ChattingCursor does **not** require the crewAI Python runtime for core chat; it is optional tooling on feature branches only
 
 ## Deletion note
 

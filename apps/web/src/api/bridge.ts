@@ -5,7 +5,6 @@ import type {
   ChatSendResponse,
   ChatImageUploadResponse,
   ChatAnalyzeImageResponse,
-  CrewStatusResponse,
   HistorySearchResponse,
   LatestRunResponse,
   LocalConfigResponse,
@@ -440,18 +439,6 @@ export async function updateTokenDirectory(
     throw new Error(await readErrorDetail(response, `更新 token 目录失败 (${response.status})`));
   }
   return response.json() as Promise<LocalTokenDirectoryUpdateResponse>;
-}
-
-
-/** 获取 crewAI 环境状态 */
-export async function fetchCrewStatus(bridgeUrl: string, token?: string): Promise<CrewStatusResponse> {
-  const response = await fetch(`${bridgeUrl}/crews/status`, {
-    headers: buildAuthHeaders(token),
-  });
-  if (!response.ok) {
-    throw new Error(await readErrorDetail(response, `crewAI 状态不可用 (${response.status})`));
-  }
-  return response.json() as Promise<CrewStatusResponse>;
 }
 
 
