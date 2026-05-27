@@ -4,6 +4,9 @@ dist/
 .venv/
 .test-screenshots/
 *.log
+.run-test*.log
+.run-test*.log.err
+scripts/_run-test.log
 .env
 .env.*
 !.env.example

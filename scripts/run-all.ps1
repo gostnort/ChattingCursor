@@ -5,7 +5,8 @@ param(
   [string]$TokenSyncDir = "",
   [switch]$WithWeb,
   [switch]$NoWeb,
-  [switch]$WithQualityWatch
+  [switch]$WithQualityWatch,
+  [switch]$VerboseTunnel
 )
 
 # Web dev server is on by default; use -NoWeb to skip (e.g. tunnel-only runs).
@@ -642,6 +643,17 @@ function Invoke-TunnelLine([string]$Line) {
 }
 
 
+function Write-TunnelLine([string]$Line) {
+  if ([string]::IsNullOrWhiteSpace($Line)) {
+    return
+  }
+  if ($VerboseTunnel) {
+    Write-Host ('[tunnel] ' + $Line)
+  }
+  Invoke-TunnelLine -Line $Line
+}
+
+
 function Poll-TunnelOutput {
   if (-not $script:TunnelProcess -or $script:TunnelProcess.HasExited) {
     return
@@ -654,8 +666,7 @@ function Poll-TunnelOutput {
       while ($reader.Peek() -ge 0) {
         $line = $reader.ReadLine()
         if ($line) {
-          Write-Host ('[tunnel] ' + $line)
-          Invoke-TunnelLine -Line $line
+          Write-TunnelLine -Line $line
         }
       }
     }
@@ -677,8 +688,7 @@ function Read-TunnelLogNewLines {
       while (-not $reader.EndOfStream) {
         $line = $reader.ReadLine()
         if ($line) {
-          Write-Host ('[tunnel] ' + $line)
-          Invoke-TunnelLine -Line $line
+          Write-TunnelLine -Line $line
         }
       }
       $script:TunnelLogOffset = $stream.Position

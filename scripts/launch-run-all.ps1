@@ -1,4 +1,4 @@
-# 在隐藏窗口中启动 run-all.ps1，轮询日志直到启动完成或失败，然后退出（不阻塞控制台）
+﻿# 在隐藏窗口中启动 run-all.ps1，轮询日志直到启动完成或失败，然后退出（不阻塞控制台）。
 param(
   [switch]$NoWeb,
   [Parameter(ValueFromRemainingArguments = $true)]
@@ -9,6 +9,7 @@ $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 $RunAllScript = Join-Path $PSScriptRoot "run-all.ps1"
 $LogPath = Join-Path $env:TEMP "chattingcursor-run-all.log"
+$ErrLogPath = Join-Path $env:TEMP "chattingcursor-run-all.err.log"
 $runAllArgs = @()
 if (-not $NoWeb) {
   $runAllArgs += "-WithWeb"
@@ -16,8 +17,10 @@ if (-not $NoWeb) {
 if ($Remaining) {
   $runAllArgs += $Remaining
 }
-if (Test-Path $LogPath) {
-  Remove-Item $LogPath -Force -ErrorAction SilentlyContinue
+foreach ($path in @($LogPath, $ErrLogPath)) {
+  if (Test-Path $path) {
+    Remove-Item $path -Force -ErrorAction SilentlyContinue
+  }
 }
 $argList = @(
   "-NoProfile",
@@ -29,10 +32,11 @@ $proc = Start-Process -FilePath "powershell.exe" `
   -WorkingDirectory $Root `
   -WindowStyle Hidden `
   -RedirectStandardOutput $LogPath `
-  -RedirectStandardError $LogPath `
+  -RedirectStandardError $ErrLogPath `
   -PassThru
 Write-Host "Starting ChattingCursor in background (monitor PID $($proc.Id))..."
 Write-Host "Log: $LogPath"
+Write-Host "Err: $ErrLogPath"
 $deadline = (Get-Date).AddSeconds(150)
 $startupOk = $false
 $startupFail = $false
@@ -57,6 +61,18 @@ while ((Get-Date) -lt $deadline) {
   }
   Start-Sleep -Milliseconds 500
 }
+function Write-RunAllErrTail {
+  if (-not (Test-Path $ErrLogPath)) {
+    return
+  }
+  $errTail = Get-Content -LiteralPath $ErrLogPath -Tail 40 -ErrorAction SilentlyContinue
+  if (-not $errTail) {
+    return
+  }
+  Write-Host ""
+  Write-Host "--- stderr (last 40 lines): $ErrLogPath ---"
+  $errTail | ForEach-Object { Write-Host $_ }
+}
 Write-Host ""
 if ($startupOk) {
   Write-Host "[OK] Startup flow complete. Services keep running in the background."
@@ -67,11 +83,13 @@ if ($startupOk) {
 }
 if ($proc.HasExited -and $proc.ExitCode -eq 2) {
   Write-Host "[FAIL] Port conflict or cleanup failed (exit 2). See log: $LogPath"
+  Write-RunAllErrTail
   exit 2
 }
 if ($startupFail -or ($proc.HasExited -and $proc.ExitCode -ne 0)) {
   $code = if ($proc.HasExited) { $proc.ExitCode } else { 1 }
   Write-Host "[FAIL] Startup did not finish successfully (exit $code). See log: $LogPath"
+  Write-RunAllErrTail
   exit $code
 }
 Write-Host "[OK] Background launcher is still starting (PID $($proc.Id))."
