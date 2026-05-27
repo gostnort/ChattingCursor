@@ -370,79 +370,6 @@ function Get-RecoveryTimestamp {
 }
 
 
-function Read-TokenFileFields {
-  param([string]$Content)
-  $fields = @{}
-  if ([string]::IsNullOrWhiteSpace($Content)) {
-    return $fields
-  }
-  foreach ($line in ($Content -split '\r?\n')) {
-    $trimmed = $line.Trim()
-    if (-not $trimmed) {
-      continue
-    }
-    $sep = $trimmed.IndexOf(':')
-    if ($sep -lt 0) {
-      continue
-    }
-    $key = $trimmed.Substring(0, $sep).Trim().ToLowerInvariant()
-    $value = $trimmed.Substring($sep + 1).Trim()
-    $fields[$key] = $value
-  }
-  return $fields
-}
-
-
-function Format-CanonicalTokenFileContent {
-  param(
-    [string]$Datetime,
-    [string]$Token,
-    [string]$PublicUrl,
-    [string]$PreviousDatetime = $null
-  )
-  $lines = @("datetime: $Datetime")
-  if ($PreviousDatetime) {
-    $lines += "previousDatetime: $PreviousDatetime"
-  }
-  $lines += @("token: $Token", "publicBridgeUrl: $PublicUrl", "")
-  return ($lines -join "`n")
-}
-
-
-function Write-PublicBridgeUrlToTokenFileDirect([string]$PublicUrl) {
-  $filePath = Get-TokenFilePath
-  $dir = Split-Path -Parent $filePath
-  if (-not (Test-Path $dir)) {
-    New-Item -ItemType Directory -Path $dir -Force | Out-Null
-  }
-  $nowIso = (Get-Date).ToUniversalTime().ToString('o')
-  $raw = ""
-  if (Test-Path $filePath) {
-    $raw = Get-Content -Path $filePath -Raw -ErrorAction SilentlyContinue
-  }
-  if ([string]::IsNullOrWhiteSpace($raw)) {
-    $content = Format-CanonicalTokenFileContent -Datetime $nowIso -Token "PENDING_SYNC_FROM_BRIDGE" -PublicUrl $PublicUrl
-  } else {
-    $fields = Read-TokenFileFields -Content $raw
-    $effectiveDt = $fields['datetime']
-    if (-not $effectiveDt) {
-      $effectiveDt = $fields['generatedat']
-    }
-    $previousDt = $fields['previousdatetime']
-    $token = $fields['token']
-    if (-not $token) {
-      $token = "PENDING_SYNC_FROM_BRIDGE"
-    }
-    $datetime = if ($effectiveDt) { $effectiveDt } else { $nowIso }
-    if ($previousDt -and $previousDt -eq $datetime) {
-      $previousDt = $null
-    }
-    $content = Format-CanonicalTokenFileContent -Datetime $datetime -PreviousDatetime $previousDt -Token $token -PublicUrl $PublicUrl
-  }
-  Set-Content -Path $filePath -Value $content -Encoding utf8
-}
-
-
 function Invoke-BridgeRegenerateToken {
   try {
     $response = Invoke-RestMethod `
@@ -526,12 +453,15 @@ function Test-PublicBridgeCommunication([string]$PublicUrl) {
 
 function Invoke-TunnelRecovery([string]$Reason) {
   $timestamp = Get-RecoveryTimestamp
-  Write-Host "[RECOVERY START] Tunnel-only restart 鈥?reason: $Reason"
-  # 浠呴噸鍚?cloudflared锛涢€氳繃 Bridge API 鏇存柊 token/URL锛屼笉閲嶅惎 Bridge/Web 绛夎繘绋?
-  $null = Invoke-BridgeRegenerateToken
+  Write-Host "[RECOVERY START] Tunnel-only restart — reason: $Reason"
+  # 仅重启 cloudflared；token/URL 仅经 Bridge API 写入（见 Set-PublicBridgeUrlInTokenFile）
   Restart-TunnelProcess
   if (-not (Wait-ForTunnelUrl -MaxSeconds 90)) {
     Write-Fail "[$timestamp] No new URL detected within timeout after tunnel restart"
+    return $false
+  }
+  if (-not (Invoke-BridgeRegenerateToken)) {
+    Write-Fail "[$timestamp] Bridge failed to rotate token after tunnel URL was applied"
     return $false
   }
   $onDisk = Get-TokenFilePublicUrl
@@ -554,13 +484,6 @@ function Set-PublicBridgeUrlInTokenFile([string]$PublicUrl, [switch]$Force) {
     return $true
   }
   $normalized = Ensure-HttpsPublicBridgeUrl $PublicUrl
-  try {
-    Write-PublicBridgeUrlToTokenFileDirect -PublicUrl $normalized
-    Write-Ok "Token file updated directly (disk-first)"
-  } catch {
-    Write-Fail "Failed to write token file directly: $($_.Exception.Message)"
-    return $false
-  }
   $body = @{ publicBridgeUrl = $normalized } | ConvertTo-Json
   try {
     $response = Invoke-RestMethod `
@@ -569,17 +492,13 @@ function Set-PublicBridgeUrlInTokenFile([string]$PublicUrl, [switch]$Force) {
       -ContentType "application/json; charset=utf-8" `
       -Body $body `
       -ErrorAction Stop
-    Write-Ok "Bridge API synced publicBridgeUrl: $($response.publicBridgeUrl)"
+    Write-Ok "Bridge rotated token and set publicBridgeUrl: $($response.publicBridgeUrl)"
     if ($response.tokenFilePath) {
       Write-Host "     Bridge token file: $($response.tokenFilePath)"
     }
-    $apiUrl = [string]$response.publicBridgeUrl
-    if ($apiUrl -and $apiUrl -notmatch 'trycloudflare\.com') {
-      Write-Host "     Warning: Bridge memory URL is still local; keeping disk file as source of truth."
-      Write-PublicBridgeUrlToTokenFileDirect -PublicUrl $normalized
-    }
   } catch {
-    Write-Fail "Bridge API sync failed (disk file already written): $($_.Exception.Message)"
+    Write-Fail "Bridge API failed to rotate token and set URL: $($_.Exception.Message)"
+    return $false
   }
   if (-not (Test-TokenFileHasTrycloudflareUrl)) {
     Write-Fail "No trycloudflare public URL found in token file"

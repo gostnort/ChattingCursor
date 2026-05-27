@@ -147,6 +147,15 @@ function deriveDailyToken(date: string, salt: string): string {
 }
 
 
+/** 隧道重连/手动轮换：口令与完整 datetime + 新 salt 绑定，同日多次重连也会变化 */
+function deriveRotatedToken(datetime: string, salt: string): string {
+  return createHash("sha256")
+    .update(`${datetime}:${salt}`, "utf8")
+    .digest("base64url")
+    .slice(0, 32);
+}
+
+
 function buildTokenFileContent(options: {
   datetime: string;
   previousDatetime?: string;
@@ -304,17 +313,7 @@ export class TokenRotationService {
   async updatePublicBridgeUrl(url: string): Promise<string> {
     const normalized = normalizePublicBridgeUrl(url);
     this.publicBridgeUrl = normalized;
-    const record = await this.ensureTodayToken();
-    this.publicBridgeUrl = normalized;
-    const filePath = this.getFilePath();
-    const parsed = await readParsedTokenFile(filePath);
-    const content = buildTokenFileContent({
-      datetime: effectiveDatetime(parsed) ?? nowIso(),
-      previousDatetime: parsed.previousDatetime,
-      token: record.token,
-      publicBridgeUrl: normalized,
-    });
-    await writeFile(filePath, content, "utf8");
+    await this.rotateTokenForReconnect(normalized);
     return normalized;
   }
 
@@ -394,16 +393,32 @@ export class TokenRotationService {
   }
 
 
-  async regenerateTodayToken(): Promise<DailyTokenRecord> {
+  /** 每次隧道恢复或显式轮换：新 salt、新口令、previousDatetime、不写 generatedAt */
+  private async rotateTokenForReconnect(publicBridgeUrl?: string): Promise<DailyTokenRecord> {
     this.cachedRecord = null;
     await mkdir(this.directory, { recursive: true });
-    const today = this.getToday();
-    const salt = await this.resolveSalt(await loadTokenMeta(this.directory));
-    const token = deriveDailyToken(today, salt);
+    const filePath = this.getFilePath();
+    const existing = await readParsedTokenFile(filePath);
+    const prior = effectiveDatetime(existing);
+    const datetime = nowIso();
+    const salt = generateSalt();
+    await saveTokenMeta(this.directory, { salt });
+    const token = deriveRotatedToken(datetime, salt);
+    const bridgeUrl = publicBridgeUrl
+      ? normalizePublicBridgeUrl(publicBridgeUrl)
+      : pickPreferredPublicBridgeUrl(this.publicBridgeUrl, existing.publicBridgeUrl);
+    this.publicBridgeUrl = bridgeUrl;
     return this.writeTodayTokenFile({
       token,
-      publicBridgeUrl: this.publicBridgeUrl,
+      publicBridgeUrl: bridgeUrl,
+      datetime,
+      previousDatetime: prior,
     });
+  }
+
+
+  async regenerateTodayToken(): Promise<DailyTokenRecord> {
+    return this.rotateTokenForReconnect();
   }
 
 
