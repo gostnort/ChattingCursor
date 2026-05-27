@@ -85,6 +85,16 @@ export async function registerLocalRoutes(app: FastifyInstance): Promise<void> {
   });
 
 
+  app.post("/local/regenerate-token", async (_request, reply) => {
+    const record = await tokenRotationService.regenerateTodayToken();
+    return reply.send({
+      tokenDate: record.date,
+      tokenFilePath: tokenRotationService.getFilePath(),
+      publicBridgeUrl: tokenRotationService.getPublicBridgeUrl(),
+    });
+  });
+
+
   app.post("/local/token-directory", async (request, reply) => {
     const parsed = localTokenDirectoryUpdateRequestSchema.safeParse(request.body ?? {});
     if (!parsed.success) {

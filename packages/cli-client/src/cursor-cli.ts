@@ -22,6 +22,15 @@ function shouldTryWslCli(): boolean {
 }
 
 
+/** 将 Windows 路径转为 WSL 路径（供 --workspace / 图片路径 使用） */
+export function formatPathForCli(filePath: string, viaWsl: boolean): string {
+  if (!viaWsl || process.platform !== "win32") {
+    return filePath;
+  }
+  return windowsPathToWsl(filePath);
+}
+
+
 /** 将 Windows 路径转为 WSL 路径（供 --workspace 使用） */
 function windowsPathToWsl(workspace: string): string {
   const normalized = workspace.replace(/\\/g, "/");
@@ -190,26 +199,26 @@ function looksLikeIdeLauncher(helpOutput: string): boolean {
 /** 构建 Agent CLI 缺失时的错误提示 */
 function buildMissingAgentCliMessage(hasIdeLauncher: boolean): string {
   const lines = [
-    "未检测到可用的 Cursor Agent CLI（cursor-agent）。",
+    "No usable Cursor Agent CLI (cursor-agent) was detected.",
   ];
   if (hasIdeLauncher) {
     lines.push(
-      "PATH 中的 cursor 是 IDE 启动器（cursor.cmd），不是终端 Agent CLI；",
-      "运行 cursor agent --print 只会打开 IDE，不会产生 Agent 回复。",
+      "The `cursor` command in PATH is the IDE launcher (`cursor.cmd`), not the terminal Agent CLI.",
+      "Running `cursor agent --print` only opens the IDE and does not return an Agent response.",
     );
   }
   if (process.platform === "win32") {
     lines.push(
-      "Windows 官方安装脚本仅支持 Linux/macOS；本机需通过 WSL 安装，或使用社区 Windows 移植版。",
-      "WSL 安装：wsl --install 后执行 curl https://cursor.com/install -fsS | bash",
-      "验证：cursor-agent --version（help 中应含 stream-json）",
-      "登录：cursor-agent login",
+      "The official installer is Linux/macOS only; on Windows install via WSL or use a community Windows port.",
+      "WSL install: `wsl --install` then `curl https://cursor.com/install -fsS | bash`",
+      "Verify: `cursor-agent --version` (help output should include `stream-json`)",
+      "Login: `cursor-agent login`",
     );
   } else {
     lines.push(
-      "安装：curl https://cursor.com/install -fsS | bash",
-      "验证：cursor-agent --version",
-      "登录：cursor-agent login",
+      "Install: `curl https://cursor.com/install -fsS | bash`",
+      "Verify: `cursor-agent --version`",
+      "Login: `cursor-agent login`",
     );
   }
   return lines.join(" ");
@@ -317,9 +326,7 @@ function buildArgs(options: CursorCliRunOptions, argsPrefix: string[], viaWsl: b
     args.push("--model", options.model);
   }
   if (options.workspace) {
-    const workspace = viaWsl && process.platform === "win32"
-      ? windowsPathToWsl(options.workspace)
-      : options.workspace;
+    const workspace = formatPathForCli(options.workspace, viaWsl);
     args.push("--workspace", workspace);
   }
   args.push(options.prompt);
@@ -435,7 +442,7 @@ export async function runCursorCli(options: CursorCliRunOptions): Promise<Cursor
       timedOut = true;
       child.kill("SIGTERM");
       options.onEvent?.(makeEvent(options.runId, "error", {
-        text: `CLI 运行超时（${timeoutMs}ms）`,
+        text: `CLI run timed out (${timeoutMs}ms)`,
       }));
     }, timeoutMs);
     const lineHandler = createLineHandler(options.runId, options.onEvent, "stream-json");

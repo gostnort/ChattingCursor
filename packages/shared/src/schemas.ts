@@ -44,6 +44,7 @@ export const chatMessageSchema = z.object({
   content: z.string(),
   createdAt: z.string().datetime().optional(),
   modelLabel: z.string().optional(),
+  imageUrl: z.string().optional(),
 });
 
 export type ChatMessage = z.infer<typeof chatMessageSchema>;
@@ -96,6 +97,30 @@ export const chatSendResponseSchema = z.object({
 });
 
 export type ChatSendResponse = z.infer<typeof chatSendResponseSchema>;
+
+
+/** POST /chat/upload-image 响应体 */
+export const chatImageUploadResponseSchema = z.object({
+  imageId: z.string().min(1),
+  sessionId: z.string().min(1),
+  fileName: z.string().min(1),
+  imageUrl: z.string().min(1),
+});
+
+export type ChatImageUploadResponse = z.infer<typeof chatImageUploadResponseSchema>;
+
+
+/** POST /chat/analyze-image 请求体 */
+export const chatAnalyzeImageRequestSchema = z.object({
+  sessionId: z.string().min(1),
+  imageId: z.string().min(1),
+  fileName: z.string().min(1),
+  model: z.string().optional(),
+  modelLabel: z.string().optional(),
+  workspace: z.string().optional(),
+});
+
+export type ChatAnalyzeImageRequest = z.infer<typeof chatAnalyzeImageRequestSchema>;
 
 
 /** POST /chat/new-session 响应体 */
@@ -256,6 +281,16 @@ export const localTokenFileResponseSchema = z.object({
 });
 
 export type LocalTokenFileResponse = z.infer<typeof localTokenFileResponseSchema>;
+
+
+/** POST /local/regenerate-token 响应体 */
+export const localRegenerateTokenResponseSchema = z.object({
+  tokenDate: z.string().min(1),
+  tokenFilePath: z.string().min(1),
+  publicBridgeUrl: z.string().min(1),
+});
+
+export type LocalRegenerateTokenResponse = z.infer<typeof localRegenerateTokenResponseSchema>;
 
 
 /** GET /local/history 会话摘要 */

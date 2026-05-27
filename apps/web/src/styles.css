@@ -607,9 +607,25 @@ body {
 
   justify-content: flex-start;
 
-  /* 模型标签与气泡底部对齐，不随气泡拉高而拉伸 */
+  align-items: flex-start;
 
-  align-items: flex-end;
+}
+
+
+
+.bubble-side {
+
+  display: flex;
+
+  flex-direction: column;
+
+  align-items: center;
+
+  gap: 0.35rem;
+
+  flex-shrink: 0;
+
+  align-self: flex-start;
 
 }
 
@@ -676,6 +692,16 @@ body {
   max-width: min(92%, 44rem);
 
   min-width: 0;
+
+  flex: 1 1 auto;
+
+}
+
+
+
+.bubble-row-assistant .bubble-main {
+
+  max-width: none;
 
   flex: 1 1 auto;
 
@@ -1020,9 +1046,7 @@ body {
 
   line-height: 1;
 
-  /* 朗读按钮固定在气泡行底部，便于点击 */
-
-  align-self: flex-end;
+  align-self: center;
 
 }
 
@@ -1917,4 +1941,33 @@ body {
 
 }
 
+
+
+@media (orientation: portrait) {
+
+  .bubble-row-assistant .bubble-main {
+
+    max-width: calc(100% - 3.5rem);
+
+  }
+
+
+
+  .bubble-row-user .bubble-main {
+
+    max-width: min(92%, 44rem);
+
+  }
+
+
+
+  .messages {
+
+    padding-left: 0.65rem;
+
+    padding-right: 0.65rem;
+
+  }
+
+}
 

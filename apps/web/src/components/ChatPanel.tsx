@@ -11,6 +11,7 @@ import {
 import { clearChatState, loadChatState, saveChatState } from "../chatPersistence";
 import { isLocalBridgeUrl } from "../bridgeSettings";
 import { useSpeech } from "../hooks/useSpeech";
+import { playNotificationSound } from "../utils/notificationSound";
 import { MessageBubble } from "./MessageBubble";
 
 
@@ -377,6 +378,7 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
         appendAssistantError(`CLI 运行失败（exit=${exitCode}）。`);
       }
       stderrBufferRef.current = "";
+      playNotificationSound();
     }
   };
 

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { RunEvent } from "@chatting-cursor/shared";
 import { subscribeTerminalEvents } from "../api/bridge";
+import { playNotificationSound } from "../utils/notificationSound";
 
 
 interface TerminalPanelProps {
@@ -49,6 +50,7 @@ export function TerminalPanel({ bridgeUrl, bridgeToken, runId }: TerminalPanelPr
         const data = event.data as { exitCode?: number | null } | undefined;
         const code = data?.exitCode;
         setLines((prev) => [...prev, `\n[进程结束 exit=${code ?? "?"}]`]);
+        playNotificationSound();
       }
     }, (error) => {
       setPanelError(error.message);

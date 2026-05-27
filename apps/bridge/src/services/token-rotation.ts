@@ -1,6 +1,6 @@
 import { access, copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import {
   getDefaultTokenSyncDir,
   getLegacyTokenSyncDir,
@@ -15,14 +15,22 @@ export interface DailyTokenRecord {
 }
 
 
+interface ParsedTokenFile {
+  date?: string;
+  token?: string;
+  salt?: string;
+  publicBridgeUrl?: string;
+}
+
+
 function todayStamp(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
 
-function parseTokenFile(content: string): { date?: string; token?: string; publicBridgeUrl?: string } {
+function parseTokenFile(content: string): ParsedTokenFile {
   const lines = content.split(/\r?\n/);
-  const parsed: { date?: string; token?: string; publicBridgeUrl?: string } = {};
+  const parsed: ParsedTokenFile = {};
   for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed) {
@@ -40,6 +48,9 @@ function parseTokenFile(content: string): { date?: string; token?: string; publi
     if (key === "token") {
       parsed.token = value;
     }
+    if (key === "salt") {
+      parsed.salt = value;
+    }
     if (key === "publicbridgeurl") {
       parsed.publicBridgeUrl = normalizePublicBridgeUrl(value);
     }
@@ -48,10 +59,44 @@ function parseTokenFile(content: string): { date?: string; token?: string; publi
 }
 
 
+function generateSalt(): string {
+  return randomBytes(32).toString("base64url");
+}
+
+
+function deriveDailyToken(date: string, salt: string): string {
+  return createHash("sha256")
+    .update(`${date}:${salt}`, "utf8")
+    .digest("base64url")
+    .slice(0, 24);
+}
+
+
+function buildTokenFileContent(options: {
+  date: string;
+  token: string;
+  salt: string;
+  publicBridgeUrl: string;
+  generatedAt?: string;
+}): string {
+  return [
+    `date: ${options.date}`,
+    `salt: ${options.salt}`,
+    `token: ${options.token}`,
+    `generatedAt: ${options.generatedAt ?? new Date().toISOString()}`,
+    `publicBridgeUrl: ${options.publicBridgeUrl}`,
+    "",
+    "Use today's token on your phone page to connect to the remote Bridge.",
+    "Keep this file in your synced cloud folder so your phone can read it.",
+    "",
+  ].join("\n");
+}
+
+
 function normalizePublicBridgeUrl(url: string): string {
   const trimmed = url.trim().replace(/\/+$/, "");
   if (!trimmed) {
-    throw new Error("公开 Bridge URL 不能为空");
+    throw new Error("Public Bridge URL cannot be empty");
   }
   if (/^https?:\/\//i.test(trimmed)) {
     return trimmed;
@@ -141,13 +186,13 @@ export class TokenRotationService {
   async setDirectory(directory: string): Promise<void> {
     const normalized = directory.trim();
     if (!normalized) {
-      throw new Error("同步目录不能为空");
+      throw new Error("Sync directory cannot be empty");
     }
     this.directory = normalized;
     this.cachedRecord = null;
     await mkdir(this.directory, { recursive: true });
     await saveTokenSyncDirectory(normalized);
-    await this.ensureTodayToken();
+    await this.regenerateTodayToken();
   }
 
 
@@ -205,10 +250,29 @@ export class TokenRotationService {
       await access(legacyPath);
       await mkdir(this.directory, { recursive: true });
       await copyFile(legacyPath, targetPath);
-      console.log(`[token] 已从旧目录迁移口令文件: ${legacyPath} -> ${targetPath}`);
+      console.log(`[token] Migrated token file from legacy directory: ${legacyPath} -> ${targetPath}`);
     } catch {
       // 旧目录无文件则跳过
     }
+  }
+
+
+  async regenerateTodayToken(): Promise<DailyTokenRecord> {
+    this.cachedRecord = null;
+    const today = this.getToday();
+    const filePath = this.getFilePath();
+    await mkdir(this.directory, { recursive: true });
+    const salt = generateSalt();
+    const token = deriveDailyToken(today, salt);
+    const content = buildTokenFileContent({
+      date: today,
+      token,
+      salt,
+      publicBridgeUrl: this.publicBridgeUrl,
+    });
+    await writeFile(filePath, content, "utf8");
+    this.cachedRecord = { date: today, token, filePath };
+    return this.cachedRecord;
   }
 
 
@@ -240,20 +304,30 @@ export class TokenRotationService {
         };
         return this.cachedRecord;
       }
+      if (parsed.salt && parsed.date !== today) {
+        const salt = parsed.salt;
+        const token = deriveDailyToken(today, salt);
+        const content = buildTokenFileContent({
+          date: today,
+          token,
+          salt,
+          publicBridgeUrl: pickPreferredPublicBridgeUrl(this.publicBridgeUrl, parsed.publicBridgeUrl),
+        });
+        await writeFile(filePath, content, "utf8");
+        this.cachedRecord = { date: today, token, filePath };
+        return this.cachedRecord;
+      }
     } catch {
       // 文件不存在时创建新口令
     }
-    const token = randomBytes(24).toString("base64url");
-    const content = [
-      `date: ${today}`,
-      `token: ${token}`,
-      `generatedAt: ${new Date().toISOString()}`,
-      `publicBridgeUrl: ${this.publicBridgeUrl}`,
-      "",
-      "把今天的 token 输入手机网页后即可连接远程 Bridge。",
-      "此文件应位于云盘同步目录，供手机查看。",
-      "",
-    ].join("\n");
+    const salt = generateSalt();
+    const token = deriveDailyToken(today, salt);
+    const content = buildTokenFileContent({
+      date: today,
+      token,
+      salt,
+      publicBridgeUrl: this.publicBridgeUrl,
+    });
     await writeFile(filePath, content, "utf8");
     this.cachedRecord = { date: today, token, filePath };
     return this.cachedRecord;

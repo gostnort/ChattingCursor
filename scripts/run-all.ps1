@@ -1,10 +1,19 @@
-﻿# 一键启动：Bridge + cloudflared 快速隧道，自动写入 token 文件中的 publicBridgeUrl
+﻿# One-click startup: Bridge + cloudflared quick tunnel, auto-updates publicBridgeUrl in token file
 param(
   [int]$BridgePort = 4321,
   [int]$WebPort = 43210,
   [string]$TokenSyncDir = "",
-  [switch]$WithWeb
+  [switch]$WithWeb,
+  [switch]$NoWeb,
+  [switch]$WithQualityWatch
 )
+
+# Web dev server is on by default; use -NoWeb to skip (e.g. tunnel-only runs).
+if ($NoWeb) {
+  $WithWeb = $false
+} elseif (-not $PSBoundParameters.ContainsKey('WithWeb')) {
+  $WithWeb = $true
+}
 
 $ErrorActionPreference = "Continue"
 . (Join-Path $PSScriptRoot "Resolve-TokenSyncDir.ps1")
@@ -22,12 +31,18 @@ $script:BridgeProcess = $null
 $script:BridgeOwned = $false
 $script:WebProcess = $null
 $script:WebOwned = $false
+$script:QualityWatchProcess = $null
+$script:QualityWatchOwned = $false
 $script:TunnelProcess = $null
 $script:TunnelLogPath = Join-Path $env:TEMP "chattingcursor-cloudflared.log"
 $script:TunnelUrlApplied = $false
 $script:DetectedTunnelUrl = $null
 $script:ShuttingDown = $false
 $script:TunnelLogOffset = 0
+$script:HealthCheckIntervalSeconds = 30
+$script:CommunicationFailureThreshold = 2
+$script:ConsecutiveCommunicationFailures = 0
+$script:SecondsSinceHealthCheck = 0
 $TunnelUrlPattern = [regex]"https://[a-z0-9-]+\.trycloudflare\.com"
 
 
@@ -75,28 +90,28 @@ function Test-CloudflaredInstalled {
 
 function Ensure-ProjectReady {
   if (-not (Test-Path "$Root\node_modules")) {
-    Write-Step "首次运行，正在安装依赖..."
+    Write-Step "First run detected, installing dependencies..."
     & "$PSScriptRoot\install-all.ps1" -SkipCloudflared
     if ($LASTEXITCODE -ne 0) {
       exit $LASTEXITCODE
     }
   }
   if (-not (Test-Path "$Root\packages\shared\dist")) {
-    Write-Step "构建 shared 包..."
+    Write-Step "Building shared package..."
     pnpm --filter @chatting-cursor/shared build
     if ($LASTEXITCODE -ne 0) {
       exit $LASTEXITCODE
     }
   }
   if (-not (Test-Path "$Root\packages\cli-client\dist")) {
-    Write-Step "构建 cli-client（Bridge 依赖）..."
+    Write-Step "Building cli-client (Bridge dependency)..."
     pnpm --filter @chatting-cursor/cli-client build
     if ($LASTEXITCODE -ne 0) {
       exit $LASTEXITCODE
     }
   }
   if (-not (Test-Path "$Root\packages\orchestrator\dist")) {
-    Write-Step "构建 orchestrator（Bridge 依赖）..."
+    Write-Step "Building orchestrator (Bridge dependency)..."
     pnpm --filter @chatting-cursor/orchestrator build
     if ($LASTEXITCODE -ne 0) {
       exit $LASTEXITCODE
@@ -122,36 +137,133 @@ function Start-WebProcess {
   $pnpmExe = Resolve-PnpmExe
   $script:WebProcess = Start-Process -FilePath $pnpmExe -ArgumentList "dev:web" -WorkingDirectory $Root -WindowStyle Hidden -PassThru
   $script:WebOwned = $true
-  Write-Host "Web 进程 PID: $($script:WebProcess.Id) (pnpm: $pnpmExe)"
+  Write-Host "Web process PID: $($script:WebProcess.Id) (pnpm: $pnpmExe)"
+}
+
+
+function Start-QualityWatchProcess {
+  $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
+  $nodeExe = if ($nodeCmd) { $nodeCmd.Source } else { $null }
+  if (-not $nodeExe) {
+    Write-Fail "node not found; cannot start quality watcher."
+    return $false
+  }
+  $watchScript = Join-Path $Root "scripts\quality-watch.mjs"
+  if (-not (Test-Path $watchScript)) {
+    Write-Fail "quality-watch script not found: $watchScript"
+    return $false
+  }
+  $logPath = Join-Path $env:TEMP "chattingcursor-quality-watch.log"
+  if (Test-Path $logPath) {
+    Remove-Item $logPath -Force -ErrorAction SilentlyContinue
+  }
+  $script:QualityWatchProcess = Start-Process -FilePath $nodeExe `
+    -ArgumentList @($watchScript) `
+    -WorkingDirectory $Root `
+    -RedirectStandardOutput $logPath `
+    -RedirectStandardError $logPath `
+    -WindowStyle Hidden `
+    -PassThru
+  $script:QualityWatchOwned = $true
+  Write-Ok "Quality watcher started (PID $($script:QualityWatchProcess.Id), log: $logPath)"
+  return $true
+}
+
+
+function Get-LocalWebUrl {
+  return "http://127.0.0.1:$WebPort/ChattingCursor/"
+}
+
+
+function Test-WebHealthy {
+  $url = Get-LocalWebUrl
+  try {
+    $resp = Invoke-WebRequest -Uri $url -Method Get -TimeoutSec 3 -UseBasicParsing -ErrorAction Stop
+    return $resp.StatusCode -ge 200 -and $resp.StatusCode -lt 500
+  } catch {
+    return $false
+  }
 }
 
 
 function Wait-WebReady {
-  param([int]$MaxSeconds = 60)
-  $url = "http://127.0.0.1:$WebPort/ChattingCursor/"
+  param([int]$MaxSeconds = 90)
+  $url = Get-LocalWebUrl
   for ($i = 0; $i -lt $MaxSeconds; $i++) {
-    try {
-      $null = Invoke-WebRequest -Uri $url -Method Get -TimeoutSec 2 -UseBasicParsing -ErrorAction Stop
+    if (Test-WebHealthy) {
       return $true
-    } catch {
-      Start-Sleep -Seconds 1
     }
+    if ($script:WebOwned -and $script:WebProcess -and $script:WebProcess.HasExited) {
+      Write-Fail "Web startup process exited, code: $($script:WebProcess.ExitCode)"
+      return $false
+    }
+    if ($i -gt 0 -and ($i % 15) -eq 0) {
+      Write-Host "Still waiting for Web at $url (${i}s / ${MaxSeconds}s)..."
+    }
+    Start-Sleep -Seconds 1
+  }
+  if ($script:WebOwned -and $script:WebProcess -and $script:WebProcess.HasExited) {
+    Write-Fail "Web startup process exited, code: $($script:WebProcess.ExitCode)"
+  } else {
+    Write-Fail "Web did not pass HTTP check within ${MaxSeconds}s: $url"
   }
   return $false
 }
 
 
+function Ensure-WebRunning {
+  $url = Get-LocalWebUrl
+  if (Test-WebHealthy) {
+    if (Test-PortInUse -Port $WebPort) {
+      Write-Ok "A healthy Web server is already running on port $WebPort; reusing existing instance."
+    } else {
+      Write-Ok "Local chat page is reachable: $url"
+    }
+    return $true
+  }
+  if (Test-PortInUse -Port $WebPort) {
+    $stalePids = @(Get-ListenerPids -Port $WebPort)
+    Write-Fail "Port $WebPort is in use but $url is not healthy (PID: $($stalePids -join ', '))"
+    Write-Host "Run shutdown.bat first, or end those processes manually, then run run.bat again."
+    return $false
+  }
+  Write-Step "Starting Web (port $WebPort)..."
+  Start-WebProcess
+  if (-not (Wait-WebReady)) {
+    return $false
+  }
+  Write-Ok "Web is reachable locally: $url"
+  return $true
+}
+
+
 function Show-LocalWebHint {
+  $url = Get-LocalWebUrl
   Write-Host ""
-  Write-Host "本地聊天页: http://127.0.0.1:$WebPort/ChattingCursor/"
-  if (-not $script:WebOwned) {
-    Write-Host "（未启动 Web 时请在另一终端执行: pnpm dev:web）"
+  if (Test-WebHealthy) {
+    Write-Host "Local chat page is reachable: $url"
+  } elseif ($WithWeb) {
+    Write-Host "Local chat page is not reachable: $url"
+    if ($script:WebOwned) {
+      Write-Host "Web was started by this run but is no longer responding."
+    }
+  } else {
+    Write-Host "Local chat page was not started (run without -NoWeb to auto-start Web)."
+    Write-Host "URL when running separately: $url"
   }
   Write-Host ""
 }
 
 
 function Stop-ChildProcesses {
+  if ($script:QualityWatchOwned -and $script:QualityWatchProcess -and -not $script:QualityWatchProcess.HasExited) {
+    try {
+      & taskkill /PID $script:QualityWatchProcess.Id /T /F *>$null
+    } catch {
+      # 质量守护进程可能已退出
+    }
+    $script:QualityWatchProcess = $null
+  }
   if ($script:WebOwned -and $script:WebProcess -and -not $script:WebProcess.HasExited) {
     try {
       & taskkill /PID $script:WebProcess.Id /T /F *>$null
@@ -213,12 +325,12 @@ function Show-TokenFileOpenReminder {
   $resolved = Get-TokenFilePathResolved
   Write-Host ""
   Write-Host "----------------------------------------"
-  Write-Host "Token 文件完整路径:"
+  Write-Host "Token file full path:"
   Write-Host "  $resolved"
-  Write-Host "publicBridgeUrl 行:"
+  Write-Host "publicBridgeUrl line:"
   Write-Host "  publicBridgeUrl: $PublicUrl"
   Write-Host ""
-  Write-Host "请用记事本或 VS Code 打开上述路径；若已在编辑器中打开，请重新加载/关闭再开以看到最新内容。"
+  Write-Host "Open this file in Notepad or VS Code; if already open, reload/reopen to see latest content."
   Write-Host "----------------------------------------"
   Write-Host ""
 }
@@ -290,16 +402,107 @@ function Write-PublicBridgeUrlToTokenFileDirect([string]$PublicUrl) {
 }
 
 
-function Set-PublicBridgeUrlInTokenFile([string]$PublicUrl) {
-  if ($script:TunnelUrlApplied) {
+function Invoke-BridgeRegenerateToken {
+  try {
+    $response = Invoke-RestMethod `
+      -Uri "http://127.0.0.1:$BridgePort/local/regenerate-token" `
+      -Method Post `
+      -ContentType "application/json; charset=utf-8" `
+      -ErrorAction Stop
+    Write-Ok "Bridge regenerated today's token (date: $($response.tokenDate))"
+    if ($response.tokenFilePath) {
+      Write-Host "     Token file: $($response.tokenFilePath)"
+    }
+    return $true
+  } catch {
+    Write-Fail "Bridge failed to regenerate token: $($_.Exception.Message)"
+    return $false
+  }
+}
+
+
+function Restart-TunnelProcess {
+  if ($script:TunnelProcess -and -not $script:TunnelProcess.HasExited) {
+    try {
+      & taskkill /PID $script:TunnelProcess.Id /T /F *>$null
+    } catch {
+      # 隧道进程可能已退出
+    }
+  }
+  $script:TunnelProcess = $null
+  $script:TunnelUrlApplied = $false
+  $script:DetectedTunnelUrl = $null
+  $script:TunnelLogOffset = 0
+  Start-TunnelProcess
+}
+
+
+function Wait-ForTunnelUrl {
+  param([int]$MaxSeconds = 90)
+  for ($tick = 0; $tick -lt ($MaxSeconds * 2); $tick++) {
+    if ($script:ShuttingDown) {
+      return $false
+    }
+    Start-Sleep -Milliseconds 500
+    Read-TunnelLogNewLines
+    if ($script:DetectedTunnelUrl -and -not $script:TunnelUrlApplied) {
+      $null = Set-PublicBridgeUrlInTokenFile -PublicUrl $script:DetectedTunnelUrl -Force
+    }
+    if ($script:TunnelUrlApplied) {
+      return $true
+    }
+    if ($script:TunnelProcess -and $script:TunnelProcess.HasExited) {
+      Read-TunnelLogNewLines
+      return $false
+    }
+  }
+  Read-TunnelLogNewLines
+  return $false
+}
+
+
+function Test-PublicBridgeCommunication([string]$PublicUrl) {
+  if (-not $PublicUrl) {
+    return $false
+  }
+  $healthUrl = "$PublicUrl/health"
+  try {
+    $resp = Invoke-RestMethod -Uri $healthUrl -Method Get -TimeoutSec 10 -ErrorAction Stop
+    return $resp.status -eq "ok"
+  } catch {
+    return $false
+  }
+}
+
+
+function Invoke-TunnelRecovery([string]$Reason) {
+  Write-Fail $Reason
+  Write-Step "Restarting cloudflared and refreshing token file..."
+  $null = Invoke-BridgeRegenerateToken
+  Restart-TunnelProcess
+  if (-not (Wait-ForTunnelUrl -MaxSeconds 90)) {
+    Write-Fail "No new URL detected within timeout after tunnel restart"
+    return $false
+  }
+  $onDisk = Get-TokenFilePublicUrl
+  if ($onDisk) {
+    $null = Test-PublicBridgeHealth -PublicUrl $onDisk
+  }
+  Write-Ok "Tunnel recovered and token file updated"
+  return $true
+}
+
+
+function Set-PublicBridgeUrlInTokenFile([string]$PublicUrl, [switch]$Force) {
+  if ($script:TunnelUrlApplied -and -not $Force) {
     return $true
   }
   $normalized = Ensure-HttpsPublicBridgeUrl $PublicUrl
   try {
     Write-PublicBridgeUrlToTokenFileDirect -PublicUrl $normalized
-    Write-Ok "已直接写入 token 文件（优先落盘）"
+    Write-Ok "Token file updated directly (disk-first)"
   } catch {
-    Write-Fail "直接写入 token 文件失败: $($_.Exception.Message)"
+    Write-Fail "Failed to write token file directly: $($_.Exception.Message)"
     return $false
   }
   $body = @{ publicBridgeUrl = $normalized } | ConvertTo-Json
@@ -310,33 +513,33 @@ function Set-PublicBridgeUrlInTokenFile([string]$PublicUrl) {
       -ContentType "application/json; charset=utf-8" `
       -Body $body `
       -ErrorAction Stop
-    Write-Ok "Bridge API 已同步 publicBridgeUrl: $($response.publicBridgeUrl)"
+    Write-Ok "Bridge API synced publicBridgeUrl: $($response.publicBridgeUrl)"
     if ($response.tokenFilePath) {
-      Write-Host "     Bridge 使用的 Token 文件: $($response.tokenFilePath)"
+      Write-Host "     Bridge token file: $($response.tokenFilePath)"
     }
     $apiUrl = [string]$response.publicBridgeUrl
     if ($apiUrl -and $apiUrl -notmatch 'trycloudflare\.com') {
-      Write-Host "     警告: Bridge 内存中的 URL 仍为本地地址，已以磁盘文件为准。"
+      Write-Host "     Warning: Bridge memory URL is still local; keeping disk file as source of truth."
       Write-PublicBridgeUrlToTokenFileDirect -PublicUrl $normalized
     }
   } catch {
-    Write-Fail "Bridge API 同步失败（磁盘文件已写入）: $($_.Exception.Message)"
+    Write-Fail "Bridge API sync failed (disk file already written): $($_.Exception.Message)"
   }
   if (-not (Test-TokenFileHasTrycloudflareUrl)) {
-    Write-Fail "token 文件中未找到 trycloudflare 公网地址"
+    Write-Fail "No trycloudflare public URL found in token file"
     return $false
   }
   $onDisk = Get-TokenFilePublicUrl
   if ($onDisk -ne $normalized) {
-    Write-Fail "token 文件 URL 与隧道不一致: $onDisk"
+    Write-Fail "Token file URL does not match tunnel URL: $onDisk"
     return $false
   }
-  Write-Ok "token 文件已包含公网 URL: $onDisk"
+  Write-Ok "Token file now contains public URL: $onDisk"
   $script:TunnelUrlApplied = $true
   Show-TokenFileOpenReminder -PublicUrl $onDisk
-  Write-Host "手机配置: GitHub Pages -> 本地 -> 配置"
+  Write-Host "Phone setup path: GitHub Pages -> Local -> Config"
   Write-Host "  Bridge URL = $onDisk"
-  Write-Host "  今日口令 = 从 token 文件复制"
+  Write-Host "  Today's token = copy from token file"
   Write-Host ""
   return $true
 }
@@ -348,17 +551,17 @@ function Test-PublicBridgeHealth([string]$PublicUrl) {
     try {
       $resp = Invoke-RestMethod -Uri $healthUrl -Method Get -TimeoutSec 15 -ErrorAction Stop
       if ($resp.status -eq "ok") {
-        Write-Ok "公网健康检查通过: $healthUrl"
+      Write-Ok "Public health check passed: $healthUrl"
         return $true
       }
-      Write-Fail "公网健康检查返回异常: $healthUrl"
+      Write-Fail "Public health check returned unexpected response: $healthUrl"
       return $false
     } catch {
       if ($attempt -lt 6) {
-        Write-Host "公网健康检查第 ${attempt} 次失败，5s 后重试..."
+        Write-Host "Public health check attempt ${attempt} failed, retrying in 5s..."
         Start-Sleep -Seconds 5
       } else {
-        Write-Fail "公网健康检查失败（隧道 URL 已写入 token 文件，手机端可稍后再试）: $($_.Exception.Message)"
+        Write-Fail "Public health check failed (tunnel URL already written to token file): $($_.Exception.Message)"
         return $false
       }
     }
@@ -380,7 +583,7 @@ function Invoke-TunnelLine([string]$Line) {
     return
   }
   $script:DetectedTunnelUrl = $url
-  Write-Ok "检测到 cloudflared 隧道地址: $url"
+  Write-Ok "Detected cloudflared tunnel URL: $url"
   $null = Set-PublicBridgeUrlInTokenFile -PublicUrl $url
   if ($script:TunnelUrlApplied) {
     $null = Test-PublicBridgeHealth -PublicUrl $url
@@ -449,9 +652,9 @@ function Wait-BridgeReady {
     }
   }
   if ($script:BridgeProcess -and $script:BridgeProcess.HasExited) {
-    Write-Fail "Bridge 启动进程已退出，代码: $($script:BridgeProcess.ExitCode)"
+      Write-Fail "Bridge startup process exited, code: $($script:BridgeProcess.ExitCode)"
   } else {
-    Write-Fail "Bridge 在 ${MaxSeconds}s 内未通过 /health 检查"
+    Write-Fail "Bridge did not pass /health check within ${MaxSeconds}s"
   }
   return $false
 }
@@ -491,8 +694,8 @@ function Test-PortInUse([int]$Port) {
 function Clear-StaleBridgePort {
   param([int]$MaxWaitSeconds = 20)
   Write-Host ""
-  Write-Host "端口 $BridgePort 已被占用，正在尝试清理残留进程..."
-  Write-Host "（也可先运行 shutdown.bat）"
+  Write-Host "Port $BridgePort is in use, attempting cleanup of stale processes..."
+  Write-Host "(You can also run shutdown.bat first)"
   Write-Host ""
   & "$PSScriptRoot\shutdown-all.ps1" -SkipWeb
   $deadline = (Get-Date).AddSeconds($MaxWaitSeconds)
@@ -525,14 +728,14 @@ function Start-BridgeProcess {
   $pnpmExe = Resolve-PnpmExe
   $script:BridgeProcess = Start-Process -FilePath $pnpmExe -ArgumentList "dev:bridge" -WorkingDirectory $Root -WindowStyle Hidden -PassThru
   $script:BridgeOwned = $true
-  Write-Host "Bridge 进程 PID: $($script:BridgeProcess.Id) (pnpm: $pnpmExe)"
+  Write-Host "Bridge process PID: $($script:BridgeProcess.Id) (pnpm: $pnpmExe)"
 }
 
 
 function Start-TunnelProcess {
   $cloudflaredExe = Resolve-CloudflaredExe
   if (-not $cloudflaredExe) {
-    throw "未找到 cloudflared 可执行文件"
+    throw "cloudflared executable not found"
   }
   if (Test-Path $script:TunnelLogPath) {
     Remove-Item $script:TunnelLogPath -Force -ErrorAction SilentlyContinue
@@ -544,7 +747,7 @@ function Start-TunnelProcess {
     -RedirectStandardError $script:TunnelLogPath `
     -NoNewWindow -PassThru
   Write-Host "cloudflared: $cloudflaredExe (PID $($script:TunnelProcess.Id))"
-  Write-Host "隧道日志: $($script:TunnelLogPath)"
+  Write-Host "Tunnel log: $($script:TunnelLogPath)"
 }
 
 
@@ -555,7 +758,7 @@ try {
     $e.Cancel = $true
     $script:ShuttingDown = $true
     Write-Host ""
-    Write-Host "正在停止 Bridge 与隧道..."
+    Write-Host "Stopping Bridge and tunnel..."
     Stop-ChildProcesses
   }) | Out-Null
 } catch {
@@ -564,60 +767,59 @@ try {
 
 $exitCode = 0
 try {
-  Write-Host "=== ChattingCursor 远程启动 ==="
-  Write-Host "Token 同步目录: $TokenSyncDir"
-  Write-Host "Token 文件完整路径: $(Get-TokenFilePathResolved)"
+  Write-Host "=== ChattingCursor Remote Startup ==="
+  Write-Host "Token sync directory: $TokenSyncDir"
+  Write-Host "Token file full path: $(Get-TokenFilePathResolved)"
   Write-Host "Stop: press Ctrl+C"
   Write-Host ""
 
   Ensure-ProjectReady
 
   if (-not (Test-CloudflaredInstalled)) {
-    Write-Fail "未找到 cloudflared，请先运行 install.bat"
+    Write-Fail "cloudflared not found. Run install.bat first."
     exit 1
   }
-  Write-Ok "cloudflared 已找到: $(Resolve-CloudflaredExe)"
+  Write-Ok "cloudflared found: $(Resolve-CloudflaredExe)"
 
   if (Test-PortInUse -Port $BridgePort) {
     if (Test-BridgeHealthy) {
-      Write-Ok "端口 $BridgePort 上已有健康的 Bridge，将复用现有实例。"
+      Write-Ok "A healthy Bridge is already running on port $BridgePort; reusing existing instance."
     } elseif (-not (Clear-StaleBridgePort)) {
       $stalePids = @(Get-ListenerPids -Port $BridgePort)
-      Write-Fail "端口 $BridgePort 仍被占用 (PID: $($stalePids -join ', '))"
-      Write-Host "请先运行 shutdown.bat，或手动结束上述进程后再运行 run.bat。"
+      Write-Fail "Port $BridgePort is still occupied (PID: $($stalePids -join ', '))"
+      Write-Host "Run shutdown.bat first, or end those processes manually, then run run.bat again."
       exit 2
     } else {
-      Write-Ok "端口 $BridgePort 已释放"
+      Write-Ok "Port $BridgePort has been released"
     }
   }
 
   if (-not (Test-BridgeHealthy)) {
-    Write-Step "启动 Bridge (端口 $BridgePort)..."
+    Write-Step "Starting Bridge (port $BridgePort)..."
     Start-BridgeProcess
     if (-not (Wait-BridgeReady)) {
-      Write-Fail "Bridge 在限定时间内未就绪；可先运行 shutdown.bat 后重试。"
+      Write-Fail "Bridge did not become ready in time; run shutdown.bat and retry."
       exit 1
     }
   }
-  Write-Ok "Bridge 本地健康: http://127.0.0.1:$BridgePort/health"
+  Write-Ok "Bridge local health: http://127.0.0.1:$BridgePort/health"
 
-  if ($WithWeb) {
-    Write-Step "启动 Web (端口 $WebPort)..."
-    Start-WebProcess
-    if (Wait-WebReady) {
-      Write-Ok "Web 本地可访问: http://127.0.0.1:$WebPort/ChattingCursor/"
-    } else {
-      Write-Fail "Web 在限定时间内未就绪，可手动执行 pnpm dev:web"
-    }
-  } else {
-    Show-LocalWebHint
+  if ($WithQualityWatch) {
+    Write-Step "Starting quality watcher (typecheck/lint + crew dry-run)..."
+    $null = Start-QualityWatchProcess
   }
 
-  Write-Step "启动 cloudflared 快速隧道..."
+  if ($WithWeb) {
+    if (-not (Ensure-WebRunning)) {
+      exit 1
+    }
+  }
+
+  Write-Step "Starting cloudflared quick tunnel..."
   Start-TunnelProcess
 
   $tunnelWaitSeconds = 90
-  Write-Host "等待隧道 URL（最多 ${tunnelWaitSeconds}s）..."
+  Write-Host "Waiting for tunnel URL (max ${tunnelWaitSeconds}s)..."
   for ($tick = 0; $tick -lt ($tunnelWaitSeconds * 2); $tick++) {
     if ($script:ShuttingDown) {
       break
@@ -632,22 +834,23 @@ try {
     }
     if ($script:TunnelProcess -and $script:TunnelProcess.HasExited) {
       Read-TunnelLogNewLines
-      Write-Fail "cloudflared 已退出，代码: $($script:TunnelProcess.ExitCode)"
-      break
+      if (-not (Invoke-TunnelRecovery -Reason "cloudflared exited, code: $($script:TunnelProcess.ExitCode)")) {
+        break
+      }
     }
     if ($script:BridgeOwned -and $script:BridgeProcess -and $script:BridgeProcess.HasExited -and -not (Test-BridgeHealthy)) {
-      Write-Fail "Bridge 进程已退出，代码: $($script:BridgeProcess.ExitCode)"
+        Write-Fail "Bridge process exited, code: $($script:BridgeProcess.ExitCode)"
       exit 1
     }
   }
 
   if (-not $script:TunnelUrlApplied) {
     Read-TunnelLogNewLines
-    Write-Fail "未在 ${tunnelWaitSeconds}s 内获得 trycloudflare 地址，请查看隧道日志: $($script:TunnelLogPath)"
+    Write-Fail "No trycloudflare URL detected within ${tunnelWaitSeconds}s. Check tunnel log: $($script:TunnelLogPath)"
     exit 1
   }
 
-  Write-Ok "启动流程完成，服务持续运行中。"
+  Write-Ok "Startup flow complete. Services are running."
   Show-LocalWebHint
   Write-Host ""
 
@@ -655,15 +858,37 @@ try {
     Start-Sleep -Milliseconds 500
     Read-TunnelLogNewLines
     if ($script:BridgeOwned -and $script:BridgeProcess -and $script:BridgeProcess.HasExited -and -not (Test-BridgeHealthy)) {
-      Write-Fail "Bridge 进程已退出，代码: $($script:BridgeProcess.ExitCode)"
+      Write-Fail "Bridge process exited, code: $($script:BridgeProcess.ExitCode)"
       $exitCode = 1
       break
     }
     if ($script:TunnelProcess -and $script:TunnelProcess.HasExited) {
       Read-TunnelLogNewLines
-      Write-Fail "cloudflared 已退出，代码: $($script:TunnelProcess.ExitCode)"
-      $exitCode = 1
-      break
+      if (-not (Invoke-TunnelRecovery -Reason "cloudflared exited, code: $($script:TunnelProcess.ExitCode)")) {
+        $exitCode = 1
+        break
+      }
+      $script:ConsecutiveCommunicationFailures = 0
+      $script:SecondsSinceHealthCheck = 0
+      continue
+    }
+    $script:SecondsSinceHealthCheck += 0.5
+    if ($script:SecondsSinceHealthCheck -ge $script:HealthCheckIntervalSeconds) {
+      $script:SecondsSinceHealthCheck = 0
+      $publicUrl = Get-TokenFilePublicUrl
+      if ($publicUrl -and -not (Test-PublicBridgeCommunication -PublicUrl $publicUrl)) {
+        $script:ConsecutiveCommunicationFailures += 1
+        Write-Fail "Public communication failed (consecutive $($script:ConsecutiveCommunicationFailures)/$($script:CommunicationFailureThreshold))"
+        if ($script:ConsecutiveCommunicationFailures -ge $script:CommunicationFailureThreshold) {
+          if (-not (Invoke-TunnelRecovery -Reason "Public communication failed repeatedly; restarting tunnel")) {
+            $exitCode = 1
+            break
+          }
+          $script:ConsecutiveCommunicationFailures = 0
+        }
+      } else {
+        $script:ConsecutiveCommunicationFailures = 0
+      }
     }
   }
 }

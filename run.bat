@@ -8,7 +8,7 @@ if errorlevel 1 (
   exit /b 1
 )
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\run-all.ps1" %*
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\run-all.ps1" -WithWeb %*
 set EXITCODE=%ERRORLEVEL%
 if "%EXITCODE%"=="2" exit /b 2
 if not "%EXITCODE%"=="0" exit /b %EXITCODE%

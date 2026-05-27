@@ -20,8 +20,20 @@ export function MessageBubble({ message, onSpeakToggle, isSpeaking, agentLabel =
   return (
     <div className={`bubble-row bubble-row-${message.role}`}>
       {!isUser && (
-        <div className="bubble-avatar bubble-avatar-agent" title={label} aria-hidden="true">
-          {label}
+        <div className="bubble-side">
+          <button
+            type="button"
+            className={`bubble-tts${isSpeaking ? " bubble-tts-active" : ""}`}
+            aria-label={`朗读${label}消息`}
+            title={isSpeaking ? "停止朗读" : "朗读"}
+            aria-pressed={isSpeaking}
+            onClick={() => onSpeakToggle(message.id, message.content)}
+          >
+            <span aria-hidden="true">{isSpeaking ? "■" : "🔊"}</span>
+          </button>
+          <div className="bubble-avatar bubble-avatar-agent" title={label} aria-hidden="true">
+            {label}
+          </div>
         </div>
       )}
       <div className="bubble-main">
@@ -34,16 +46,18 @@ export function MessageBubble({ message, onSpeakToggle, isSpeaking, agentLabel =
             )}
           </div>
         </div>
-        <button
-          type="button"
-          className={`bubble-tts${isSpeaking ? " bubble-tts-active" : ""}`}
-          aria-label={`朗读${label}消息`}
-          title={isSpeaking ? "停止朗读" : "朗读"}
-          aria-pressed={isSpeaking}
-          onClick={() => onSpeakToggle(message.id, message.content)}
-        >
-          <span aria-hidden="true">{isSpeaking ? "■" : "🔊"}</span>
-        </button>
+        {isUser && (
+          <button
+            type="button"
+            className={`bubble-tts${isSpeaking ? " bubble-tts-active" : ""}`}
+            aria-label="朗读用户消息"
+            title={isSpeaking ? "停止朗读" : "朗读"}
+            aria-pressed={isSpeaking}
+            onClick={() => onSpeakToggle(message.id, message.content)}
+          >
+            <span aria-hidden="true">{isSpeaking ? "■" : "🔊"}</span>
+          </button>
+        )}
       </div>
     </div>
   );

@@ -30,3 +30,9 @@ export function getUserConfigPath(): string {
 export function getDefaultHistoryDir(): string {
   return path.join(getChattingCursorHomeDir(), "history");
 }
+
+
+/** 聊天图片上传目录 */
+export function getUploadsDir(): string {
+  return path.join(getChattingCursorHomeDir(), "uploads");
+}

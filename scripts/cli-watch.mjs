@@ -1,12 +1,27 @@
 #!/usr/bin/env node
 /** 在本地终端订阅 Bridge 的 CLI 原始输出 SSE */
 import process from "node:process";
+import { execFile } from "node:child_process";
 
 
 const DEFAULT_BRIDGE_URL = "http://127.0.0.1:4321";
 const bridgeUrl = (process.env.BRIDGE_URL ?? DEFAULT_BRIDGE_URL).replace(/\/$/, "");
 const bridgeToken = process.env.BRIDGE_TOKEN?.trim() ?? "";
 const runId = process.argv[2]?.trim() ?? process.env.RUN_ID?.trim() ?? "";
+
+
+function playExitNotificationSound() {
+  if (process.platform === "win32") {
+    execFile(
+      "powershell",
+      ["-NoProfile", "-Command", "[System.Media.SystemSounds]::Asterisk.Play()"],
+      { windowsHide: true },
+      () => {},
+    );
+    return;
+  }
+  process.stdout.write("\u0007");
+}
 
 
 function printUsage() {
@@ -74,6 +89,7 @@ for await (const chunk of response.body) {
       if (event.type === "run_finished") {
         const code = event.data?.exitCode;
         console.log(`\n[进程结束 exit=${code ?? "?"}]`);
+        playExitNotificationSound();
       }
     } catch {
       // 忽略无法解析的 SSE 块

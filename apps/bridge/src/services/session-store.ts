@@ -7,6 +7,7 @@ export interface SessionMessage {
   content: string;
   timestamp: string;
   modelLabel?: string;
+  imageUrl?: string;
 }
 
 
