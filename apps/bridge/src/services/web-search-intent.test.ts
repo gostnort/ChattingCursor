@@ -22,6 +22,32 @@ test("extractWebSearchQuery 从指令前缀提取关键词", () => {
 });
 
 
+test("hasWebSearchIntent 识别行内 /websearch（中英文混排）", () => {
+  const mixed =
+    "目前cerritos的市长是哪个国家出生的? /websearch cerritos mayor birth place";
+  assert.equal(hasWebSearchIntent(mixed), true);
+  assert.equal(hasWebSearchIntent("foo bar /websearch cerritos mayor birth place"), true);
+  assert.equal(hasWebSearchIntent("/websearch cerritos mayor"), true);
+});
+
+
+test("extractWebSearchQuery 行内指令只取 /websearch 之后至行尾", () => {
+  const mixed =
+    "目前cerritos的市长是哪个国家出生的? /websearch cerritos mayor birth place";
+  assert.equal(extractWebSearchQuery(mixed), "cerritos mayor birth place");
+  assert.equal(
+    extractWebSearchQuery("foo bar /websearch cerritos mayor birth place"),
+    "cerritos mayor birth place",
+  );
+});
+
+
+test("extractWebSearchQuery 多行取首个 /websearch 查询", () => {
+  const multi = "第一行 /websearch query one\n第二行 /websearch query two";
+  assert.equal(extractWebSearchQuery(multi), "query one");
+});
+
+
 test("formatWebSearchReply 含搜索摘要与来源", () => {
   const reply = formatWebSearchReply("机票", {
     ok: true,

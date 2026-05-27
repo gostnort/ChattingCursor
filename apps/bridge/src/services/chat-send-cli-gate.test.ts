@@ -15,6 +15,13 @@ test("/websearch 不要求 cursor-agent", () => {
 });
 
 
+test("行内 /websearch 混排不要求 cursor-agent（不走 Kimi）", () => {
+  const mixed =
+    "目前cerritos的市长是哪个国家出生的? /websearch cerritos mayor birth place";
+  assert.equal(chatSendNeedsCursorCli(mixed), false);
+});
+
+
 test("/search 本地历史不要求 cursor-agent", () => {
   assert.equal(chatSendNeedsCursorCli("/search 关键词"), false);
 });

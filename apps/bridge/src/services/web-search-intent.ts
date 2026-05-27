@@ -4,14 +4,49 @@ import {
   type GoogleSerpItem,
 } from "./google-serp-parse.js";
 
-const WEBSEARCH_PREFIX = /^\/websearch\s+/i;
-const GOOGLE_PREFIX = /^\/google\s+/i;
+const SLASH_WEBSEARCH = /\/websearch\b/i;
+const SLASH_GOOGLE = /\/google\b/i;
+const LINE_WEBSEARCH_QUERY = /\/websearch\b\s*(.*)$/i;
+const LINE_GOOGLE_QUERY = /\/google\b\s*(.*)$/i;
+
+
+/** 从各行中提取 /websearch、/google 后的查询词（至行尾） */
+function extractSlashCommandQueriesFromLines(prompt: string): string[] {
+  const queries: string[] = [];
+  for (const line of prompt.split(/\r?\n/)) {
+    const webMatch = LINE_WEBSEARCH_QUERY.exec(line);
+    if (webMatch) {
+      const query = webMatch[1].trim();
+      if (query) {
+        queries.push(query);
+      }
+      continue;
+    }
+    const googleMatch = LINE_GOOGLE_QUERY.exec(line);
+    if (googleMatch) {
+      const query = googleMatch[1].trim();
+      if (query) {
+        queries.push(query);
+      }
+    }
+  }
+  return queries;
+}
+
+
+/** 消息任意位置是否包含 /websearch 或 /google 指令 */
+function hasSlashWebSearchCommand(prompt: string): boolean {
+  return SLASH_WEBSEARCH.test(prompt) || SLASH_GOOGLE.test(prompt);
+}
 
 
 /** 判断用户是否在请求联网搜索或核实（非本地聊天历史） */
 export function hasWebSearchIntent(prompt: string): boolean {
   const trimmed = prompt.trim();
-  if (WEBSEARCH_PREFIX.test(trimmed) || GOOGLE_PREFIX.test(trimmed)) {
+  if (!trimmed) {
+    return false;
+  }
+  if (hasSlashWebSearchCommand(trimmed)) {
     return true;
   }
   if (/^\/search\s+/i.test(trimmed)) {
@@ -36,13 +71,9 @@ export function hasWebSearchIntent(prompt: string): boolean {
 /** 从自然语言或 /websearch、/google 指令中提取联网搜索关键词 */
 export function extractWebSearchQuery(prompt: string): string {
   const trimmed = prompt.trim();
-  const websearchMatch = WEBSEARCH_PREFIX.exec(trimmed);
-  if (websearchMatch) {
-    return trimmed.slice(websearchMatch[0].length).trim();
-  }
-  const googleMatch = GOOGLE_PREFIX.exec(trimmed);
-  if (googleMatch) {
-    return trimmed.slice(googleMatch[0].length).trim();
+  const slashQueries = extractSlashCommandQueriesFromLines(trimmed);
+  if (slashQueries.length > 0) {
+    return slashQueries[0];
   }
   const topicPatterns = [
     /(?:帮我|请)?(?:搜索|搜|查)(?:一下|下)?(?:网页|网上|网络|互联网|在线)?[：:]\s*(.+)/,
