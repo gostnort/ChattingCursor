@@ -155,7 +155,10 @@ export function formatWebSearchReply(
     serpStartOffsets?: number[];
     isRepeatSearch?: boolean;
     linksCrawled?: number;
+    linksQueued?: number;
     linksTruncated?: boolean;
+    crawlBatchCount?: number;
+    crawlBatchSize?: number;
     block?: "consent" | "captcha" | null;
     aiSummary?: string;
     endpoint: string;
@@ -215,12 +218,21 @@ export function formatWebSearchReply(
   } else if (typeof result.serpPagesFetched === "number" && result.serpPagesFetched > 1) {
     lines.push("", zh ? `（已合并 ${result.serpPagesFetched} 页 Google 结果）` : `(Merged ${result.serpPagesFetched} SERP pages)`);
   }
-  if (typeof result.linksCrawled === "number") {
+  if (typeof result.linksQueued === "number" || typeof result.linksCrawled === "number") {
+    const queued = result.linksQueued ?? 0;
+    const crawled = result.linksCrawled ?? 0;
+    const batchSize = result.crawlBatchSize ?? 5;
+    const batchCount = result.crawlBatchCount ?? (queued > 0 ? Math.ceil(queued / batchSize) : 0);
+    const batchNote = batchCount > 0
+      ? (zh
+        ? `，分 ${batchCount} 批打开（每批最多 ${batchSize} 个）`
+        : `, opened in ${batchCount} batch(es) of up to ${batchSize}`)
+      : "";
     lines.push(
       "",
       zh
-        ? `已阅读 ${result.linksCrawled} 个结果页${result.linksTruncated ? "（部分链接因上限未打开）" : ""}。`
-        : `Read ${result.linksCrawled} result page(s)${result.linksTruncated ? " (some links skipped due to limits)" : ""}.`,
+        ? `已排队打开 ${queued} 个结果链接，成功阅读 ${crawled} 个${batchNote}${result.linksTruncated ? "（部分链接因上限未打开）" : ""}。`
+        : `Queued ${queued} result link(s), read ${crawled}${batchNote}${result.linksTruncated ? " (some links skipped due to limits)" : ""}.`,
     );
   }
   if (result.title) {

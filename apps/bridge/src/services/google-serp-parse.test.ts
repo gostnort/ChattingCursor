@@ -3,8 +3,10 @@ import test from "node:test";
 import {
   buildStructuredSerpSummary,
   buildSynthesizedSearchSummary,
+  collectNewOrganicResultUrls,
   detectGoogleAccessBlock,
   parseGoogleSerpEvaluateValue,
+  pickOrganicUrlFromSerpHrefs,
   preferChineseWebSearchReply,
 } from "./google-serp-parse.js";
 
@@ -56,6 +58,31 @@ test("buildStructuredSerpSummary 输出条目与中文拦截提示", () => {
 test("preferChineseWebSearchReply", () => {
   assert.equal(preferChineseWebSearchReply("哲学家"), true);
   assert.equal(preferChineseWebSearchReply("flight status"), false);
+});
+
+
+test("collectNewOrganicResultUrls 从 Google /url?q= 解包外链", () => {
+  const seen = new Set<string>();
+  const batch = collectNewOrganicResultUrls(
+    [
+      {
+        title: "Example",
+        url: "https://www.google.com/url?q=https%3A%2F%2Fexample.com%2Fpage&sa=U",
+      },
+    ],
+    seen,
+    { perPageMax: 5, totalMax: 10, alreadyQueued: 0 },
+  );
+  assert.deepEqual(batch.urls, ["https://example.com/page"]);
+});
+
+
+test("pickOrganicUrlFromSerpHrefs 解包相对 /url?q= 链接", () => {
+  const href = "/url?q=https%3A%2F%2Fexample.com%2Fpage&sa=U";
+  assert.equal(
+    pickOrganicUrlFromSerpHrefs([href]),
+    "https://example.com/page",
+  );
 });
 
 

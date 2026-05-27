@@ -9,7 +9,7 @@
     "build": "pnpm -r build",
     "lint": "eslint .",
     "typecheck": "pnpm --filter @chatting-cursor/shared build && pnpm -r typecheck",
-    "test:bridge": "pnpm --filter @chatting-cursor/cli-client build && pnpm --filter @chatting-cursor/bridge exec tsx --test ../../apps/bridge/src/services/web-search-intent.test.ts ../../apps/bridge/src/services/chat-send-cli-gate.test.ts ../../apps/bridge/src/services/chrome-google-search.encode.test.ts ../../apps/bridge/src/services/google-serp-parse.test.ts",
+    "test:bridge": "pnpm --filter @chatting-cursor/cli-client build && pnpm --filter @chatting-cursor/bridge test",
     "cli:watch": "node scripts/cli-watch.mjs",
     "quality:watch": "node scripts/quality-watch.mjs",
     "crew:setup": "python -m venv .venv && .venv\\Scripts\\pip install -r requirements.txt",

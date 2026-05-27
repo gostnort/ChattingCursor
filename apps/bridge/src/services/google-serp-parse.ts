@@ -35,16 +35,70 @@ export const GOOGLE_SERP_EXTRACT_EXPRESSION = `(() => {
   const bodyText = (document.body && document.body.innerText) || "";
   const items = [];
   const seen = new Set();
-  const selectors = ["#search .g", "#rso .g", "div.g"];
+  const unwrapGoogleHref = (raw) => {
+    if (!raw) return "";
+    try {
+      const u = new URL(raw, location.origin);
+      if (u.hostname.includes("google.") && u.pathname === "/url" && u.searchParams.has("q")) {
+        const q = (u.searchParams.get("q") || "").trim();
+        if (q.startsWith("http")) return q;
+        return "";
+      }
+      if (u.protocol === "http:" || u.protocol === "https:") {
+        if (u.hostname.includes("google.") && u.pathname.startsWith("/search")) return "";
+        return u.href;
+      }
+    } catch (_) {}
+    return "";
+  };
+  const findResultUrl = (node) => {
+    for (const a of node.querySelectorAll("a[href]")) {
+      const h3 = a.querySelector("h3");
+      if (!h3) continue;
+      const url = unwrapGoogleHref(a.href || a.getAttribute("href") || "");
+      if (url) return url;
+    }
+    for (const a of node.querySelectorAll('a[href*="/url"], a[href^="/url"]')) {
+      const url = unwrapGoogleHref(a.href || a.getAttribute("href") || "");
+      if (url) return url;
+    }
+    const cite = node.querySelector("cite");
+    if (cite) {
+      const citeLink = cite.closest("a");
+      if (citeLink) {
+        const url = unwrapGoogleHref(citeLink.href || citeLink.getAttribute("href") || "");
+        if (url) return url;
+      }
+    }
+    const h3 = node.querySelector("h3");
+    if (h3) {
+      const parentLink = h3.closest("a");
+      if (parentLink) {
+        const url = unwrapGoogleHref(parentLink.href || parentLink.getAttribute("href") || "");
+        if (url) return url;
+      }
+    }
+    return "";
+  };
+  const selectors = [
+    "#search .MjjYud",
+    "#rso .MjjYud",
+    ".MjjYud",
+    "#search .tF2Cxc",
+    ".tF2Cxc",
+    "#search .g",
+    "#rso .g",
+    "div.g",
+    "#search [data-sokoban-container]",
+  ];
   for (const sel of selectors) {
     for (const node of document.querySelectorAll(sel)) {
       const h3 = node.querySelector("h3");
       if (!h3) continue;
       const title = (h3.innerText || "").trim();
       if (!title || seen.has(title)) continue;
-      const link = h3.closest("a") || node.querySelector('a[href^="http"]');
-      const url = link && link.href ? link.href : "";
-      const snippetEl = node.querySelector("[data-snf], .VwiC3b, .IsZvec, .st, .aCOpRe");
+      const url = findResultUrl(node);
+      const snippetEl = node.querySelector("[data-snf], .VwiC3b, .IsZvec, .st, .aCOpRe, .MUxGbd");
       const snippet = snippetEl ? (snippetEl.innerText || "").trim().slice(0, 400) : "";
       seen.add(title);
       items.push({ title, url, snippet });
@@ -133,6 +187,27 @@ export function preferChineseWebSearchReply(query: string): boolean {
 }
 
 
+/** 从 SERP 条目 href 列表中选出首个可抓取的有机结果 URL */
+export function pickOrganicUrlFromSerpHrefs(hrefs: string[]): string {
+  for (const raw of hrefs) {
+    const trimmed = raw.trim();
+    if (!trimmed) {
+      continue;
+    }
+    const candidates = trimmed.startsWith("http")
+      ? [trimmed]
+      : [trimmed, `https://www.google.com${trimmed.startsWith("/") ? trimmed : `/${trimmed}`}`];
+    for (const candidate of candidates) {
+      const normalized = normalizeOrganicResultUrl(candidate);
+      if (normalized) {
+        return normalized;
+      }
+    }
+  }
+  return "";
+}
+
+
 /** 将 SERP 链接规范为可抓取的 http(s) URL；Google 跳转链会解包 */
 export function normalizeOrganicResultUrl(raw: string): string | null {
   const trimmed = raw.trim();
@@ -164,7 +239,7 @@ export function collectNewOrganicResultUrls(
   const urls: string[] = [];
   let truncated = false;
   for (const item of items) {
-    const href = normalizeOrganicResultUrl(item.url ?? "");
+    const href = pickOrganicUrlFromSerpHrefs([item.url ?? ""]);
     if (!href || seenUrls.has(href)) {
       continue;
     }

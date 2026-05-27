@@ -78,3 +78,18 @@ test("formatWebSearchReply 含搜索摘要与来源", () => {
   assert.match(reply, /来源：/);
   assert.match(reply, /标签页已自动关闭/);
 });
+
+
+test("formatWebSearchReply 提及分批打开", () => {
+  const reply = formatWebSearchReply("test", {
+    ok: true,
+    endpoint: "http://127.0.0.1:9222",
+    searchUrl: "https://www.google.com/search?q=test",
+    linksQueued: 12,
+    linksCrawled: 10,
+    crawlBatchCount: 3,
+    crawlBatchSize: 5,
+  });
+  assert.match(reply, /分 3 批打开/);
+  assert.match(reply, /每批最多 5 个/);
+});

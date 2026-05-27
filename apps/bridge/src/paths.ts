@@ -44,7 +44,11 @@ export function getUploadsDir(): string {
 }
 
 
-/** /websearch 分页与去重状态 */
+/** /websearch 分页与去重状态（测试可通过 CHATTINGCURSOR_WEBSEARCH_STATE_PATH 覆盖） */
 export function getWebSearchStatePath(): string {
+  const override = process.env.CHATTINGCURSOR_WEBSEARCH_STATE_PATH?.trim();
+  if (override) {
+    return override;
+  }
   return path.join(getChattingCursorHomeDir(), "websearch-state.json");
 }

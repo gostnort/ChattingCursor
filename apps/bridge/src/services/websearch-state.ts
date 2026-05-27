@@ -102,7 +102,14 @@ async function writeStateFile(state: WebSearchStateFile): Promise<void> {
 export async function loadWebSearchQueryState(query: string): Promise<WebSearchQueryState | undefined> {
   const state = await readStateFile();
   const key = webSearchQueryHash(query);
-  return state.queries[key];
+  const entry = state.queries[key];
+  if (!entry) {
+    return undefined;
+  }
+  return {
+    ...entry,
+    query: entry.query || query.trim(),
+  };
 }
 
 
@@ -133,19 +140,32 @@ export async function planWebSearchRun(query: string): Promise<{
   seenUrls: Set<string>;
   seenContentHashes: Set<string>;
   statePath: string;
+  queryKey: string;
+  previousLastStartOffset?: number;
 }> {
   const trimmed = query.trim();
   const entry = await loadWebSearchQueryState(trimmed);
   const lastOffset = entry?.lastStartOffset;
-  const resolved = resolveSerpStartOffsets(
-    entry === undefined ? undefined : lastOffset,
-  );
+  const hasPriorSerp = entry !== undefined && typeof lastOffset === "number" && lastOffset > 0;
+  const resolved = resolveSerpStartOffsets(hasPriorSerp ? lastOffset : undefined);
+  const statePath = getWebSearchStatePath();
+  const queryKey = webSearchQueryHash(trimmed);
+  console.info("[websearch] state load", {
+    statePath,
+    queryKey,
+    priorLastStartOffset: hasPriorSerp ? lastOffset : null,
+    isRepeat: resolved.isRepeat,
+    serpStartOffsets: resolved.offsets,
+    seenUrlCount: entry?.seenUrls?.length ?? 0,
+  });
   return {
     offsets: resolved.offsets,
     isRepeat: resolved.isRepeat,
     seenUrls: new Set(entry?.seenUrls ?? []),
     seenContentHashes: new Set(entry?.seenContentHashes ?? []),
-    statePath: getWebSearchStatePath(),
+    statePath,
+    queryKey,
+    previousLastStartOffset: hasPriorSerp ? lastOffset : undefined,
   };
 }
 
@@ -156,15 +176,23 @@ export async function commitWebSearchRun(
   serpOffsetsUsed: number[],
   seenUrls: Set<string>,
   seenContentHashes: Set<string>,
-): Promise<void> {
+): Promise<WebSearchQueryState> {
   const lastStartOffset = serpOffsetsUsed.length > 0
     ? Math.max(...serpOffsetsUsed)
     : 0;
-  await saveWebSearchQueryState(query.trim(), {
+  const saved = await saveWebSearchQueryState(query.trim(), {
     query: query.trim(),
     lastStartOffset,
     seenUrls: [...seenUrls],
     seenContentHashes: [...seenContentHashes],
   });
+  console.info("[websearch] state saved", {
+    statePath: getWebSearchStatePath(),
+    queryKey: webSearchQueryHash(query),
+    lastStartOffset: saved.lastStartOffset,
+    seenUrlCount: saved.seenUrls.length,
+    serpOffsetsUsed,
+  });
+  return saved;
 }
 

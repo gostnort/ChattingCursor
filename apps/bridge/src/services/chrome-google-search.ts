@@ -24,6 +24,14 @@ const CDP_SESSION_TIMEOUT_MS = 90000;
 const EXCERPT_MAX_CHARS = 8000;
 const PAGE_TEXT_MAX_CHARS = 3500;
 const AGGREGATE_EXCERPT_MAX_CHARS = 30000;
+/** 结果页并发打开上限（每批打开后关闭再开下一批） */
+export const WEBSEARCH_CRAWL_BATCH_SIZE = 5;
+
+
+/** Bridge stdout 日志（英文，便于排查 /websearch） */
+function logWebSearch(stage: string, details: Record<string, unknown>): void {
+  console.info(`[websearch] ${stage}`, JSON.stringify(details));
+}
 
 
 export interface ChromeGoogleSearchOptions {
@@ -54,7 +62,10 @@ export interface ChromeGoogleSearchResult {
   serpStartOffsets?: number[];
   isRepeatSearch?: boolean;
   linksCrawled?: number;
+  linksQueued?: number;
   linksTruncated?: boolean;
+  crawlBatchCount?: number;
+  crawlBatchSize?: number;
   statePath?: string;
   block?: "consent" | "captcha" | null;
   aiSummary?: string;
@@ -121,6 +132,15 @@ export async function openGoogleSearchInChrome(
   const serpOffsets = plan.offsets;
   const firstOffset = serpOffsets[0] ?? 10;
   const searchUrl = buildGoogleSearchUrl(query, firstOffset);
+  logWebSearch("state_loaded", {
+    query: query.trim(),
+    queryKey: plan.queryKey,
+    statePath: plan.statePath,
+    isRepeat: plan.isRepeat,
+    previousLastStartOffset: plan.previousLastStartOffset ?? null,
+    serpStartOffsets: serpOffsets,
+    seenUrlCount: plan.seenUrls.size,
+  });
   const chrome = await inspectChromeEndpoint();
   if (!chrome.available) {
     return {
@@ -134,6 +154,8 @@ export async function openGoogleSearchInChrome(
   const seenContentHashes = new Set(plan.seenContentHashes);
   const createdTabIds: string[] = [];
   let linksTruncated = false;
+  let serpOffsetsUsed: number[] = [];
+  let crawlQueue: string[] = [];
   try {
     const created = await openTab(endpoint, searchUrl);
     const searchTargetId = typeof created.id === "string" ? created.id : "";
@@ -150,8 +172,16 @@ export async function openGoogleSearchInChrome(
       };
     }
     const serpCapture = await captureGoogleSerpForOffsets(wsUrl, query, serpOffsets);
+    serpOffsetsUsed = serpOffsets.slice(0, serpCapture.pagesFetched ?? serpOffsets.length);
     const serpItems = serpCapture.serpItems ?? [];
-    const crawlQueue: string[] = [];
+    const serpItemsWithUrl = serpItems.filter((item) => Boolean(item.url?.trim())).length;
+    logWebSearch("serp_captured", {
+      serpStartOffsets: serpOffsetsUsed,
+      serpItemCount: serpItems.length,
+      serpItemsWithUrl,
+      block: serpCapture.block ?? null,
+    });
+    crawlQueue = [];
     for (const pageItems of serpCapture.itemsByPage) {
       const batch = collectNewOrganicResultUrls(pageItems, seenUrls, {
         perPageMax: WEBSEARCH_MAX_LINKS_PER_SERP_PAGE,
@@ -169,34 +199,32 @@ export async function openGoogleSearchInChrome(
     if (crawlQueue.length >= WEBSEARCH_MAX_LINKS_PER_SEARCH) {
       linksTruncated = true;
     }
-    const crawledPages: CrawledPageText[] = [];
-    for (const targetUrl of crawlQueue) {
-      const pageTab = await openTab(endpoint, targetUrl);
-      const pageTargetId = typeof pageTab.id === "string" ? pageTab.id : "";
-      if (pageTargetId) {
-        createdTabIds.push(pageTargetId);
-      }
-      const pageWs = await resolveTargetWebSocket(endpoint, pageTargetId);
-      if (!pageWs) {
-        continue;
-      }
-      const pageText = await capturePageMainTextViaCdp(pageWs, targetUrl);
-      const body = pageText.text.trim();
-      if (!body) {
-        continue;
-      }
-      const contentHash = hashWebSearchPageContent(body);
-      if (seenContentHashes.has(contentHash)) {
-        continue;
-      }
-      seenContentHashes.add(contentHash);
-      crawledPages.push({
-        title: pageText.title || targetUrl,
-        url: pageText.url || targetUrl,
-        text: body.slice(0, PAGE_TEXT_MAX_CHARS),
-      });
-    }
-    await commitWebSearchRun(query, serpOffsets, seenUrls, seenContentHashes);
+    logWebSearch("links_queued", {
+      linksQueued: crawlQueue.length,
+      linksTruncated,
+    });
+    await commitWebSearchRun(query, serpOffsetsUsed, seenUrls, seenContentHashes);
+    logWebSearch("state_saved_after_serp", {
+      query: query.trim(),
+      queryKey: plan.queryKey,
+      lastStartOffset: serpOffsetsUsed.length > 0 ? Math.max(...serpOffsetsUsed) : 0,
+      seenUrlCount: seenUrls.size,
+    });
+    const crawlBatchCount = computeCrawlBatchCount(crawlQueue.length, WEBSEARCH_CRAWL_BATCH_SIZE);
+    const crawledPages = await crawlResultUrlsInBatches(
+      endpoint,
+      crawlQueue,
+      seenContentHashes,
+      WEBSEARCH_CRAWL_BATCH_SIZE,
+    );
+    await commitWebSearchRun(query, serpOffsetsUsed, seenUrls, seenContentHashes);
+    logWebSearch("state_saved", {
+      query: query.trim(),
+      queryKey: plan.queryKey,
+      lastStartOffset: serpOffsetsUsed.length > 0 ? Math.max(...serpOffsetsUsed) : 0,
+      seenUrlCount: seenUrls.size,
+      linksCrawled: crawledPages.length,
+    });
     const structuredBullets = serpItems
       .map((item) => `- ${item.title}${item.snippet ? `: ${item.snippet.slice(0, 120)}` : ""}`)
       .join("\n");
@@ -229,6 +257,11 @@ export async function openGoogleSearchInChrome(
         `部分结果页未打开（上限：每 SERP 页 ${WEBSEARCH_MAX_LINKS_PER_SERP_PAGE} 条，单次合计 ${WEBSEARCH_MAX_LINKS_PER_SEARCH} 条）。`,
       );
     }
+    if (crawlQueue.length > 0) {
+      statusNotes.push(
+        `结果页分 ${crawlBatchCount} 批抓取（每批最多 ${WEBSEARCH_CRAWL_BATCH_SIZE} 个并发标签页）。`,
+      );
+    }
     statusNotes.push(`状态文件：${plan.statePath}`);
     return {
       ok: true,
@@ -241,10 +274,13 @@ export async function openGoogleSearchInChrome(
       crawledPages,
       synthesizedSummary,
       serpPagesFetched: serpCapture.pagesFetched,
-      serpStartOffsets: serpOffsets,
+      serpStartOffsets: serpOffsetsUsed,
       isRepeatSearch: plan.isRepeat,
       linksCrawled: crawledPages.length,
+      linksQueued: crawlQueue.length,
       linksTruncated,
+      crawlBatchCount,
+      crawlBatchSize: WEBSEARCH_CRAWL_BATCH_SIZE,
       statePath: plan.statePath,
       block: serpCapture.block,
       aiSummary,
@@ -252,6 +288,20 @@ export async function openGoogleSearchInChrome(
     };
   } catch (error: unknown) {
     const detail = error instanceof Error ? error.message : String(error);
+    if (serpOffsetsUsed.length > 0) {
+      try {
+        await commitWebSearchRun(query, serpOffsetsUsed, seenUrls, seenContentHashes);
+        logWebSearch("state_saved_partial", {
+          query: query.trim(),
+          serpStartOffsets: serpOffsetsUsed,
+          seenUrlCount: seenUrls.size,
+          error: detail,
+        });
+      } catch (commitError: unknown) {
+        const commitDetail = commitError instanceof Error ? commitError.message : String(commitError);
+        logWebSearch("state_save_failed", { error: commitDetail });
+      }
+    }
     return {
       ok: false,
       endpoint,
@@ -264,8 +314,107 @@ export async function openGoogleSearchInChrome(
 }
 
 
+/** 根据链接数计算批次数（12 链接、每批 5 → 3 批） */
+export function computeCrawlBatchCount(urlCount: number, batchSize: number): number {
+  if (urlCount <= 0 || batchSize <= 0) {
+    return 0;
+  }
+  return Math.ceil(urlCount / batchSize);
+}
+
+
+/** 将 URL 列表按固定大小切分 */
+function chunkUrls(urls: string[], batchSize: number): string[][] {
+  const batches: string[][] = [];
+  for (let index = 0; index < urls.length; index += batchSize) {
+    batches.push(urls.slice(index, index + batchSize));
+  }
+  return batches;
+}
+
+
+/** 分批打开结果页：每批最多 batchSize 个标签，摘录后关闭再开下一批 */
+async function crawlResultUrlsInBatches(
+  endpoint: string,
+  urls: string[],
+  seenContentHashes: Set<string>,
+  batchSize: number,
+): Promise<CrawledPageText[]> {
+  const crawledPages: CrawledPageText[] = [];
+  const batches = chunkUrls(urls, batchSize);
+  for (let batchIndex = 0; batchIndex < batches.length; batchIndex += 1) {
+    const batchUrls = batches[batchIndex];
+    const batchNumber = batchIndex + 1;
+    console.info(
+      `[websearch] Batch ${batchNumber}/${batches.length}: opened ${batchUrls.length} URLs...`,
+    );
+    logWebSearch("batch_start", {
+      batch: batchNumber,
+      totalBatches: batches.length,
+      urlCount: batchUrls.length,
+    });
+    const opened = await Promise.all(
+      batchUrls.map(async (targetUrl) => {
+        const pageTab = await openTab(endpoint, targetUrl);
+        const pageTargetId = typeof pageTab.id === "string" ? pageTab.id : "";
+        return { targetUrl, pageTargetId };
+      }),
+    );
+    const captures = await Promise.all(
+      opened.map(async ({ targetUrl, pageTargetId }) => {
+        if (!pageTargetId) {
+          return null;
+        }
+        const pageWs = await resolveTargetWebSocket(endpoint, pageTargetId);
+        if (!pageWs) {
+          return null;
+        }
+        try {
+          return await capturePageMainTextViaCdp(pageWs, targetUrl);
+        } catch {
+          return null;
+        }
+      }),
+    );
+    const batchTabIds = opened
+      .map((entry) => entry.pageTargetId)
+      .filter((targetId): targetId is string => Boolean(targetId));
+    const pagesBeforeBatch = crawledPages.length;
+    for (let captureIndex = 0; captureIndex < captures.length; captureIndex += 1) {
+      const pageText = captures[captureIndex];
+      const targetUrl = batchUrls[captureIndex];
+      if (!pageText) {
+        continue;
+      }
+      const body = pageText.text.trim();
+      if (!body) {
+        continue;
+      }
+      const contentHash = hashWebSearchPageContent(body);
+      if (seenContentHashes.has(contentHash)) {
+        continue;
+      }
+      seenContentHashes.add(contentHash);
+      crawledPages.push({
+        title: pageText.title || targetUrl,
+        url: pageText.url || targetUrl,
+        text: body.slice(0, PAGE_TEXT_MAX_CHARS),
+      });
+    }
+    logWebSearch("batch_done", {
+      batch: batchNumber,
+      totalBatches: batches.length,
+      opened: batchUrls.length,
+      extracted: crawledPages.length - pagesBeforeBatch,
+    });
+    await closeCreatedTabs(endpoint, batchTabIds);
+  }
+  return crawledPages;
+}
+
+
 async function openTab(endpoint: string, url: string): Promise<Record<string, unknown>> {
-  const response = await fetch(`${endpoint}/json/new?${url}`, {
+  const response = await fetch(`${endpoint}/json/new?${encodeURIComponent(url)}`, {
     method: "PUT",
     signal: AbortSignal.timeout(NAVIGATE_TIMEOUT_MS),
   });
@@ -366,7 +515,15 @@ async function captureGoogleSerpForOffsets(
         expression: GOOGLE_SERP_EXTRACT_EXPRESSION,
         returnByValue: true,
       });
-      const parsed = parseGoogleSerpEvaluateValue(readEvaluateValue(extractResponse));
+      const rawEvaluate = readEvaluateValue(extractResponse);
+      const parsed = parseGoogleSerpEvaluateValue(rawEvaluate);
+      logWebSearch("serp_page_eval", {
+        start,
+        pageUrl,
+        rawItemCount: parsed.items.length,
+        block: parsed.block ?? null,
+        hasRaw: rawEvaluate !== undefined && rawEvaluate !== null,
+      });
       lastSnapshot = parsed;
       pagesFetched += 1;
       const pageItems: GoogleSerpItem[] = [];
@@ -416,7 +573,15 @@ async function capturePageMainTextViaCdp(
     });
     const currentValue = readEvaluateValue(current) as { url?: string; ready?: string } | undefined;
     const href = typeof currentValue?.url === "string" ? currentValue.url : "";
-    const needsNavigate = !href || href === "about:blank" || !href.startsWith("http");
+    const targetHost = (() => {
+      try {
+        return new URL(targetUrl).hostname;
+      } catch {
+        return "";
+      }
+    })();
+    const onTarget = Boolean(targetHost && href.includes(targetHost));
+    const needsNavigate = !href || href === "about:blank" || !href.startsWith("http") || !onTarget;
     if (needsNavigate) {
       await sendCommand("Page.navigate", { url: targetUrl });
     }
@@ -544,23 +709,48 @@ async function waitForGooglePageLoad(
 ): Promise<void> {
   const expectedHost = "google.";
   const deadline = Date.now() + NAVIGATE_TIMEOUT_MS;
+  let sawComplete = false;
   while (Date.now() < deadline) {
     const response = await sendCommand("Runtime.evaluate", {
-      expression: "({ url: location.href, ready: document.readyState })",
+      expression: `({
+        url: location.href,
+        ready: document.readyState,
+        resultCount: document.querySelectorAll(".MjjYud h3, #search .g h3, div.g h3").length,
+        blocked: /consent\\.google|Before you continue|unusual traffic|recaptcha/i.test(
+          ((document.body && document.body.innerText) || "") + " " + location.href
+        )
+      })`,
       returnByValue: true,
     });
-    const value = readEvaluateValue(response) as { url?: string; ready?: string } | undefined;
+    const value = readEvaluateValue(response) as {
+      url?: string;
+      ready?: string;
+      resultCount?: number;
+      blocked?: boolean;
+    } | undefined;
     const url = typeof value?.url === "string" ? value.url : "";
     const ready = typeof value?.ready === "string" ? value.ready : "";
-    if (url && url !== "about:blank" && url.includes(expectedHost) && (ready === "interactive" || ready === "complete")) {
-      await sleep(600);
+    const resultCount = typeof value?.resultCount === "number" ? value.resultCount : 0;
+    if (value?.blocked) {
+      await sleep(400);
       return;
+    }
+    const onGoogle = url && url !== "about:blank" && url.includes(expectedHost);
+    const pageReady = ready === "interactive" || ready === "complete";
+    if (onGoogle && pageReady) {
+      sawComplete = true;
+      if (resultCount > 0) {
+        await sleep(500);
+        return;
+      }
     }
     if (url.startsWith(searchUrl.split("?")[0] ?? "") && ready === "complete") {
-      await sleep(600);
-      return;
+      sawComplete = true;
     }
     await sleep(400);
+  }
+  if (sawComplete) {
+    await sleep(1500);
   }
 }
 

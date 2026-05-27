@@ -276,6 +276,19 @@ export async function registerChatRoutes(app: FastifyInstance): Promise<void> {
         "Windows CDP search (Bridge → Chrome 9222, not WSL MCP)",
       );
       void openGoogleSearchInChrome(query, { userContext: userContext || undefined }).then((result) => {
+        request.log.info(
+          {
+            query,
+            ok: result.ok,
+            serpStartOffsets: result.serpStartOffsets,
+            isRepeatSearch: result.isRepeatSearch,
+            linksQueued: result.linksQueued,
+            linksCrawled: result.linksCrawled,
+            crawlBatchCount: result.crawlBatchCount,
+            statePath: result.statePath,
+          },
+          "websearch finished",
+        );
         const replyText = formatWebSearchReply(query, result);
         finishDirectReplyRun(runId, session.sessionId, prompt, replyText, "chrome_web_search", modelLabel);
       }).catch((error: unknown) => {
