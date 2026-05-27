@@ -96,7 +96,7 @@ export function formatWebSearchReply(
     ].join("\n");
   }
   const lines = [
-    `已在 Chrome 中打开 Google 搜索「${query}」。`,
+    `已通过 Windows CDP（${result.endpoint}）在 Chrome 中打开 Google 搜索「${query}」。`,
     "",
     `搜索链接：${result.searchUrl}`,
   ];
@@ -114,8 +114,8 @@ export function formatWebSearchReply(
   }
   lines.push(
     "",
-    "提示：本路径使用本机 Chrome（免费）。勿依赖 Kimi「auto」模型的付费 API 联网；",
-    "可用 /websearch 关键词、/google 关键词，或自然语言如「网上搜一下…」。",
+    "提示：联网搜索走 Bridge → Windows Chrome CDP（9222），非 WSL MCP。",
+    "勿依赖 Kimi「auto」付费 API 联网；可用 /websearch、/google 或「网上搜一下…」。",
   );
   return lines.join("\n");
 }

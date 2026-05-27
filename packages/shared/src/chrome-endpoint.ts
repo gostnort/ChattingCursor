@@ -14,6 +14,16 @@ export function resolveChromeEndpoint(): string {
 }
 
 
+/** Bridge（run.bat / Windows Node）联网搜索用：固定本机 9222，不做 WSL 主机改写 */
+export function resolveBridgeChromeEndpoint(): string {
+  const fromEnv = process.env.CHROME_DEBUG_ENDPOINT?.trim();
+  if (fromEnv && fromEnv.length > 0) {
+    return fromEnv.replace(/\/$/, "");
+  }
+  return DEFAULT_CHROME_DEBUG_ENDPOINT;
+}
+
+
 function isWsl(): boolean {
   if (process.platform !== "linux") {
     return false;

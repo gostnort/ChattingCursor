@@ -266,6 +266,10 @@ export async function registerChatRoutes(app: FastifyInstance): Promise<void> {
     }
     if (hasWebSearchIntent(prompt)) {
       const query = extractWebSearchQuery(prompt);
+      request.log.info(
+        { query, endpoint: "http://127.0.0.1:9222", path: "chrome-google-search" },
+        "Windows CDP search (Bridge → Chrome 9222, not WSL MCP)",
+      );
       void openGoogleSearchInChrome(query).then((result) => {
         const replyText = formatWebSearchReply(query, result);
         finishDirectReplyRun(runId, session.sessionId, prompt, replyText, "chrome_web_search", modelLabel);

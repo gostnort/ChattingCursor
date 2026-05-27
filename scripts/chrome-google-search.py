@@ -64,7 +64,8 @@ def open_google_search(query: str, snapshot: bool) -> dict[str, Any]:
             "message": chrome.get("message"),
         }
     try:
-        created = fetch_json(f"{endpoint}/json/new?{quote(search_url, safe='')}", method="PUT")
+        # q= 已 percent-encode；整 URL 为 ASCII，直接拼到 /json/new? 后，勿再 quote 以免二次编码 %
+        created = fetch_json(f"{endpoint}/json/new?{search_url}", method="PUT")
     except Exception as exc:
         return {
             "ok": False,

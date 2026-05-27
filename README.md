@@ -17,7 +17,7 @@ Open **http://127.0.0.1:43210/ChattingCursor/** → **Local → Config** → con
 |---------|---------|--------|
 | Bridge | `4321` | `BRIDGE_PORT`, `BRIDGE_HOST` |
 | Web dev | `43210` | Vite; base path `/ChattingCursor/` |
-| Chrome debug (optional) | `9222` | Free `/websearch` via local Chrome CDP; see [docs/QUICKSTART.md](docs/QUICKSTART.md) |
+| Chrome debug (optional) | `9222` | Free `/websearch`: Bridge → Windows Chrome CDP (`127.0.0.1:9222`), not WSL MCP; see [docs/QUICKSTART.md](docs/QUICKSTART.md) |
 
 ## Token file (phone)
 

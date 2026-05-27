@@ -1,6 +1,6 @@
 /** 通过 Chrome 远程调试（默认 9222）在 Google 打开搜索页 */
 
-import { resolveChromeEndpoint } from "@chatting-cursor/shared/chrome-endpoint";
+import { resolveBridgeChromeEndpoint } from "@chatting-cursor/shared/chrome-endpoint";
 
 const NAVIGATE_TIMEOUT_MS = 15000;
 
@@ -32,7 +32,7 @@ export function buildGoogleSearchUrl(query: string): string {
 
 /** 探测 Chrome 9222 是否可用 */
 export async function inspectChromeEndpoint(): Promise<ChromeEndpointStatus> {
-  const endpoint = resolveChromeEndpoint();
+  const endpoint = resolveBridgeChromeEndpoint();
   try {
     const response = await fetch(`${endpoint}/json/list`, {
       signal: AbortSignal.timeout(3000),
@@ -71,7 +71,7 @@ export async function inspectChromeEndpoint(): Promise<ChromeEndpointStatus> {
 
 /** 在 Chrome 新标签页打开 Google 搜索，并尝试读取标题与正文摘录 */
 export async function openGoogleSearchInChrome(query: string): Promise<ChromeGoogleSearchResult> {
-  const endpoint = resolveChromeEndpoint();
+  const endpoint = resolveBridgeChromeEndpoint();
   const searchUrl = buildGoogleSearchUrl(query);
   const chrome = await inspectChromeEndpoint();
   if (!chrome.available) {
@@ -110,7 +110,8 @@ export async function openGoogleSearchInChrome(query: string): Promise<ChromeGoo
 
 
 async function openTab(endpoint: string, url: string): Promise<Record<string, unknown>> {
-  const response = await fetch(`${endpoint}/json/new?${encodeURIComponent(url)}`, {
+  // buildGoogleSearchUrl 已对 q 做 encodeURIComponent；此处勿再 encodeURI/encodeURIComponent（会二次编码 %）
+  const response = await fetch(`${endpoint}/json/new?${url}`, {
     method: "PUT",
     signal: AbortSignal.timeout(NAVIGATE_TIMEOUT_MS),
   });
