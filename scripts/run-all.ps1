@@ -370,39 +370,74 @@ function Get-RecoveryTimestamp {
 }
 
 
+function Read-TokenFileFields {
+  param([string]$Content)
+  $fields = @{}
+  if ([string]::IsNullOrWhiteSpace($Content)) {
+    return $fields
+  }
+  foreach ($line in ($Content -split '\r?\n')) {
+    $trimmed = $line.Trim()
+    if (-not $trimmed) {
+      continue
+    }
+    $sep = $trimmed.IndexOf(':')
+    if ($sep -lt 0) {
+      continue
+    }
+    $key = $trimmed.Substring(0, $sep).Trim().ToLowerInvariant()
+    $value = $trimmed.Substring($sep + 1).Trim()
+    $fields[$key] = $value
+  }
+  return $fields
+}
+
+
+function Format-CanonicalTokenFileContent {
+  param(
+    [string]$Datetime,
+    [string]$Token,
+    [string]$PublicUrl,
+    [string]$PreviousDatetime = $null
+  )
+  $lines = @("datetime: $Datetime")
+  if ($PreviousDatetime) {
+    $lines += "previousDatetime: $PreviousDatetime"
+  }
+  $lines += @("token: $Token", "publicBridgeUrl: $PublicUrl", "")
+  return ($lines -join "`n")
+}
+
+
 function Write-PublicBridgeUrlToTokenFileDirect([string]$PublicUrl) {
   $filePath = Get-TokenFilePath
   $dir = Split-Path -Parent $filePath
   if (-not (Test-Path $dir)) {
     New-Item -ItemType Directory -Path $dir -Force | Out-Null
   }
-  $content = ""
+  $nowIso = (Get-Date).ToUniversalTime().ToString('o')
+  $raw = ""
   if (Test-Path $filePath) {
-    $content = Get-Content -Path $filePath -Raw -ErrorAction SilentlyContinue
+    $raw = Get-Content -Path $filePath -Raw -ErrorAction SilentlyContinue
   }
-  if ([string]::IsNullOrWhiteSpace($content)) {
-    $nowIso = (Get-Date).ToUniversalTime().ToString('o')
-    $content = @(
-      "datetime: $nowIso",
-      "token: PENDING_SYNC_FROM_BRIDGE",
-      "publicBridgeUrl: $PublicUrl",
-      ""
-    ) -join "`n"
+  if ([string]::IsNullOrWhiteSpace($raw)) {
+    $content = Format-CanonicalTokenFileContent -Datetime $nowIso -Token "PENDING_SYNC_FROM_BRIDGE" -PublicUrl $PublicUrl
   } else {
-    $replaced = $false
-    $lines = $content -split '\r?\n'
-    $updated = foreach ($line in $lines) {
-      if ($line -match '^\s*publicBridgeUrl:') {
-        $replaced = $true
-        "publicBridgeUrl: $PublicUrl"
-      } else {
-        $line
-      }
+    $fields = Read-TokenFileFields -Content $raw
+    $effectiveDt = $fields['datetime']
+    if (-not $effectiveDt) {
+      $effectiveDt = $fields['generatedat']
     }
-    if (-not $replaced) {
-      $updated = @("publicBridgeUrl: $PublicUrl") + $updated
+    $previousDt = $fields['previousdatetime']
+    $token = $fields['token']
+    if (-not $token) {
+      $token = "PENDING_SYNC_FROM_BRIDGE"
     }
-    $content = ($updated -join "`n").TrimEnd() + "`n"
+    $datetime = if ($effectiveDt) { $effectiveDt } else { $nowIso }
+    if ($previousDt -and $previousDt -eq $datetime) {
+      $previousDt = $null
+    }
+    $content = Format-CanonicalTokenFileContent -Datetime $datetime -PreviousDatetime $previousDt -Token $token -PublicUrl $PublicUrl
   }
   Set-Content -Path $filePath -Value $content -Encoding utf8
 }
