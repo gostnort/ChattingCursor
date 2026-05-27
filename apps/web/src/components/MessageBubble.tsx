@@ -81,14 +81,13 @@ export function MessageBubble({
               <button
                 type="button"
                 className={`bubble-model-pill${imageAttachBusy ? " bubble-model-pill-busy" : ""}`}
-                title={imageAttachBusy ? "Analyzing image…" : "Attach image for analysis"}
-                aria-label={imageAttachBusy ? "Analyzing image" : `Attach image (${label})`}
+                title={imageAttachBusy ? `${label}…` : label}
+                aria-label={imageAttachBusy ? `${label} busy` : label}
                 disabled={imageAttachBusy || imageAttachDisabled}
                 onClick={handleModelPillClick}
               >
-                <span className="bubble-model-pill-label">{label}</span>
-                <span className="bubble-model-pill-icon" aria-hidden="true">
-                  {imageAttachBusy ? "…" : "📷"}
+                <span className="bubble-model-pill-label">
+                  {imageAttachBusy ? `${label}…` : label}
                 </span>
               </button>
             </>

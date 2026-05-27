@@ -60,6 +60,10 @@ body {
 
   overflow: hidden;
 
+  user-select: none;
+
+  -webkit-user-select: none;
+
 }
 
 
@@ -73,6 +77,10 @@ body {
   display: flex;
 
   flex-direction: column;
+
+  user-select: none;
+
+  -webkit-user-select: none;
 
 }
 
@@ -376,6 +384,10 @@ body {
 
   min-height: 0;
 
+  user-select: none;
+
+  -webkit-user-select: none;
+
 }
 
 
@@ -559,6 +571,10 @@ body {
 
   -webkit-overflow-scrolling: touch;
 
+  user-select: none;
+
+  -webkit-user-select: none;
+
 }
 
 
@@ -574,6 +590,10 @@ body {
 
 
 .bubble-row {
+
+  user-select: none;
+
+  -webkit-user-select: none;
 
   display: flex;
 
@@ -727,7 +747,7 @@ body {
 
 
 
-.bubble-model-pill-busy .bubble-model-pill-icon {
+.bubble-model-pill-busy .bubble-model-pill-label {
 
   animation: bubble-model-pulse 1s ease-in-out infinite;
 
@@ -752,18 +772,6 @@ body {
   text-overflow: ellipsis;
 
   max-width: 6rem;
-
-}
-
-
-
-.bubble-model-pill-icon {
-
-  font-size: 0.85em;
-
-  line-height: 1;
-
-  flex-shrink: 0;
 
 }
 
@@ -1352,6 +1360,10 @@ body {
   line-height: 1.5;
 
   touch-action: pan-y;
+
+  user-select: text;
+
+  -webkit-user-select: text;
 
 }
 

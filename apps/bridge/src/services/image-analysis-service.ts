@@ -167,12 +167,59 @@ export async function analyzeUploadedImage(options: {
 }
 
 
-/** 转发给 agent-cli 的用户消息前缀 */
-export function buildImageForwardPrompt(analysisText: string, fileName: string): string {
-  return [
+const FORWARD_CONTEXT_MAX_MESSAGES = 12;
+
+
+/** 取最近对话上下文：优先自上次助手回复之后，否则取末尾 N 条 */
+function collectRecentConversationContext(
+  messages: SessionMessage[],
+  userIntent?: string,
+): { contextLines: string[]; userIntentLine?: string } {
+  const trimmed = messages.filter((message) => message.content.trim());
+  const lastAssistantIndex = trimmed.map((message) => message.role).lastIndexOf("assistant");
+  let slice = lastAssistantIndex >= 0
+    ? trimmed.slice(lastAssistantIndex + 1)
+    : trimmed.slice(-FORWARD_CONTEXT_MAX_MESSAGES);
+  if (slice.length > FORWARD_CONTEXT_MAX_MESSAGES) {
+    slice = slice.slice(-FORWARD_CONTEXT_MAX_MESSAGES);
+  }
+  const contextLines = slice.map((message) => {
+    const roleLabel = message.role === "user" ? "User" : "Assistant";
+    return `${roleLabel}: ${message.content.trim()}`;
+  });
+  const intent = userIntent?.trim() ?? "";
+  let userIntentLine: string | undefined;
+  if (intent) {
+    const lastUser = [...trimmed].reverse().find((message) => message.role === "user");
+    if (!lastUser || lastUser.content.trim() !== intent) {
+      userIntentLine = intent;
+    }
+  }
+  return { contextLines, userIntentLine };
+}
+
+
+/** 组装转发给 agent-cli 的完整提示（会话上下文 + 图片分析） */
+export function buildImageForwardPrompt(
+  analysisText: string,
+  fileName: string,
+  messages: SessionMessage[],
+  userIntent?: string,
+): string {
+  const { contextLines, userIntentLine } = collectRecentConversationContext(messages, userIntent);
+  const parts: string[] = [];
+  const contextParts: string[] = [...contextLines];
+  if (userIntentLine) {
+    contextParts.push(`User (current message): ${userIntentLine}`);
+  }
+  if (contextParts.length > 0) {
+    parts.push("[User context]", ...contextParts, "");
+  }
+  parts.push(
     "[Image analysis]",
     analysisText,
     "",
     `(User attached image: ${fileName})`,
-  ].join("\n");
+  );
+  return parts.join("\n");
 }

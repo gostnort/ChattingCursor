@@ -349,7 +349,7 @@ export async function registerChatRoutes(app: FastifyInstance): Promise<void> {
         message: cli.message ?? "Cursor Agent CLI is not available",
       });
     }
-    const { sessionId, imageId, fileName, model, modelLabel, workspace } = parsed.data;
+    const { sessionId, imageId, fileName, model, modelLabel, workspace, userIntent } = parsed.data;
     const session = sessionStore.getOrCreate(sessionId);
     const stored = await readStoredImage(sessionId, imageId);
     if (!stored) {
@@ -369,7 +369,12 @@ export async function registerChatRoutes(app: FastifyInstance): Promise<void> {
       const message = error instanceof Error ? error.message : String(error);
       return reply.status(502).send({ error: "analysis_failed", message });
     }
-    const forwardPrompt = buildImageForwardPrompt(analysisText, fileName);
+    const forwardPrompt = buildImageForwardPrompt(
+      analysisText,
+      fileName,
+      session.messages,
+      userIntent,
+    );
     const runId = uuidv4();
     runStore.create(runId);
     const startedAt = new Date().toISOString();

@@ -202,6 +202,7 @@ export async function analyzeChatImage(
     fileName: string;
     model?: string;
     modelLabel?: string;
+    userIntent?: string;
   },
   token?: string,
 ): Promise<ChatAnalyzeImageResponse> {

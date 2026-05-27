@@ -118,6 +118,8 @@ export const chatAnalyzeImageRequestSchema = z.object({
   model: z.string().optional(),
   modelLabel: z.string().optional(),
   workspace: z.string().optional(),
+  /** 附件时输入框中的用户意图（尚未发送时） */
+  userIntent: z.string().optional(),
 });
 
 export type ChatAnalyzeImageRequest = z.infer<typeof chatAnalyzeImageRequestSchema>;

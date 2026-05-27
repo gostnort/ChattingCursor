@@ -15,7 +15,11 @@ import { isLocalBridgeUrl, isLocalWebWithRemoteBridge } from "../bridgeSettings"
 import { isLocalWebOrigin } from "../environment";
 import { useSpeech } from "../hooks/useSpeech";
 import { playNotificationSound } from "../utils/notificationSound";
-import { isEditableFocusedTarget, selectElementText } from "../utils/selectBubbleText";
+import {
+  clampSelectionToFocusedBubble,
+  isEditableFocusedTarget,
+  selectElementText,
+} from "../utils/selectBubbleText";
 import { MessageBubble } from "./MessageBubble";
 
 
@@ -296,6 +300,18 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
   }, [focusedMessageId]);
 
 
+  useEffect(() => {
+    const handleSelectionChange = (): void => {
+      if (!focusedMessageId) {
+        return;
+      }
+      clampSelectionToFocusedBubble(focusedMessageId);
+    };
+    document.addEventListener("selectionchange", handleSelectionChange);
+    return () => document.removeEventListener("selectionchange", handleSelectionChange);
+  }, [focusedMessageId]);
+
+
   const handleMessagesPointerDown = (event: PointerEvent<HTMLDivElement>): void => {
     const row = (event.target as HTMLElement).closest<HTMLElement>("[data-message-id]");
     if (row?.dataset.messageId) {
@@ -496,6 +512,10 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
       appendAssistantError("Wait for the current run to finish before attaching an image.");
       return;
     }
+    const userIntent = input.trim();
+    if (userIntent) {
+      setInput("");
+    }
     setIsImageAnalyzing(true);
     try {
       let activeSessionId = sessionId;
@@ -516,8 +536,11 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
         fileName: upload.fileName,
         model: selectedModel || undefined,
         modelLabel: selectedModelLabel,
+        userIntent: userIntent || undefined,
       }, bridgeToken);
-      const userContent = `[Image analysis]: ${analysis.analysisText}`;
+      const userContent = userIntent
+        ? `${userIntent}\n\n[Image analysis]\n${analysis.analysisText}`
+        : `[Image analysis]\n${analysis.analysisText}`;
       setMessages((prev) => [
         ...prev,
         {
