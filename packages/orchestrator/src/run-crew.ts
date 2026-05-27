@@ -3,7 +3,7 @@ import { access, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import path from "node:path";
 import { tmpdir } from "node:os";
-import type { CrewRunResponse } from "@chatting-cursor/shared";
+import { resolveChromeEndpoint, type CrewRunResponse } from "@chatting-cursor/shared";
 import { RUN_CREW_SCRIPT, REPO_ROOT, resolveCrewConfigPath } from "./load-crew.js";
 
 
@@ -75,7 +75,7 @@ export async function probeCrewEnvironment(): Promise<CrewProbeResult> {
     crewai: { installed: false, message: "未检测" },
     chrome: {
       available: false,
-      endpoint: process.env.CHROME_DEBUG_ENDPOINT ?? "http://127.0.0.1:9222",
+      endpoint: resolveChromeEndpoint(),
       message: "未检测",
     },
     exampleConfig: {

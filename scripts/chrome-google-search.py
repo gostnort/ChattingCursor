@@ -9,19 +9,13 @@ from urllib.error import URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
-DEFAULT_CHROME_ENDPOINT = "http://127.0.0.1:9222"
+SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
+from chrome_endpoint import resolve_chrome_endpoint
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
-
-
-def resolve_chrome_endpoint() -> str:
-    import os
-    return os.environ.get("CHROME_DEBUG_ENDPOINT", DEFAULT_CHROME_ENDPOINT).rstrip("/")
 
 
 def build_google_search_url(query: str) -> str:

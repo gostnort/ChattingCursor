@@ -37,6 +37,29 @@ Chinese quickstart with the same sections: [docs/QUICKSTART.md](docs/QUICKSTART.
 | Web dev | `43210` | Vite; base path `/ChattingCursor/` |
 | Chrome debug (optional web search) | `9222` | For non-Kimi “search the web” intents |
 
+### Chrome remote debugging (Windows + WSL)
+
+Start Chrome on **Windows** with remote debugging, for example:
+
+```powershell
+& "C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222
+```
+
+On Windows, Bridge and `curl.exe http://127.0.0.1:9222/json/version` should succeed.
+
+**WSL ≠ Windows localhost:** crew Python, `pnpm crew:status`, or Cursor’s **chrome-devtools** MCP running inside WSL cannot reach Chrome at `127.0.0.1:9222` on the Windows host. The repo rewrites `http://127.0.0.1:9222` to the Windows host IP from `/etc/resolv.conf` when it detects WSL. You can also set an explicit URL:
+
+```bash
+# WSL — replace 172.x.x.x with: grep nameserver /etc/resolv.conf | awk '{print $2}'
+export CHROME_DEBUG_ENDPOINT=http://172.x.x.x:9222
+```
+
+For **chrome-devtools MCP** in WSL, point `--browserUrl` at the same Windows host IP (not `127.0.0.1`). See [.cursor/mcp.json.example](.cursor/mcp.json.example).
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `CHROME_DEBUG_ENDPOINT` | `http://127.0.0.1:9222` (WSL: auto-rewrite to Windows host) | Chrome CDP HTTP endpoint |
+
 ## Token file (phone setup)
 
 Bridge writes a small text file (default: `%USERPROFILE%\.chattingcursor\chattingcursor-token.txt`, or a path you set in **Local → Config**). Put that file in a folder your phone can read (e.g. cloud sync).
@@ -100,6 +123,7 @@ See [docs/QUICKSTART.md](docs/QUICKSTART.md) for crew commands and local-mode AP
 | `BRIDGE_PUBLIC_URL` | `http://127.0.0.1:4321` | Advertised public URL |
 | `BRIDGE_CORS_ORIGINS` | see `.env.example` | Allowed web origins |
 | `CHATTINGCURSOR_TOKEN_SYNC_DIR` | `~/.chattingcursor` | Token file directory |
+| `CHROME_DEBUG_ENDPOINT` | `http://127.0.0.1:9222` | Chrome CDP URL; WSL auto-rewrites localhost to Windows host |
 
 ## Project layout
 

@@ -1,6 +1,7 @@
 /** 通过 Chrome 远程调试（默认 9222）在 Google 打开搜索页 */
 
-const DEFAULT_ENDPOINT = "http://127.0.0.1:9222";
+import { resolveChromeEndpoint } from "@chatting-cursor/shared";
+
 const NAVIGATE_TIMEOUT_MS = 15000;
 
 
@@ -20,13 +21,6 @@ export interface ChromeGoogleSearchResult {
   title?: string;
   excerpt?: string;
   message?: string;
-}
-
-
-/** 解析 Chrome 调试地址（可用环境变量 CHROME_DEBUG_ENDPOINT 覆盖） */
-export function resolveChromeEndpoint(): string {
-  const fromEnv = process.env.CHROME_DEBUG_ENDPOINT?.trim();
-  return fromEnv && fromEnv.length > 0 ? fromEnv.replace(/\/$/, "") : DEFAULT_ENDPOINT;
 }
 
 

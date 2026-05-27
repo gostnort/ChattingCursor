@@ -10,6 +10,8 @@ from typing import Any
 from urllib.error import URLError
 from urllib.request import urlopen
 
+from chrome_endpoint import resolve_chrome_endpoint
+
 try:
     from crewai import Agent, Crew, Process, Task
     from crewai.tools import BaseTool
@@ -40,7 +42,6 @@ except ImportError:
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = REPO_ROOT / "configs" / "crews" / "example.yaml"
 DEFAULT_INPUTS = REPO_ROOT / "configs" / "crews" / "example-inputs.json"
-DEFAULT_CHROME_ENDPOINT = "http://127.0.0.1:9222"
 VALIDATION_COMMANDS = [
     ["pnpm", "lint"],
     ["pnpm", "typecheck"],
@@ -82,10 +83,6 @@ def render_template(text: str, inputs: dict[str, str]) -> str:
     for key, value in inputs.items():
         rendered = rendered.replace(f"{{{{{key}}}}}", value)
     return rendered
-
-
-def resolve_chrome_endpoint() -> str:
-    return DEFAULT_CHROME_ENDPOINT
 
 
 def fetch_json(url: str) -> Any:
