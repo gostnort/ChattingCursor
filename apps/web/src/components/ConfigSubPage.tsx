@@ -12,7 +12,7 @@ import {
   resetPortSettings,
   setWebPort,
 } from "../bridgeSettings";
-import { GITHUB_PAGES_URL, isGitHubPages } from "../environment";
+import { GITHUB_PAGES_URL, isGitHubPages, isLocalWebOrigin } from "../environment";
 import { MAX_TEXT_SIZE_PX, MIN_TEXT_SIZE_PX } from "../textSizeSettings";
 import {
   fetchAuthStatus,
@@ -61,11 +61,17 @@ function formatBridgeRequestError(bridgeUrl: string, onGitHubPages: boolean, err
   const normalized = normalizeBridgeUrl(bridgeUrl);
   const localTarget = isLocalBridgeUrl(normalized);
   const networkFailure = /failed to fetch|networkerror|network error|load failed|fetch resource/i.test(message);
+  if (isLocalWebOrigin() && !localTarget && networkFailure) {
+    return "你在本机浏览器打开页面，但 Bridge URL 指向远程地址。本地开发请改为 http://127.0.0.1:4321 并确认 Bridge 已启动；手机远程访问请改用 GitHub Pages 并粘贴 token 文件中的 publicBridgeUrl。";
+  }
   if (onGitHubPages && localTarget && networkFailure) {
     return "当前 Bridge URL 仍是 127.0.0.1 / localhost。若你现在用的是手机，127.0.0.1 指向的是手机自己，不是电脑；GitHub Pages 也不会自动找到你的电脑。请先给电脑上的 Bridge 配置一个可公开访问的 HTTPS 地址，再把这个地址填到 Bridge URL。";
   }
   if (onGitHubPages && !localTarget && networkFailure) {
     return "远程 Bridge 当前不可达（隧道不可抵达）。请从云盘 token 文件复制最新的 publicBridgeUrl（须为 https://….trycloudflare.com），确认 run.bat 与 cloudflared 正在运行，并在本页保存后重试。";
+  }
+  if (isLocalWebOrigin() && localTarget && networkFailure) {
+    return "无法连接本机 Bridge（http://127.0.0.1:4321）。请确认 run.bat / Bridge 已启动，且端口未被占用。";
   }
   return message;
 }

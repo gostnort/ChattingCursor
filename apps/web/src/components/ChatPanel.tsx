@@ -9,7 +9,8 @@ import {
   subscribeRunEvents,
 } from "../api/bridge";
 import { clearChatState, loadChatState, saveChatState } from "../chatPersistence";
-import { isLocalBridgeUrl } from "../bridgeSettings";
+import { isLocalBridgeUrl, isLocalWebWithRemoteBridge } from "../bridgeSettings";
+import { isLocalWebOrigin } from "../environment";
 import { useSpeech } from "../hooks/useSpeech";
 import { playNotificationSound } from "../utils/notificationSound";
 import { isEditableFocusedTarget, selectElementText } from "../utils/selectBubbleText";
@@ -534,12 +535,14 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
         </div>
         {connectionError && (
           <p className="config-error">
-            {isLocalBridgeUrl(bridgeUrl)
-              ? `Bridge 连接异常：${connectionError}`
-              : `远程 Bridge 连接异常：${connectionError}。请在“本地 → 配置”中确认 Bridge URL 和当天口令。`}
+            {isLocalWebWithRemoteBridge(bridgeUrl)
+              ? `本机页面不应使用远程 Bridge 地址（当前：${bridgeUrl}）。请到“本地 → 配置”将 Bridge URL 改为 http://127.0.0.1:4321，并确认 run.bat 已启动 Bridge。`
+              : isLocalBridgeUrl(bridgeUrl) || isLocalWebOrigin()
+                ? `Bridge 连接异常：${connectionError}。请确认 Bridge 已启动（默认 http://127.0.0.1:4321）。`
+                : `远程 Bridge 连接异常：${connectionError}。请在“本地 → 配置”中确认 Bridge URL 和当天口令。`}
           </p>
         )}
-        {!bridgeToken && !isLocalBridgeUrl(bridgeUrl) && (
+        {!bridgeToken && !isLocalBridgeUrl(bridgeUrl) && !isLocalWebOrigin() && (
           <p className="config-hint">
             当前 Bridge URL 不是本机地址。请先在“本地 → 配置”里输入当天口令，再开始聊天。
           </p>

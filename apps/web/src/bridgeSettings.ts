@@ -1,9 +1,10 @@
-import { isGitHubPages } from "./environment";
+import { isGitHubPages, isLocalWebOrigin } from "./environment";
 
 /** Bridge / 网页端口 localStorage 键与默认值 */
 export const BRIDGE_PORT_KEY = "bridgePort";
 export const WEB_PORT_KEY = "webPort";
 export const LEGACY_BRIDGE_URL_KEY = "bridgeUrl";
+export const LOCAL_BRIDGE_URL_KEY = "localBridgeUrl";
 export const REMOTE_BRIDGE_URL_KEY = "remoteBridgeUrl";
 export const BRIDGE_TOKEN_KEY = "bridgeAccessToken";
 export const DEFAULT_BRIDGE_PORT = 4321;
@@ -49,39 +50,72 @@ export function normalizeBridgeUrl(value: string): string {
 }
 
 
-/** 从 localStorage 读取 Bridge URL */
-export function getBridgeUrl(): string {
-  const storedUrl = localStorage.getItem(REMOTE_BRIDGE_URL_KEY)?.trim();
-  if (storedUrl) {
-    return normalizeBridgeUrl(storedUrl);
+/** 从 localStorage 读取本机 Bridge URL（仅 127.0.0.1 / localhost） */
+function getStoredLocalBridgeUrl(): string {
+  const localUrl = localStorage.getItem(LOCAL_BRIDGE_URL_KEY)?.trim();
+  if (localUrl && isLocalBridgeUrl(localUrl)) {
+    return normalizeBridgeUrl(localUrl);
   }
-  const legacyUrl = localStorage.getItem(LEGACY_BRIDGE_URL_KEY);
-  if (legacyUrl) {
+  const legacyUrl = localStorage.getItem(LEGACY_BRIDGE_URL_KEY)?.trim();
+  if (legacyUrl && isLocalBridgeUrl(legacyUrl)) {
     return normalizeBridgeUrl(legacyUrl);
   }
   const storedPort = localStorage.getItem(BRIDGE_PORT_KEY);
   if (storedPort) {
     return buildBridgeUrl(parsePort(storedPort, DEFAULT_BRIDGE_PORT));
   }
-  if (isGitHubPages()) {
-    return "";
-  }
   return buildBridgeUrl(DEFAULT_BRIDGE_PORT);
 }
 
 
-/** 保存 Bridge URL，并同步 legacy 值 */
+/** 从 localStorage 读取远程 / 公网 Bridge URL */
+function getStoredRemoteBridgeUrl(): string {
+  const storedUrl = localStorage.getItem(REMOTE_BRIDGE_URL_KEY)?.trim();
+  if (storedUrl) {
+    return normalizeBridgeUrl(storedUrl);
+  }
+  const legacyUrl = localStorage.getItem(LEGACY_BRIDGE_URL_KEY)?.trim();
+  if (legacyUrl && !isLocalBridgeUrl(legacyUrl)) {
+    return normalizeBridgeUrl(legacyUrl);
+  }
+  return "";
+}
+
+
+/** 从 localStorage 读取当前环境应使用的 Bridge URL */
+export function getBridgeUrl(): string {
+  if (isLocalWebOrigin()) {
+    return getStoredLocalBridgeUrl();
+  }
+  const remote = getStoredRemoteBridgeUrl();
+  if (remote) {
+    return remote;
+  }
+  if (isGitHubPages()) {
+    return "";
+  }
+  return getStoredLocalBridgeUrl();
+}
+
+
+/** 保存 Bridge URL，并按本机 / 远程页面分别写入对应键 */
 export function setBridgeUrl(url: string): void {
   const normalized = normalizeBridgeUrl(url);
   if (!normalized) {
     return;
   }
-  localStorage.setItem(REMOTE_BRIDGE_URL_KEY, normalized);
   localStorage.setItem(LEGACY_BRIDGE_URL_KEY, normalized);
   const port = readBridgePortFromUrl(normalized);
   if (port !== null) {
     localStorage.setItem(BRIDGE_PORT_KEY, String(port));
   }
+  if (isLocalBridgeUrl(normalized)) {
+    localStorage.setItem(LOCAL_BRIDGE_URL_KEY, normalized);
+    if (isLocalWebOrigin()) {
+      return;
+    }
+  }
+  localStorage.setItem(REMOTE_BRIDGE_URL_KEY, normalized);
 }
 
 
@@ -119,12 +153,16 @@ export function getBridgePort(): number {
 /** 仅更新本地 Bridge 端口配置 */
 export function setBridgePort(port: number): void {
   localStorage.setItem(BRIDGE_PORT_KEY, String(port));
-  const current = getBridgeUrl();
-  if (current && isLocalBridgeUrl(current)) {
-    setBridgeUrl(buildBridgeUrl(port));
+  const localUrl = buildBridgeUrl(port);
+  localStorage.setItem(LOCAL_BRIDGE_URL_KEY, localUrl);
+  localStorage.setItem(LEGACY_BRIDGE_URL_KEY, localUrl);
+  if (isLocalWebOrigin()) {
     return;
   }
-  localStorage.setItem(LEGACY_BRIDGE_URL_KEY, buildBridgeUrl(port));
+  const current = getStoredRemoteBridgeUrl();
+  if (current && isLocalBridgeUrl(current)) {
+    setBridgeUrl(localUrl);
+  }
 }
 
 
@@ -172,6 +210,7 @@ export function clearBridgeToken(): void {
 /** 清除已保存端口，恢复默认值 */
 export function resetPortSettings(): { bridgePort: number; webPort: number } {
   localStorage.removeItem(BRIDGE_PORT_KEY);
+  localStorage.removeItem(LOCAL_BRIDGE_URL_KEY);
   localStorage.removeItem(REMOTE_BRIDGE_URL_KEY);
   localStorage.removeItem(LEGACY_BRIDGE_URL_KEY);
   if (isGitHubPages()) {
@@ -206,4 +245,10 @@ export function isLocalBridgeUrl(bridgeUrl: string): boolean {
   } catch {
     return false;
   }
+}
+
+
+/** 本机页面却配置了远程 Bridge URL（常见于误用 tunnel 地址） */
+export function isLocalWebWithRemoteBridge(bridgeUrl: string): boolean {
+  return isLocalWebOrigin() && !isLocalBridgeUrl(bridgeUrl);
 }
