@@ -379,7 +379,6 @@ function Write-PublicBridgeUrlToTokenFileDirect([string]$PublicUrl) {
     $content = @(
       "datetime: $nowIso",
       "token: PENDING_SYNC_FROM_BRIDGE",
-      "generatedAt: $nowIso",
       "publicBridgeUrl: $PublicUrl",
       ""
     ) -join "`n"

@@ -27,6 +27,8 @@ Open the web URL, go to **Local → Config**, confirm Bridge port **4321**, then
 
 **GitHub Pages (UI only):** https://gostnort.github.io/ChattingCursor/ — you still need a reachable Bridge URL and today’s token for remote use.
 
+Chinese quickstart with the same sections: [docs/QUICKSTART.md](docs/QUICKSTART.md).
+
 ## Ports
 
 | Service | Default | Notes |
@@ -39,33 +41,32 @@ Open the web URL, go to **Local → Config**, confirm Bridge port **4321**, then
 
 Bridge writes a small text file (default: `%USERPROFILE%\.chattingcursor\chattingcursor-token.txt`, or a path you set in **Local → Config**). Put that file in a folder your phone can read (e.g. cloud sync).
 
+**You must configure where the token file is saved locally.** Use cloud sync (OneDrive, iCloud Drive, etc.) or another channel your phone can read. The project does not provide automatic email delivery. If you skip sync, when the temporary tunnel restarts you will not receive the updated tunnel URL and token on your phone.
+
 **The synced file is minimal and safe to share with your phone:**
 
 ```text
 datetime: 2026-05-27T14:30:00.000Z
 token: <32-character daily token>
-generatedAt: 2026-05-27T14:30:00.000Z
 publicBridgeUrl: https://xxxx.trycloudflare.com
 ```
 
 - **No salt** — derivation salt lives only on the PC under `~/.chattingcursor/token-meta-*.json`, not in the synced file.
-- **No seed** — nothing besides the fields above.
 - **`datetime`** — ISO timestamp of the last token write (e.g. tunnel reconnect / regenerate).
 - **Token length** — 32 characters (regenerating or changing salt invalidates older tokens).
 
 On the phone: open the GitHub Pages app → **Local → Config** → paste `publicBridgeUrl` and `token` from the file.
 
-Legacy files that still contain a `date:` or `salt:` line are migrated on read: salt is moved server-side and the file is rewritten without it. Tokens created before the 32-character change may need a fresh copy from the file after upgrade.
+Legacy files may still contain `generatedAt:`, `date:`, or `salt:`; Bridge migrates on read (salt moves server-side, file is rewritten to the three fields above).
 
-## Cloudflare quick tunnel
+## Cloudflare tunnel
 
-`run.bat` / `scripts/run-all.ps1` start **cloudflared** with a random `*.trycloudflare.com` URL, update `publicBridgeUrl` in the token file, and call Bridge to stay in sync.
+`run.bat` / `scripts/run-all.ps1` start a **temporary** `*.trycloudflare.com` URL, update `publicBridgeUrl` in the token file, and restart on health failure.
 
-- **Periodic check:** every **5 minutes**, the script probes `GET {publicBridgeUrl}/health` (not chat traffic).
-- **Fast recovery:** if cloudflared exits or a health probe fails, the script restarts the tunnel and regenerates the token file via Bridge.
-- **Caveat:** trycloudflare URLs are ephemeral and can drop; there is no guarantee of stable networking. Re-copy `publicBridgeUrl` and `token` from the file after reconnect.
+- **Periodic check:** every **5 minutes**, `GET {publicBridgeUrl}/health`.
+- **Caveat:** quick tunnel URLs change when the tunnel restarts; re-copy the synced file to your phone.
 
-Named tunnels and custom domains are optional (see other docs in `docs/` if present); quick tunnel is the default one-click path.
+Full operational comparison (temporary vs fixed named tunnel): [docs/CLOUDFLARE_TUNNEL_SETUP.md](docs/CLOUDFLARE_TUNNEL_SETUP.md).
 
 ## Optional: quality watch
 
@@ -79,7 +80,9 @@ Runs typecheck/lint and a crew dry-run in the background. Not required for norma
 
 ## Optional: crewAI
 
-Python crew tooling is optional. Examples live under `configs/crews/`. On branches that include crewAI reference code, use `pnpm crew:status` / `pnpm crew:run` after `pnpm crew:setup`. **main** may omit the `crewAI/` tree via `.gitignore`.
+Python crew tooling is optional. On branches such as `with-crewai`, use `pnpm crew:status` / `pnpm crew:run` after `pnpm crew:setup`. **main** may omit the `crewAI/` reference tree via `.gitignore`.
+
+See [docs/QUICKSTART.md](docs/QUICKSTART.md) for crew commands and local-mode API tables.
 
 ## Prerequisites
 
@@ -102,16 +105,34 @@ Python crew tooling is optional. Examples live under `configs/crews/`. On branch
 
 ```
 ChattingCursor/
-├── apps/web/           # Frontend
-├── apps/bridge/        # Bridge API
+├── apps/web/           # Frontend (Vite; dev server, Pages build)
+├── apps/bridge/        # Bridge API (TypeScript source in src/)
 ├── packages/shared/
 ├── packages/cli-client/
 ├── packages/orchestrator/
 ├── packages/evaluator/
-├── configs/crews/      # Crew YAML examples
+├── configs/crews/      # Crew YAML examples (optional; see below)
 ├── scripts/            # run-all.ps1, install, tunnel helpers
 └── run.bat             # One-click Windows startup
 ```
+
+### `configs/` (crew-only)
+
+Everything under **`configs/`** is for **optional crewAI** workflows (`configs/crews/*.yaml`, example inputs). The core chat app (web + bridge + CLI) does **not** need these files at runtime.
+
+- **GitHub Pages / main upload:** the static UI build does not bundle `configs/`; you do not need them on Pages.
+- **Keep in repo:** useful on `with-crewai` for `pnpm crew:run`, Bridge `/crews/*`, and `packages/orchestrator` loading YAML paths.
+
+Do not delete without checking your branch — crew examples and dry-run scripts depend on this folder.
+
+### Build output (`dist/`) — not committed
+
+Root `.gitignore` ignores **`dist/`** everywhere. For Bridge, `pnpm build` in `apps/bridge` runs `tsc` and writes **`apps/bridge/dist/`** (e.g. `dist/index.js`). That folder is **generated locally**, same as other packages’ `dist/` after build.
+
+- **Dev:** `pnpm dev:bridge` uses `tsx` on `src/` (no commit needed).
+- **Production-style start:** `pnpm build` then `node apps/bridge/dist/index.js` (or package `start` script).
+
+Do not commit `dist/` unless the project changes convention; CI and clones run `pnpm build` as needed.
 
 ## License
 

@@ -1,210 +1,170 @@
 # ChattingCursor 快速开始
 
-## 用户只需要做 3 步
+本地优先的多 Agent 聊天平台，通过本机 **Cursor CLI** 驱动对话。网页可部署在 GitHub Pages，**Bridge** API 留在你的电脑上；手机访问时使用 Cloudflare 快速隧道。
 
-**终端 1**（启动 Bridge，端口 4321）：
+## 功能概览
 
-```powershell
-cd e:\my_github\ChattingCursor
-pnpm dev:bridge
-```
+- **apps/web** — Vite + React 前端（GitHub Pages 或本地开发）
+- **apps/bridge** — Node.js API（封装 `cursor-agent`、鉴权、历史、可选 crew 接口）
+- **packages/shared** — 共享类型与 Zod
+- **packages/cli-client** — Cursor CLI 封装
+- **packages/orchestrator** — 可选 crewAI 编排与环境检查
+- **packages/evaluator** — 评估占位
 
-**终端 2**（启动前端，端口 43210）：
+## 快速开始
 
-```powershell
-cd e:\my_github\ChattingCursor
-pnpm dev:web
-```
+**最省事（Windows）：** 在仓库根目录双击或运行 `run.bat`，自动启动 Bridge、可选本地 Web、`cloudflared` 快速隧道，并维护同步用的 token 文件。
 
-**浏览器打开**：
-
-```
-http://127.0.0.1:43210/ChattingCursor/
-```
-
-确认 Bridge 已在 `4321` 端口运行后即可开始聊天。Bridge URL 在 **本地 → 配置** 中设置（默认 `http://127.0.0.1:4321`）。
-
-如果你要在**手机**上使用 GitHub Pages：
-
-1. 首次运行 `install.bat`，日常运行 `run.bat`（自动启动 Bridge + 隧道，并更新 token 文件中的公网地址）；需要重启时先运行 `shutdown.bat`，再运行 `run.bat`
-2. 需要手机读 token 时，可把 `%USERPROFILE%\.chattingcursor` 放进云盘，或在 **本地 → 配置** 改为云盘路径（会写入 `config.json` 持久化）
-3. 手机 **本地 → 配置** 填入 token 文件里的 `publicBridgeUrl` 与 `token`
-
-详见 `docs/CLOUDFLARE_TUNNEL_SETUP.md`；背景见 `docs/REMOTE_SETUP.md`。
-
-标题旁有 **聊天 | 本地** 切换：聊天页仅对话 UI；本地模式含 **配置** 与 **CLI输出** 两个子页。
-
-**响应式布局**：Web 端不针对单一分辨率（如 375px）写死断点，而是用 `orientation` / `aspect-ratio` 媒体查询、`dvh`/`clamp()` 等流体单位、聊天面板的 **container queries**，以及安全区 `env(safe-area-inset-*)` 适配各尺寸手机与横竖屏。
-
-在聊天框用自然语言搜索本地历史（近 7 天），例如「帮我找之前关于端口的对话」；Bridge 会自动搜索 `~/.chattingcursor/history/*.txt` 并回复，无需单独按钮。也支持 `/search 关键词`。
-
----
-
-## 页面导航（URL）
-
-| 模式 | URL（开发） | 说明 |
-|------|-------------|------|
-| 聊天 | `http://127.0.0.1:43210/ChattingCursor/` | 默认首页 |
-| 本地 · 配置 | `http://127.0.0.1:43210/ChattingCursor/local/config` | Bridge/历史/crewAI |
-| 本地 · CLI输出 | `http://127.0.0.1:43210/ChattingCursor/local/cli` | Web 查看 CLI 原始输出 |
-
-也可用 hash：`#local/config`、`#local/cli`（首次打开会规范化为 pathname）。
-
-旧链接 `/ChattingCursor/config`、`/ChattingCursor/terminal` 会自动跳转到上述本地子页。
-
----
-
-## CLI 实时反馈（不在聊天页）
-
-聊天页不嵌入 CLI 输出。可在**本地真实终端**或 **本地 → CLI输出** 查看。
-
-### 方式 A：本地命令（推荐）
-
-在**第三个终端**运行：
+**手动开发（两个终端）：**
 
 ```powershell
 cd e:\my_github\ChattingCursor
-pnpm cli:watch <runId>
+pnpm install
+pnpm dev:bridge    # http://127.0.0.1:4321
+pnpm dev:web       # http://127.0.0.1:43210/ChattingCursor/
 ```
 
-- 发送聊天消息后，runId 会写入浏览器 `localStorage`（键名 `latestRunId`），也可从 Bridge 日志获取。
-- 不填 runId 时会打印用法说明。
-- 环境变量：`BRIDGE_URL`（默认 `http://127.0.0.1:4321`）、`RUN_ID`。
+浏览器打开 Web 地址，进入 **本地 → 配置**，确认 Bridge 端口 **4321** 后即可聊天。
 
-### 方式 B：Web CLI 输出（本地模式）
+**仅 GitHub Pages（只有 UI）：** https://gostnort.github.io/ChattingCursor/ — 远程使用仍需可访问的 Bridge 地址与当日 token。
 
-```
-http://127.0.0.1:43210/ChattingCursor/local/cli
-```
+英文版同结构说明见根目录 [README.md](../README.md)。
 
-- 标题旁切换到 **本地**，再点 **CLI输出**。
-- 自动读取最近一次 runId，或手动输入；也可从 **配置** 子页点击「打开 CLI 输出」。
+## 端口
 
-Bridge 终端 SSE（供 cli:watch / CLI输出页使用）：`GET http://127.0.0.1:4321/chat/terminal/:runId`
-
----
-
-## 本地模式（配置 + CLI输出）
-
-本地功能不是 Python UI，也不是 Cursor 内置面板，而是 Web 前端的 **本地** 顶层视图，数据来自本机 Bridge API。
-
-### 如何打开
-
-1. 先按上文启动 **Bridge**（`pnpm dev:bridge`）和 **Web**（`pnpm dev:web`）。
-2. 打开 `http://127.0.0.1:43210/ChattingCursor/`，点击标题旁 **本地**，再选 **配置** 或 **CLI输出**。
-
-或直接访问：
-
-```
-http://127.0.0.1:43210/ChattingCursor/local/config
-http://127.0.0.1:43210/ChattingCursor/local/cli
-```
-
-### 页面上有什么
-
-| 项目 | 说明 |
-|------|------|
-| Bridge URL | 与聊天页共用（存于浏览器 `localStorage`） |
-| 今日口令 | 当天随机 token，手动输入后用于远程聊天鉴权 |
-| 默认模型 | 来自 `cursor-agent models` 或内置回退列表 |
-| CLI 命令 | 例如 `wsl cursor-agent`（Windows 经 WSL） |
-| 历史目录 | 默认 `~/.chattingcursor/history/` |
-| 保留天数 | 7 天，过期文件自动删除 |
-| CLI 实时反馈 | 说明 + 切换到 CLI输出 子页 / `pnpm cli:watch` |
-| crewAI 编排 | Python / crewAI / Chrome 9222 状态、示例 YAML 是否可 dry-run |
-| 对话历史列表 | **只读**浏览近 7 天内全部 `*.txt` 会话文件 |
-
-### 对应 Bridge API（仅本机）
-
-| 方法 | 路径 | 说明 |
+| 服务 | 默认 | 说明 |
 |------|------|------|
-| GET | `/local/config` | Bridge/CLI/历史目录/默认模型 |
-| GET | `/auth/status` | 当天 token 文件位置、日期、公开 Bridge 地址 |
-| POST | `/auth/verify` | 校验当天 token |
-| GET | `/local/history` | 列出全部历史文件 |
-| GET | `/local/history/:file` | 读取单个历史文件全文 |
-| GET | `/crews/status` | crewAI / Python / Chrome 9222 / 示例配置状态 |
-| POST | `/crews/run` | 运行 crew（默认 dry-run） |
+| Bridge | `4321` | `BRIDGE_PORT`、`BRIDGE_HOST` |
+| Web 开发 | `43210` | Vite，base `/ChattingCursor/` |
+| Chrome 调试（可选联网搜索） | `9222` | 非 Kimi「搜索网页」意图时使用 |
 
-**安全限制**：`/local/*` 仅接受来自 `127.0.0.1` / `localhost` 的请求；前端也要求 Bridge URL 为本机地址。
+## Token 文件（手机配置）
 
----
+Bridge 会写入小文本文件（默认 `%USERPROFILE%\.chattingcursor\chattingcursor-token.txt`，或在 **本地 → 配置** 中指定云盘路径）。请放在手机能读到的目录（如云同步文件夹）。
 
-## crewAI 最小配置（with-crewai 分支）
+**必须本地配置口令文件的保存位置。要么通过云共享，要么通过自动电子邮件共享（项目并未涵盖）。否则，临时隧道随时塌陷重启，将不能获得更新的隧道和token**
 
-当前为 **最小可运行集成**，非完整多 Agent 产品化：
+**同步到手机的内容尽量少，可安全共享：**
 
-1. **依赖**（一次性）：
-
-```powershell
-cd e:\my_github\ChattingCursor
-pnpm crew:setup
+```text
+datetime: 2026-05-27T14:30:00.000Z
+token: <32 位当日口令>
+publicBridgeUrl: https://xxxx.trycloudflare.com
 ```
 
-或手动：`python -m venv .venv` 后 `pip install -r requirements.txt`
+- **不含 salt** — 派生用盐值仅在 PC 的 `~/.chattingcursor/token-meta-*.json`，不在同步文件中。
+- **`datetime`** — 上次写入 token 的 ISO 时间（如隧道重连、重新生成）。
+- **口令长度** — 32 字符；换盐或重新生成会使旧口令失效。
 
-2. **Dry-run 示例**（不调用 LLM，校验 `configs/crews/example.yaml`）：
+手机：打开 GitHub Pages → **本地 → 配置** → 粘贴文件中的 `publicBridgeUrl` 与 `token`。
+
+旧文件若仍有 `generatedAt:`、`date:` 或 `salt:`，Bridge 读取时会迁移（salt 迁到本机 meta，文件重写为上述三行）。
+
+## Cloudflare 隧道
+
+`run.bat` / `scripts/run-all.ps1` 使用**临时** `*.trycloudflare.com` 地址，更新 token 文件中的 `publicBridgeUrl`，健康检查失败时自动重启隧道。
+
+- **定期检查：** 每 **5 分钟** `GET {publicBridgeUrl}/health`。
+- **注意：** 快速隧道重启后 URL 会变；请从同步文件重新复制到手机。
+
+临时隧道与固定域名的操作差异见 [CLOUDFLARE_TUNNEL_SETUP.md](./CLOUDFLARE_TUNNEL_SETUP.md)。
+
+## 可选：质量监视
 
 ```powershell
+.\scripts\run-all.ps1 -WithQualityWatch
+# 或
+pnpm quality:watch
+```
+
+后台跑 typecheck/lint 与 crew dry-run，日常聊天不必开。
+
+## 可选：crewAI
+
+Python crew 为可选功能。在 `with-crewai` 等分支上，先 `pnpm crew:setup`，再 `pnpm crew:status` / `pnpm crew:run`。**main** 可能通过 `.gitignore` 不提交 `crewAI/` 参考目录。
+
+**最小示例：**
+
+```powershell
+pnpm crew:setup
 pnpm crew:run
 ```
 
-3. **Bridge API**：
+真实执行需 LLM API Key；Bridge：`POST /crews/run`（默认 dry-run）。本地 **配置** 子页可查看 Python / crewai / Chrome 9222 / 示例 YAML 状态。
 
-```powershell
-curl -X POST http://127.0.0.1:4321/crews/run -H "Content-Type: application/json" -d "{\"crew\":\"example\",\"inputs\":{\"repo_root\":\"E:\\\\my_github\\\\ChattingCursor\",\"local_url\":\"http://127.0.0.1:43210/ChattingCursor/\",\"pages_url\":\"https://gostnort.github.io/ChattingCursor/\",\"acceptance_criteria\":\"页面能恢复历史对话\"},\"dryRun\":true}"
+## 前置条件
+
+- Node.js >= 20，pnpm >= 9
+- Windows 建议 WSL + Ubuntu，与 CLI 行为一致
+- 已安装并登录 [Cursor CLI](https://cursor.com/docs/cli)（`cursor-agent login`）
+- 远程快速隧道需 **cloudflared**（安装脚本可协助）
+
+## 环境变量（Bridge）
+
+| 变量 | 默认 | 用途 |
+|------|------|------|
+| `BRIDGE_HOST` | `127.0.0.1` | 监听地址 |
+| `BRIDGE_PORT` | `4321` | 监听端口 |
+| `BRIDGE_PUBLIC_URL` | `http://127.0.0.1:4321` | 对外公布的 Bridge URL |
+| `BRIDGE_CORS_ORIGINS` | 见 `.env.example` | 允许的前端来源 |
+| `CHATTINGCURSOR_TOKEN_SYNC_DIR` | `~/.chattingcursor` | token 文件目录 |
+
+## 项目结构
+
+```
+ChattingCursor/
+├── apps/web/           # 前端
+├── apps/bridge/        # Bridge API（源码在 src/）
+├── packages/shared/
+├── packages/cli-client/
+├── packages/orchestrator/
+├── packages/evaluator/
+├── configs/crews/      # Crew YAML 示例（可选）
+├── scripts/
+└── run.bat
 ```
 
-4. **真实执行**（需 LLM API Key，如 `OPENAI_API_KEY`）：`dryRun: false` 或 `python scripts/run-crew.py --config configs/crews/example.yaml --execute`
+### `configs/`（仅 crew）
 
-5. **编排层**：`packages/orchestrator` 加载 YAML 并调用 `scripts/run-crew.py`；完整 Chat 流程接入 crew 仍在后续阶段。
+**`configs/`** 下内容仅供**可选 crewAI**（`configs/crews/*.yaml` 与示例 inputs）。核心聊天（web + bridge + CLI）运行时**不需要**这些文件。
 
-本地 **配置** 子页会显示 crewAI 状态（Python 是否可用、crewai 是否安装、Chrome 9222 是否连通、example.yaml 是否有效）。
+- **GitHub Pages / main 发布：** 静态 UI 不会打包 `configs/`，Pages 上不必带。
+- **保留在仓库：** 在 `with-crewai` 分支便于 `pnpm crew:run`、Bridge `/crews/*` 与 `packages/orchestrator` 加载 YAML。
 
----
+删除前请确认分支是否仍依赖 crew 示例。
 
-## 已完成的一次性配置（不用再管）
+### 构建产物 `dist/`（不提交）
 
-| 项目 | 状态 |
-|------|------|
-| WSL + Ubuntu | ✓ |
-| cursor-agent 安装 | ✓ |
-| cursor-agent login | ✓ |
+仓库根 `.gitignore` 忽略所有 **`dist/`**。Bridge 执行 `pnpm build` 时由 `tsc` 生成 **`apps/bridge/dist/`**（如 `dist/index.js`），与 monorepo 内其它包的 `dist` 一样，**仅本地生成**。
 
----
+- **开发：** `pnpm dev:bridge` 用 `tsx` 直接跑 `src/`，无需提交 dist。
+- **类生产启动：** 先 `pnpm build`，再 `node apps/bridge/dist/index.js`（或包内 `start`）。
 
-## 端口说明
+除非项目约定变更，否则不要提交 `dist/`；克隆后按需 `pnpm build`。
 
-| 服务 | 端口 | 说明 |
-|------|------|------|
-| Bridge | **4321** | 本地 API，封装 Cursor CLI |
-| Web | **43210** | Vite 开发服务器 |
-| 9222 | — | Chrome MCP 调试端口，**用户不需要手动配置** |
+## 本地模式与页面（补充）
 
----
+标题旁 **聊天 | 本地**：本地模式含 **配置** 与 **CLI输出**。URL 示例：
+
+| 模式 | 开发 URL |
+|------|----------|
+| 聊天 | `http://127.0.0.1:43210/ChattingCursor/` |
+| 本地 · 配置 | `.../local/config` |
+| 本地 · CLI输出 | `.../local/cli` |
+
+`/local/*` 仅接受本机请求。CLI 实时输出：`pnpm cli:watch <runId>` 或 **本地 → CLI输出**。
 
 ## 常见问题
 
-**Bridge 显示离线？**
-- 确认终端 1 中 `pnpm dev:bridge` 正在运行
-- 确认 Bridge URL 输入框为正确地址；电脑本机通常是 `http://127.0.0.1:4321`，手机远程则应填写你的公网 Bridge 域名
+**Bridge 离线？** 确认 `pnpm dev:bridge` 在跑，且配置里 Bridge URL 正确（本机 `http://127.0.0.1:4321`，手机填公网地址）。
 
-**手机连不上？**
-- 确认公网 Bridge 域名已经能转发到这台电脑
-- 确认当天口令已同步到手机可查看的位置
-- 确认网页里输入的是当天 token，而不是旧日期的 token
+**手机连不上？** 确认隧道/Bridge 可达、**当日** token 已从同步文件复制、公网 URL 与文件一致。
 
-**CLI 不可用？**
-- 在 WSL 中运行 `cursor-agent status`，确认已登录
-- 若未登录：`cursor-agent login`
+**CLI 不可用？** WSL 中 `cursor-agent status`；未登录则 `cursor-agent login`。
 
-**想看 cursor-agent 原始输出？**
-- 聊天页**没有** CLI 面板；请用 `pnpm cli:watch <runId>` 或 **本地 → CLI输出**（`/ChattingCursor/local/cli`）
+**crewAI 未安装？** 运行 `pnpm crew:setup`。
 
-**crewAI 显示未安装？**
-- 运行 `pnpm crew:setup` 或 `pip install -r requirements.txt`
-
-**首次使用需安装依赖：**
+**首次依赖：**
 
 ```powershell
 cd e:\my_github\ChattingCursor

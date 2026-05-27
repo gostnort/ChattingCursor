@@ -131,13 +131,10 @@ function buildTokenFileContent(options: {
   datetime: string;
   token: string;
   publicBridgeUrl: string;
-  generatedAt?: string;
 }): string {
-  const generatedAt = options.generatedAt ?? options.datetime;
   return [
     `datetime: ${options.datetime}`,
     `token: ${options.token}`,
-    `generatedAt: ${generatedAt}`,
     `publicBridgeUrl: ${options.publicBridgeUrl}`,
     "",
   ].join("\n");
@@ -203,12 +200,12 @@ function upsertPublicBridgeUrlLine(content: string, url: string): string {
     return line;
   });
   if (!replaced) {
-    const insertAt = updated.findIndex((line) => line.trim().toLowerCase().startsWith("generatedat:"));
+    const insertAt = updated.findIndex((line) => line.trim().toLowerCase().startsWith("token:"));
     const line = `publicBridgeUrl: ${url}`;
     if (insertAt >= 0) {
       updated.splice(insertAt + 1, 0, line);
     } else {
-      updated.unshift(line);
+      updated.push(line);
     }
   }
   return updated.join("\n");
@@ -241,7 +238,6 @@ async function migrateLegacySaltFromSyncedFile(
     datetime: tokenDay === today ? datetime : nowIso(),
     token,
     publicBridgeUrl,
-    generatedAt: parsed.generatedAt,
   });
   await writeFile(filePath, content, "utf8");
   return { date: today, token, filePath };
@@ -361,7 +357,6 @@ export class TokenRotationService {
   private async writeTodayTokenFile(options: {
     token: string;
     publicBridgeUrl: string;
-    generatedAt?: string;
     datetime?: string;
   }): Promise<DailyTokenRecord> {
     const today = this.getToday();
@@ -371,7 +366,6 @@ export class TokenRotationService {
       datetime,
       token: options.token,
       publicBridgeUrl: options.publicBridgeUrl,
-      generatedAt: options.generatedAt,
     });
     await writeFile(filePath, content, "utf8");
     this.cachedRecord = { date: today, token: options.token, filePath };

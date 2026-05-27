@@ -1,5 +1,7 @@
 # 分支与 crewAI 参考代码策略
 
+> **Cursor rule:** The same policy lives in [`.cursor/rules/branch-strategy.mdc`](../.cursor/rules/branch-strategy.mdc). You can delete this file once you no longer need a standalone doc copy.
+
 ## main 分支
 
 - `crewAI/` 目录写入 `.gitignore`，**不会**被提交到 main
