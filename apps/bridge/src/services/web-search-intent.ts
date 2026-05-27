@@ -68,6 +68,31 @@ export function hasWebSearchIntent(prompt: string): boolean {
 }
 
 
+/** 提取 /websearch、/google 行前的用户背景（多行时取指令行之前的内容） */
+export function extractWebSearchUserContext(prompt: string): string {
+  const trimmed = prompt.trim();
+  if (!trimmed) {
+    return "";
+  }
+  const lines = trimmed.split(/\r?\n/);
+  const parts: string[] = [];
+  for (const line of lines) {
+    if (/\/websearch\b|\/google\b/i.test(line)) {
+      const before = line
+        .replace(/\s*\/websearch\b[\s\S]*$/i, "")
+        .replace(/\s*\/google\b[\s\S]*$/i, "")
+        .trim();
+      if (before) {
+        parts.push(before);
+      }
+      break;
+    }
+    parts.push(line.trim());
+  }
+  return parts.filter(Boolean).join("\n").trim();
+}
+
+
 /** 从自然语言或 /websearch、/google 指令中提取联网搜索关键词 */
 export function extractWebSearchQuery(prompt: string): string {
   const trimmed = prompt.trim();
@@ -127,6 +152,10 @@ export function formatWebSearchReply(
     crawledPages?: { title: string; url: string; text: string }[];
     synthesizedSummary?: string;
     serpPagesFetched?: number;
+    serpStartOffsets?: number[];
+    isRepeatSearch?: boolean;
+    linksCrawled?: number;
+    linksTruncated?: boolean;
     block?: "consent" | "captcha" | null;
     aiSummary?: string;
     endpoint: string;
@@ -158,7 +187,8 @@ export function formatWebSearchReply(
     block: result.block ?? null,
   };
   const structured = buildStructuredSerpSummary(query, snapshot);
-  const synthesis = result.synthesizedSummary?.trim()
+  const synthesis = result.aiSummary?.trim()
+    ?? result.synthesizedSummary?.trim()
     ?? (result.block ? structured : "");
   const lines = [
     summaryHeading,
@@ -177,11 +207,21 @@ export function formatWebSearchReply(
       lines.push(`- **${page.title}**`, `  ${page.url}`, excerpt ? `  ${excerpt}…` : "");
     }
   }
-  if (typeof result.serpPagesFetched === "number" && result.serpPagesFetched > 1) {
+  if (result.serpStartOffsets && result.serpStartOffsets.length > 0) {
+    const offsetNote = zh
+      ? `（SERP start=${result.serpStartOffsets.join(",")}${result.isRepeatSearch ? "，续搜" : "，首次第2–3页"}）`
+      : `(SERP start=${result.serpStartOffsets.join(",")}${result.isRepeatSearch ? ", continued" : ", first pages 2–3"})`;
+    lines.push("", offsetNote);
+  } else if (typeof result.serpPagesFetched === "number" && result.serpPagesFetched > 1) {
     lines.push("", zh ? `（已合并 ${result.serpPagesFetched} 页 Google 结果）` : `(Merged ${result.serpPagesFetched} SERP pages)`);
   }
-  if (result.aiSummary?.trim()) {
-    lines.push("", zh ? "### AI 补充摘要" : "### AI summary", "", result.aiSummary.trim());
+  if (typeof result.linksCrawled === "number") {
+    lines.push(
+      "",
+      zh
+        ? `已阅读 ${result.linksCrawled} 个结果页${result.linksTruncated ? "（部分链接因上限未打开）" : ""}。`
+        : `Read ${result.linksCrawled} result page(s)${result.linksTruncated ? " (some links skipped due to limits)" : ""}.`,
+    );
   }
   if (result.title) {
     lines.push("", `${zh ? "页面标题" : "Page title"}：${result.title}`);

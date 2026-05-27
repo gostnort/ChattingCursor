@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { extractWebSearchQuery, formatWebSearchReply, hasWebSearchIntent } from "./web-search-intent.js";
+import {
+  extractWebSearchQuery,
+  extractWebSearchUserContext,
+  formatWebSearchReply,
+  hasWebSearchIntent,
+} from "./web-search-intent.js";
 
 
 test("hasWebSearchIntent 识别 /websearch 与 /google（大小写不敏感）", () => {
@@ -38,6 +43,16 @@ test("extractWebSearchQuery 行内指令只取 /websearch 之后至行尾", () =
   assert.equal(
     extractWebSearchQuery("foo bar /websearch cerritos mayor birth place"),
     "cerritos mayor birth place",
+  );
+});
+
+
+test("extractWebSearchUserContext 取指令前的行内背景", () => {
+  const mixed =
+    "目前cerritos的市长是哪个国家出生的? /websearch cerritos mayor birth place";
+  assert.equal(
+    extractWebSearchUserContext(mixed),
+    "目前cerritos的市长是哪个国家出生的?",
   );
 });
 

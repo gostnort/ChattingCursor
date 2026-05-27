@@ -19,6 +19,7 @@ import {
 } from "../services/history-search-intent.js";
 import {
   extractWebSearchQuery,
+  extractWebSearchUserContext,
   formatWebSearchReply,
   hasWebSearchIntent,
 } from "../services/web-search-intent.js";
@@ -269,11 +270,12 @@ export async function registerChatRoutes(app: FastifyInstance): Promise<void> {
     }
     if (hasWebSearchIntent(prompt)) {
       const query = extractWebSearchQuery(prompt);
+      const userContext = extractWebSearchUserContext(prompt);
       request.log.info(
-        { query, endpoint: "http://127.0.0.1:9222", path: "chrome-google-search" },
+        { query, userContext: userContext || undefined, endpoint: "http://127.0.0.1:9222", path: "chrome-google-search" },
         "Windows CDP search (Bridge → Chrome 9222, not WSL MCP)",
       );
-      void openGoogleSearchInChrome(query).then((result) => {
+      void openGoogleSearchInChrome(query, { userContext: userContext || undefined }).then((result) => {
         const replyText = formatWebSearchReply(query, result);
         finishDirectReplyRun(runId, session.sessionId, prompt, replyText, "chrome_web_search", modelLabel);
       }).catch((error: unknown) => {

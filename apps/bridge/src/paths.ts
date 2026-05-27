@@ -42,3 +42,9 @@ export function getDefaultHistoryDir(): string {
 export function getUploadsDir(): string {
   return path.join(getChattingCursorHomeDir(), "uploads");
 }
+
+
+/** /websearch 分页与去重状态 */
+export function getWebSearchStatePath(): string {
+  return path.join(getChattingCursorHomeDir(), "websearch-state.json");
+}

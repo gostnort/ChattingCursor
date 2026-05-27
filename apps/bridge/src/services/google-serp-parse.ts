@@ -48,9 +48,9 @@ export const GOOGLE_SERP_EXTRACT_EXPRESSION = `(() => {
       const snippet = snippetEl ? (snippetEl.innerText || "").trim().slice(0, 400) : "";
       seen.add(title);
       items.push({ title, url, snippet });
-      if (items.length >= 8) break;
+      if (items.length >= 20) break;
     }
-    if (items.length >= 8) break;
+    if (items.length >= 20) break;
   }
   let block = null;
   const probe = bodyText + " " + href;
@@ -130,6 +130,59 @@ export function parseGoogleSerpEvaluateValue(value: unknown): GoogleSerpSnapshot
 /** 查询是否以中文回复为主 */
 export function preferChineseWebSearchReply(query: string): boolean {
   return CHINESE_CHAR.test(query);
+}
+
+
+/** 将 SERP 链接规范为可抓取的 http(s) URL；Google 跳转链会解包 */
+export function normalizeOrganicResultUrl(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed.startsWith("http")) {
+    return null;
+  }
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.hostname.includes("google.") && parsed.pathname === "/url" && parsed.searchParams.has("q")) {
+      const unwrapped = parsed.searchParams.get("q")?.trim() ?? "";
+      return unwrapped.startsWith("http") ? unwrapped : null;
+    }
+    if (parsed.hostname.includes("google.") && parsed.pathname.startsWith("/search")) {
+      return null;
+    }
+    return parsed.href;
+  } catch {
+    return null;
+  }
+}
+
+
+/** 从 SERP 条目中收集未见的有机结果 URL（受每页与总量上限约束） */
+export function collectNewOrganicResultUrls(
+  items: GoogleSerpItem[],
+  seenUrls: Set<string>,
+  limits: { perPageMax: number; totalMax: number; alreadyQueued: number },
+): { urls: string[]; truncated: boolean } {
+  const urls: string[] = [];
+  let truncated = false;
+  for (const item of items) {
+    const href = normalizeOrganicResultUrl(item.url ?? "");
+    if (!href || seenUrls.has(href)) {
+      continue;
+    }
+    urls.push(href);
+    if (urls.length >= limits.perPageMax) {
+      truncated = true;
+      break;
+    }
+  }
+  const remaining = limits.totalMax - limits.alreadyQueued;
+  if (urls.length > remaining) {
+    truncated = true;
+    return { urls: urls.slice(0, Math.max(0, remaining)), truncated };
+  }
+  if (limits.alreadyQueued + urls.length >= limits.totalMax) {
+    truncated = truncated || urls.length > 0;
+  }
+  return { urls, truncated };
 }
 
 

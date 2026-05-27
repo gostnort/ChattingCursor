@@ -5,19 +5,31 @@ import {
   GOOGLE_PAGE_MAIN_TEXT_EXPRESSION,
   GOOGLE_SERP_EXTRACT_EXPRESSION,
   buildSynthesizedSearchSummary,
+  collectNewOrganicResultUrls,
   type CrawledPageText,
   type GoogleSerpItem,
   parseGoogleSerpEvaluateValue,
 } from "./google-serp-parse.js";
+import {
+  commitWebSearchRun,
+  hashWebSearchPageContent,
+  planWebSearchRun,
+  WEBSEARCH_MAX_LINKS_PER_SEARCH,
+  WEBSEARCH_MAX_LINKS_PER_SERP_PAGE,
+} from "./websearch-state.js";
 import { maybeSummarizeWebSearchWithSdk } from "./web-search-summarize.js";
 
 const NAVIGATE_TIMEOUT_MS = 15000;
-const CDP_SESSION_TIMEOUT_MS = 25000;
+const CDP_SESSION_TIMEOUT_MS = 90000;
 const EXCERPT_MAX_CHARS = 8000;
-const MAX_SERP_PAGES = 2;
-const TOP_RESULTS_TO_CRAWL = 3;
-const MIN_SERP_ITEMS_FOR_PAGE2 = 5;
 const PAGE_TEXT_MAX_CHARS = 3500;
+const AGGREGATE_EXCERPT_MAX_CHARS = 30000;
+
+
+export interface ChromeGoogleSearchOptions {
+  /** /websearch 行前的用户问题或背景 */
+  userContext?: string;
+}
 
 
 export interface ChromeEndpointStatus {
@@ -39,6 +51,11 @@ export interface ChromeGoogleSearchResult {
   crawledPages?: CrawledPageText[];
   synthesizedSummary?: string;
   serpPagesFetched?: number;
+  serpStartOffsets?: number[];
+  isRepeatSearch?: boolean;
+  linksCrawled?: number;
+  linksTruncated?: boolean;
+  statePath?: string;
   block?: "consent" | "captcha" | null;
   aiSummary?: string;
   message?: string;
@@ -95,9 +112,15 @@ export async function inspectChromeEndpoint(): Promise<ChromeEndpointStatus> {
 
 
 /** 在 Chrome 新标签页打开 Google 搜索，等待加载并摘录 SERP */
-export async function openGoogleSearchInChrome(query: string): Promise<ChromeGoogleSearchResult> {
+export async function openGoogleSearchInChrome(
+  query: string,
+  options: ChromeGoogleSearchOptions = {},
+): Promise<ChromeGoogleSearchResult> {
   const endpoint = resolveBridgeChromeEndpoint();
-  const searchUrl = buildGoogleSearchUrl(query);
+  const plan = await planWebSearchRun(query);
+  const serpOffsets = plan.offsets;
+  const firstOffset = serpOffsets[0] ?? 10;
+  const searchUrl = buildGoogleSearchUrl(query, firstOffset);
   const chrome = await inspectChromeEndpoint();
   if (!chrome.available) {
     return {
@@ -107,7 +130,10 @@ export async function openGoogleSearchInChrome(query: string): Promise<ChromeGoo
       message: chrome.message,
     };
   }
+  const seenUrls = new Set(plan.seenUrls);
+  const seenContentHashes = new Set(plan.seenContentHashes);
   const createdTabIds: string[] = [];
+  let linksTruncated = false;
   try {
     const created = await openTab(endpoint, searchUrl);
     const searchTargetId = typeof created.id === "string" ? created.id : "";
@@ -123,11 +149,28 @@ export async function openGoogleSearchInChrome(query: string): Promise<ChromeGoo
         message: "已打开标签页，但无法获取 CDP WebSocket（无法导航或摘录）。",
       };
     }
-    const serpCapture = await captureGoogleSerpMultiPage(wsUrl, query, searchUrl);
+    const serpCapture = await captureGoogleSerpForOffsets(wsUrl, query, serpOffsets);
     const serpItems = serpCapture.serpItems ?? [];
-    const crawlTargets = pickCrawlableResultUrls(serpItems, TOP_RESULTS_TO_CRAWL);
+    const crawlQueue: string[] = [];
+    for (const pageItems of serpCapture.itemsByPage) {
+      const batch = collectNewOrganicResultUrls(pageItems, seenUrls, {
+        perPageMax: WEBSEARCH_MAX_LINKS_PER_SERP_PAGE,
+        totalMax: WEBSEARCH_MAX_LINKS_PER_SEARCH,
+        alreadyQueued: crawlQueue.length,
+      });
+      if (batch.truncated) {
+        linksTruncated = true;
+      }
+      for (const href of batch.urls) {
+        crawlQueue.push(href);
+        seenUrls.add(href);
+      }
+    }
+    if (crawlQueue.length >= WEBSEARCH_MAX_LINKS_PER_SEARCH) {
+      linksTruncated = true;
+    }
     const crawledPages: CrawledPageText[] = [];
-    for (const targetUrl of crawlTargets) {
+    for (const targetUrl of crawlQueue) {
       const pageTab = await openTab(endpoint, targetUrl);
       const pageTargetId = typeof pageTab.id === "string" ? pageTab.id : "";
       if (pageTargetId) {
@@ -138,34 +181,55 @@ export async function openGoogleSearchInChrome(query: string): Promise<ChromeGoo
         continue;
       }
       const pageText = await capturePageMainTextViaCdp(pageWs, targetUrl);
-      if (pageText.text.trim()) {
-        crawledPages.push({
-          title: pageText.title || targetUrl,
-          url: pageText.url || targetUrl,
-          text: pageText.text.slice(0, PAGE_TEXT_MAX_CHARS),
-        });
+      const body = pageText.text.trim();
+      if (!body) {
+        continue;
       }
+      const contentHash = hashWebSearchPageContent(body);
+      if (seenContentHashes.has(contentHash)) {
+        continue;
+      }
+      seenContentHashes.add(contentHash);
+      crawledPages.push({
+        title: pageText.title || targetUrl,
+        url: pageText.url || targetUrl,
+        text: body.slice(0, PAGE_TEXT_MAX_CHARS),
+      });
     }
+    await commitWebSearchRun(query, serpOffsets, seenUrls, seenContentHashes);
     const structuredBullets = serpItems
       .map((item) => `- ${item.title}${item.snippet ? `: ${item.snippet.slice(0, 120)}` : ""}`)
       .join("\n");
     const pageBullets = crawledPages
-      .map((page) => `- ${page.title}: ${page.text.slice(0, 200)}`)
+      .map((page) => `- ${page.title} (${page.url}): ${page.text.slice(0, 240)}`)
       .join("\n");
     const synthesizedSummary = serpCapture.block
       ? undefined
       : buildSynthesizedSearchSummary(query, serpItems, crawledPages);
     const aggregateExcerpt = [
       serpCapture.excerpt ?? "",
-      ...crawledPages.map((page) => `${page.title}\n${page.text}`),
-    ].join("\n\n").slice(0, EXCERPT_MAX_CHARS);
+      ...crawledPages.map((page) => `## ${page.title}\n${page.url}\n${page.text}`),
+    ].join("\n\n").slice(0, AGGREGATE_EXCERPT_MAX_CHARS);
     const aiSummary = serpCapture.block
       ? undefined
       : await maybeSummarizeWebSearchWithSdk(
         query,
         aggregateExcerpt,
         [structuredBullets, pageBullets].filter(Boolean).join("\n"),
+        options.userContext,
       );
+    const statusNotes: string[] = [];
+    if (plan.isRepeat) {
+      statusNotes.push(`本次为重复查询，已抓取 Google start=${serpOffsets.join(",")} 共 ${serpOffsets.length} 页。`);
+    } else {
+      statusNotes.push(`首次查询：已抓取 Google 第 2–3 页（start=${serpOffsets.join(",")}）。`);
+    }
+    if (linksTruncated) {
+      statusNotes.push(
+        `部分结果页未打开（上限：每 SERP 页 ${WEBSEARCH_MAX_LINKS_PER_SERP_PAGE} 条，单次合计 ${WEBSEARCH_MAX_LINKS_PER_SEARCH} 条）。`,
+      );
+    }
+    statusNotes.push(`状态文件：${plan.statePath}`);
     return {
       ok: true,
       endpoint,
@@ -177,9 +241,14 @@ export async function openGoogleSearchInChrome(query: string): Promise<ChromeGoo
       crawledPages,
       synthesizedSummary,
       serpPagesFetched: serpCapture.pagesFetched,
+      serpStartOffsets: serpOffsets,
+      isRepeatSearch: plan.isRepeat,
+      linksCrawled: crawledPages.length,
+      linksTruncated,
+      statePath: plan.statePath,
       block: serpCapture.block,
       aiSummary,
-      message: serpCapture.message,
+      message: statusNotes.join(" "),
     };
   } catch (error: unknown) {
     const detail = error instanceof Error ? error.message : String(error);
@@ -192,39 +261,6 @@ export async function openGoogleSearchInChrome(query: string): Promise<ChromeGoo
   } finally {
     await closeCreatedTabs(endpoint, createdTabIds);
   }
-}
-
-
-function pickCrawlableResultUrls(items: GoogleSerpItem[], limit: number): string[] {
-  const urls: string[] = [];
-  const seen = new Set<string>();
-  for (const item of items) {
-    const raw = (item.url ?? "").trim();
-    if (!raw.startsWith("http")) {
-      continue;
-    }
-    let href = raw;
-    try {
-      const parsed = new URL(raw);
-      if (parsed.hostname.includes("google.") && parsed.pathname === "/url" && parsed.searchParams.has("q")) {
-        href = parsed.searchParams.get("q") ?? raw;
-      }
-      if (parsed.hostname.includes("google.") && parsed.pathname.startsWith("/search")) {
-        continue;
-      }
-    } catch {
-      continue;
-    }
-    if (seen.has(href)) {
-      continue;
-    }
-    seen.add(href);
-    urls.push(href);
-    if (urls.length >= limit) {
-      break;
-    }
-  }
-  return urls;
 }
 
 
@@ -299,36 +335,31 @@ interface CdpSerpCapture {
   title?: string;
   excerpt?: string;
   serpItems?: GoogleSerpItem[];
+  itemsByPage: GoogleSerpItem[][];
   block?: "consent" | "captcha" | null;
   pagesFetched?: number;
   message?: string;
 }
 
 
-async function captureGoogleSerpMultiPage(
+async function captureGoogleSerpForOffsets(
   webSocketDebuggerUrl: string,
   query: string,
-  firstPageUrl: string,
+  startOffsets: number[],
 ): Promise<CdpSerpCapture> {
   return withCdpSession(webSocketDebuggerUrl, CDP_SESSION_TIMEOUT_MS, async (sendCommand) => {
     await sendCommand("Page.enable");
     await sendCommand("Runtime.enable");
     const mergedItems: GoogleSerpItem[] = [];
+    const itemsByPage: GoogleSerpItem[][] = [];
     const seenTitles = new Set<string>();
     let lastSnapshot: ReturnType<typeof parseGoogleSerpEvaluateValue> | null = null;
     let pagesFetched = 0;
-    const pageUrls = [firstPageUrl];
-    if (MAX_SERP_PAGES > 1) {
-      pageUrls.push(buildGoogleSearchUrl(query, 10));
-    }
-    for (let pageIndex = 0; pageIndex < pageUrls.length; pageIndex += 1) {
-      if (pageIndex > 0 && mergedItems.length >= MIN_SERP_ITEMS_FOR_PAGE2) {
+    for (const start of startOffsets) {
+      if (lastSnapshot?.block) {
         break;
       }
-      if (pageIndex > 0 && lastSnapshot?.block) {
-        break;
-      }
-      const pageUrl = pageUrls[pageIndex] ?? firstPageUrl;
+      const pageUrl = buildGoogleSearchUrl(query, start);
       await sendCommand("Page.navigate", { url: pageUrl });
       await waitForGooglePageLoad(sendCommand, pageUrl);
       const extractResponse = await sendCommand("Runtime.evaluate", {
@@ -338,13 +369,16 @@ async function captureGoogleSerpMultiPage(
       const parsed = parseGoogleSerpEvaluateValue(readEvaluateValue(extractResponse));
       lastSnapshot = parsed;
       pagesFetched += 1;
+      const pageItems: GoogleSerpItem[] = [];
       for (const item of parsed.items) {
         if (seenTitles.has(item.title)) {
           continue;
         }
         seenTitles.add(item.title);
         mergedItems.push(item);
+        pageItems.push(item);
       }
+      itemsByPage.push(pageItems);
       if (parsed.block) {
         break;
       }
@@ -354,6 +388,7 @@ async function captureGoogleSerpMultiPage(
       title: lastSnapshot?.title,
       excerpt: lastSnapshot?.text?.slice(0, EXCERPT_MAX_CHARS),
       serpItems: mergedItems,
+      itemsByPage,
       block: lastSnapshot?.block ?? null,
       pagesFetched,
     };
