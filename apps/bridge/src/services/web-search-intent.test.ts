@@ -81,7 +81,7 @@ test("formatWebSearchReply 含搜索摘要与来源", () => {
 
 
 test("formatWebSearchReply 提及分批打开", () => {
-  const reply = formatWebSearchReply("test", {
+  const reply = formatWebSearchReply("测试", {
     ok: true,
     endpoint: "http://127.0.0.1:9222",
     searchUrl: "https://www.google.com/search?q=test",
