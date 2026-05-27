@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildStructuredSerpSummary,
+  buildSynthesizedSearchSummary,
   detectGoogleAccessBlock,
   parseGoogleSerpEvaluateValue,
   preferChineseWebSearchReply,
@@ -55,4 +56,15 @@ test("buildStructuredSerpSummary 输出条目与中文拦截提示", () => {
 test("preferChineseWebSearchReply", () => {
   assert.equal(preferChineseWebSearchReply("哲学家"), true);
   assert.equal(preferChineseWebSearchReply("flight status"), false);
+});
+
+
+test("buildSynthesizedSearchSummary 合并 SERP 与页面正文", () => {
+  const summary = buildSynthesizedSearchSummary(
+    "机票",
+    [{ title: "航班", snippet: "CA988 延误" }],
+    [{ title: "Example", url: "https://example.com", text: "正文开头关于航班状态。" }],
+  );
+  assert.match(summary, /航班/);
+  assert.match(summary, /Example/);
 });

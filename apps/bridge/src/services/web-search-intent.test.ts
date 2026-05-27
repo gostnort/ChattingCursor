@@ -55,8 +55,11 @@ test("formatWebSearchReply 含搜索摘要与来源", () => {
     searchUrl: "https://www.google.com/search?q=%E6%9C%BA%E7%A5%A8",
     pageUrl: "https://www.google.com/search?q=%E6%9C%BA%E7%A5%A8",
     serpItems: [{ title: "航班动态", url: "https://example.com", snippet: "CA988" }],
+    synthesizedSummary: "- 航班动态：CA988",
   });
   assert.match(reply, /## 搜索摘要/);
+  assert.match(reply, /## 搜索结果/);
   assert.match(reply, /航班动态/);
   assert.match(reply, /来源：/);
+  assert.match(reply, /标签页已自动关闭/);
 });

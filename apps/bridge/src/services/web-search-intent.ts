@@ -124,6 +124,9 @@ export function formatWebSearchReply(
     title?: string;
     excerpt?: string;
     serpItems?: GoogleSerpItem[];
+    crawledPages?: { title: string; url: string; text: string }[];
+    synthesizedSummary?: string;
+    serpPagesFetched?: number;
     block?: "consent" | "captcha" | null;
     aiSummary?: string;
     endpoint: string;
@@ -146,6 +149,7 @@ export function formatWebSearchReply(
   }
   const sourceUrl = result.pageUrl && result.pageUrl !== "about:blank" ? result.pageUrl : result.searchUrl;
   const summaryHeading = zh ? "## 搜索摘要" : "## Search summary";
+  const resultsHeading = zh ? "## 搜索结果" : "## Search results";
   const snapshot = {
     title: result.title,
     url: sourceUrl,
@@ -154,13 +158,28 @@ export function formatWebSearchReply(
     block: result.block ?? null,
   };
   const structured = buildStructuredSerpSummary(query, snapshot);
+  const synthesis = result.synthesizedSummary?.trim()
+    ?? (result.block ? structured : "");
   const lines = [
     summaryHeading,
     "",
     zh ? `关键词：${query}` : `Query: ${query}`,
     "",
-    structured,
+    synthesis || structured || (zh ? "（暂无摘要）" : "(No summary yet)"),
   ];
+  if (!result.block) {
+    lines.push("", resultsHeading, "", structured);
+  }
+  if (result.crawledPages && result.crawledPages.length > 0) {
+    lines.push("", zh ? "### 已阅读页面摘录" : "### Pages read", "");
+    for (const page of result.crawledPages) {
+      const excerpt = page.text.replace(/\s+/g, " ").trim().slice(0, 280);
+      lines.push(`- **${page.title}**`, `  ${page.url}`, excerpt ? `  ${excerpt}…` : "");
+    }
+  }
+  if (typeof result.serpPagesFetched === "number" && result.serpPagesFetched > 1) {
+    lines.push("", zh ? `（已合并 ${result.serpPagesFetched} 页 Google 结果）` : `(Merged ${result.serpPagesFetched} SERP pages)`);
+  }
   if (result.aiSummary?.trim()) {
     lines.push("", zh ? "### AI 补充摘要" : "### AI summary", "", result.aiSummary.trim());
   }
@@ -172,8 +191,8 @@ export function formatWebSearchReply(
     `${zh ? "来源" : "Source"}：${sourceUrl}`,
     "",
     zh
-      ? `已在 Chrome（${result.endpoint}）打开完整结果页。`
-      : `Full results opened in Chrome (${result.endpoint}).`,
+      ? `已通过 Chrome（${result.endpoint}）完成搜索与摘录，相关标签页已自动关闭。`
+      : `Search and extraction via Chrome (${result.endpoint}); opened tabs were closed.`,
   );
   if (result.message) {
     lines.push("", result.message);

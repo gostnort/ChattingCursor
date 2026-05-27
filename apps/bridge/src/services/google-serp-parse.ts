@@ -16,6 +16,13 @@ export interface GoogleSerpSnapshot {
 }
 
 
+export interface CrawledPageText {
+  title: string;
+  url: string;
+  text: string;
+}
+
+
 export type GoogleAccessBlock = "consent" | "captcha";
 
 
@@ -55,6 +62,21 @@ export const GOOGLE_SERP_EXTRACT_EXPRESSION = `(() => {
     text: bodyText.slice(0, 8000),
     items,
     block,
+  };
+})()`;
+
+
+/** CDP：摘录结果页正文（article/main，限长） */
+export const GOOGLE_PAGE_MAIN_TEXT_EXPRESSION = `(() => {
+  const pick = document.querySelector("article")
+    || document.querySelector("main")
+    || document.querySelector("[role='main']")
+    || document.body;
+  const text = ((pick && pick.innerText) || "").replace(/\\s+/g, " ").trim();
+  return {
+    title: document.title || "",
+    url: location.href || "",
+    text: text.slice(0, 4000),
   };
 })()`;
 
@@ -156,4 +178,51 @@ export function buildStructuredSerpSummary(query: string, snapshot: GoogleSerpSn
   return zh
     ? "未能从当前页面解析到搜索结果，请查看 Chrome 标签页。"
     : "Could not parse search results from the page; check the Chrome tab.";
+}
+
+
+/** 由 SERP 条目与已抓取页面正文生成规则摘要（不依赖 cursor-agent） */
+export function buildSynthesizedSearchSummary(
+  query: string,
+  items: GoogleSerpItem[],
+  pages: CrawledPageText[],
+): string {
+  const zh = preferChineseWebSearchReply(query);
+  const bullets: string[] = [];
+  const seen = new Set<string>();
+  const pushBullet = (line: string): void => {
+    const key = line.slice(0, 80);
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    bullets.push(line);
+  };
+  for (const item of items.slice(0, 6)) {
+    const snippet = (item.snippet ?? "").replace(/\s+/g, " ").trim();
+    if (snippet) {
+      pushBullet(`- ${item.title}：${snippet.slice(0, 140)}`);
+    } else {
+      pushBullet(`- ${item.title}`);
+    }
+    if (bullets.length >= 6) {
+      break;
+    }
+  }
+  for (const page of pages.slice(0, 3)) {
+    const lead = page.text.replace(/\s+/g, " ").trim();
+    if (!lead) {
+      continue;
+    }
+    pushBullet(`- ${page.title}：${lead.slice(0, 160)}${lead.length > 160 ? "…" : ""}`);
+    if (bullets.length >= 8) {
+      break;
+    }
+  }
+  if (bullets.length === 0) {
+    return zh
+      ? "（未能生成摘要，请查看下方结果列表或 Chrome 标签页。）"
+      : "(No summary could be built; see result list or Chrome tab.)";
+  }
+  return bullets.join("\n");
 }
