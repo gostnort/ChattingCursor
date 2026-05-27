@@ -1,5 +1,6 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import multipart from "@fastify/multipart";
 import { probeCursorCli } from "@chatting-cursor/cli-client";
 import { loadConfig, isOriginAllowed } from "./config.js";
 import { registerAuthRoutes } from "./routes/auth.js";
@@ -17,6 +18,12 @@ async function main(): Promise<void> {
   await app.register(cors, {
     origin: (origin, callback) => {
       callback(null, isOriginAllowed(origin, config.corsOrigins));
+    },
+  });
+  await app.register(multipart, {
+    limits: {
+      fileSize: 10 * 1024 * 1024,
+      files: 1,
     },
   });
   app.get("/health", async () => {

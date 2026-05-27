@@ -3,6 +3,8 @@ import type {
   AuthVerifyResponse,
   ChatNewSessionResponse,
   ChatSendResponse,
+  ChatImageUploadResponse,
+  ChatAnalyzeImageResponse,
   CrewStatusResponse,
   HistorySearchResponse,
   LatestRunResponse,
@@ -164,6 +166,54 @@ export async function sendChatMessage(
     throw new Error(`发送失败 (${response.status}): ${detail}`);
   }
   return response.json() as Promise<ChatSendResponse>;
+}
+
+
+/** 上传聊天图片（jpeg/png） */
+export async function uploadChatImage(
+  bridgeUrl: string,
+  file: File,
+  sessionId: string | undefined,
+  token?: string,
+): Promise<ChatImageUploadResponse> {
+  const form = new FormData();
+  form.append("file", file);
+  if (sessionId) {
+    form.append("sessionId", sessionId);
+  }
+  const response = await fetch(`${bridgeUrl}/chat/upload-image`, {
+    method: "POST",
+    headers: buildAuthHeaders(token),
+    body: form,
+  });
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, `Image upload failed (${response.status})`));
+  }
+  return response.json() as Promise<ChatImageUploadResponse>;
+}
+
+
+/** 分析图片并转发到当前 agent-cli 会话 */
+export async function analyzeChatImage(
+  bridgeUrl: string,
+  payload: {
+    sessionId: string;
+    imageId: string;
+    fileName: string;
+    model?: string;
+    modelLabel?: string;
+  },
+  token?: string,
+): Promise<ChatAnalyzeImageResponse> {
+  const response = await fetch(`${bridgeUrl}/chat/analyze-image`, {
+    method: "POST",
+    headers: buildAuthHeaders(token, { "Content-Type": "application/json" }),
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, `Image analysis failed (${response.status})`));
+  }
+  return response.json() as Promise<ChatAnalyzeImageResponse>;
 }
 
 

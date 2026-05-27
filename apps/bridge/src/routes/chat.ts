@@ -1,8 +1,14 @@
+import { createReadStream } from "node:fs";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { v4 as uuidv4 } from "uuid";
 import { listCursorModels, mergeAssistantStreamText, probeCursorCli, runCursorCli } from "@chatting-cursor/cli-client";
 import type { RunEvent } from "@chatting-cursor/shared";
-import { chatSendRequestSchema } from "@chatting-cursor/shared";
+import {
+  chatAnalyzeImageRequestSchema,
+  chatSendRequestSchema,
+} from "@chatting-cursor/shared";
+import { analyzeUploadedImage, buildImageForwardPrompt } from "../services/image-analysis-service.js";
+import { readStoredImage, saveUploadedImage } from "../services/image-store.js";
 import { loadConfig, resolveCorsOrigin } from "../config.js";
 import { requireRemoteToken } from "../middleware/auth.js";
 import { openGoogleSearchInChrome } from "../services/chrome-google-search.js";
@@ -84,6 +90,57 @@ function finishDirectReplyRun(
 }
 
 
+/** 在会话中记录用户消息后启动 cursor-agent CLI run */
+function scheduleCursorCliRun(options: {
+  runId: string;
+  sessionId: string;
+  prompt: string;
+  model?: string;
+  modelLabel?: string;
+  workspace?: string;
+}): void {
+  const { runId, sessionId, prompt, model, modelLabel, workspace } = options;
+  void runCursorCli({
+    runId,
+    prompt,
+    model,
+    workspace,
+    onEvent: (event) => {
+      runStore.appendEvent(runId, event);
+    },
+  }).then(async () => {
+    const run = runStore.get(runId);
+    if (!run) {
+      return;
+    }
+    const assistantText = extractAssistantText(run.events);
+    if (assistantText) {
+      sessionStore.appendMessage(sessionId, {
+        role: "assistant",
+        content: assistantText,
+        timestamp: new Date().toISOString(),
+        modelLabel,
+      });
+      await historyStore.appendTurn(sessionId, prompt, assistantText, sessionStore.getOrCreate(sessionId).createdAt);
+    }
+  }).catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    runStore.appendEvent(runId, {
+      runId,
+      type: "error",
+      timestamp: new Date().toISOString(),
+      text: message,
+    });
+    runStore.appendEvent(runId, {
+      runId,
+      type: "run_finished",
+      timestamp: new Date().toISOString(),
+      data: { exitCode: 1 },
+    });
+  });
+}
+
+
 /** 从 run 事件中提取最终 assistant 文本 */
 function extractAssistantText(events: RunEvent[]): string {
   let text = "";
@@ -147,6 +204,7 @@ export async function registerChatRoutes(app: FastifyInstance): Promise<void> {
         content: message.content,
         createdAt: message.timestamp,
         modelLabel: message.modelLabel,
+        imageUrl: message.imageUrl,
       })),
     });
   });
@@ -224,45 +282,118 @@ export async function registerChatRoutes(app: FastifyInstance): Promise<void> {
       });
       return reply.send({ runId, sessionId: session.sessionId });
     }
-    void runCursorCli({
+    scheduleCursorCliRun({
       runId,
+      sessionId: session.sessionId,
       prompt,
       model,
+      modelLabel,
       workspace,
-      onEvent: (event) => {
-        runStore.appendEvent(runId, event);
-      },
-    }).then(async () => {
-      const run = runStore.get(runId);
-      if (!run) {
-        return;
-      }
-      const assistantText = extractAssistantText(run.events);
-      if (assistantText) {
-        sessionStore.appendMessage(session.sessionId, {
-          role: "assistant",
-          content: assistantText,
-          timestamp: new Date().toISOString(),
-          modelLabel,
-        });
-        await historyStore.appendTurn(session.sessionId, prompt, assistantText, session.createdAt);
-      }
-    }).catch((error: unknown) => {
-      const message = error instanceof Error ? error.message : String(error);
-      runStore.appendEvent(runId, {
-        runId,
-        type: "error",
-        timestamp: new Date().toISOString(),
-        text: message,
-      });
-      runStore.appendEvent(runId, {
-        runId,
-        type: "run_finished",
-        timestamp: new Date().toISOString(),
-        data: { exitCode: 1 },
-      });
     });
     return reply.send({ runId, sessionId: session.sessionId });
+  });
+
+
+  app.post("/chat/upload-image", async (request, reply) => {
+    const file = await request.file();
+    if (!file) {
+      return reply.status(400).send({ error: "missing_file", message: "Expected multipart field 'file'" });
+    }
+    const sessionField = file.fields.sessionId;
+    const sessionIdFromField = sessionField && "value" in sessionField
+      ? String(sessionField.value).trim()
+      : "";
+    const session = sessionStore.getOrCreate(sessionIdFromField || undefined);
+    const imageId = uuidv4();
+    const mime = (file.mimetype || "").toLowerCase();
+    if (mime !== "image/jpeg" && mime !== "image/png") {
+      return reply.status(400).send({ error: "unsupported_type", message: "Only JPEG and PNG images are supported" });
+    }
+    try {
+      const stored = await saveUploadedImage(session.sessionId, imageId, file);
+      const imageUrl = `/chat/uploads/${session.sessionId}/${stored.imageId}`;
+      return reply.send({
+        imageId: stored.imageId,
+        sessionId: stored.sessionId,
+        fileName: stored.fileName,
+        imageUrl,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return reply.status(400).send({ error: "upload_failed", message });
+    }
+  });
+
+
+  app.get("/chat/uploads/:sessionId/:imageId", async (request, reply) => {
+    const { sessionId, imageId } = request.params as { sessionId: string; imageId: string };
+    const stored = await readStoredImage(sessionId, imageId);
+    if (!stored) {
+      return reply.status(404).send({ error: "image_not_found" });
+    }
+    reply.header("Content-Type", stored.mimeType);
+    reply.header("Cache-Control", "private, max-age=3600");
+    return reply.send(createReadStream(stored.absolutePath));
+  });
+
+
+  app.post("/chat/analyze-image", async (request, reply) => {
+    const parsed = chatAnalyzeImageRequestSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.status(400).send({ error: "invalid_request", details: parsed.error.flatten() });
+    }
+    const cli = await probeCursorCli();
+    if (!cli.available) {
+      return reply.status(503).send({
+        error: "cli_unavailable",
+        message: cli.message ?? "Cursor Agent CLI is not available",
+      });
+    }
+    const { sessionId, imageId, fileName, model, modelLabel, workspace } = parsed.data;
+    const session = sessionStore.getOrCreate(sessionId);
+    const stored = await readStoredImage(sessionId, imageId);
+    if (!stored) {
+      return reply.status(404).send({ error: "image_not_found" });
+    }
+    let analysisText: string;
+    try {
+      analysisText = await analyzeUploadedImage({
+        absolutePath: stored.absolutePath,
+        mimeType: stored.mimeType,
+        fileName,
+        messages: session.messages,
+        model,
+        workspace,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return reply.status(502).send({ error: "analysis_failed", message });
+    }
+    const forwardPrompt = buildImageForwardPrompt(analysisText, fileName);
+    const runId = uuidv4();
+    runStore.create(runId);
+    const startedAt = new Date().toISOString();
+    sessionStore.setModel(session.sessionId, model);
+    sessionStore.appendMessage(session.sessionId, {
+      role: "user",
+      content: forwardPrompt,
+      timestamp: startedAt,
+      imageUrl: `/chat/uploads/${sessionId}/${imageId}`,
+    });
+    scheduleCursorCliRun({
+      runId,
+      sessionId: session.sessionId,
+      prompt: forwardPrompt,
+      model,
+      modelLabel,
+      workspace,
+    });
+    return reply.send({
+      runId,
+      sessionId: session.sessionId,
+      imageId,
+      analysisText,
+    });
   });
 
 

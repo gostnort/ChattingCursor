@@ -13,7 +13,9 @@
     "@chatting-cursor/cli-client": "workspace:*",
     "@chatting-cursor/orchestrator": "workspace:*",
     "@chatting-cursor/shared": "workspace:*",
+    "@cursor/sdk": "^1.0.14",
     "@fastify/cors": "^11.0.0",
+    "@fastify/multipart": "^10.0.0",
     "fastify": "^5.2.1",
     "uuid": "^11.1.0"
   },

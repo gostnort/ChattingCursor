@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import type { ChatMessage, ModelInfo } from "@chatting-cursor/shared";
 import {
+  analyzeChatImage,
   createChatSession,
   fetchRecentChatSession,
   fetchModels,
   mergeAssistantStreamText,
   sendChatMessage,
   subscribeRunEvents,
+  uploadChatImage,
 } from "../api/bridge";
 import { clearChatState, loadChatState, saveChatState } from "../chatPersistence";
 import { isLocalBridgeUrl, isLocalWebWithRemoteBridge } from "../bridgeSettings";
@@ -133,6 +135,7 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
   );
   const [sessionId, setSessionId] = useState<string | null>(() => restoredState?.sessionId ?? null);
   const [focusedMessageId, setFocusedMessageId] = useState<string | null>(null);
+  const [isImageAnalyzing, setIsImageAnalyzing] = useState(false);
   const assistantBufferRef = useRef("");
   const stderrBufferRef = useRef("");
   const currentAssistantLabelRef = useRef("Agent");
@@ -437,6 +440,19 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
   };
 
 
+  const subscribeToRun = (runId: string, activeSessionId: string): void => {
+    setSessionId(activeSessionId);
+    setConnectionError(null);
+    localStorage.setItem(LATEST_RUN_ID_KEY, runId);
+    sseCloseRef.current = subscribeRunEvents(bridgeUrl, runId, handleStreamEvent, (error) => {
+      appendAssistantError(`Stream connection failed: ${error.message}`);
+      setConnectionError(error.message);
+      sseCloseRef.current = null;
+      drainSendQueue();
+    }, bridgeToken);
+  };
+
+
   const startRun = async (prompt: string): Promise<void> => {
     runInFlightRef.current = true;
     setIsSending(true);
@@ -452,15 +468,7 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
         sessionId: sessionId ?? undefined,
         token: bridgeToken,
       });
-      setSessionId(activeSessionId);
-      setConnectionError(null);
-      localStorage.setItem(LATEST_RUN_ID_KEY, runId);
-      sseCloseRef.current = subscribeRunEvents(bridgeUrl, runId, handleStreamEvent, (error) => {
-        appendAssistantError(`流式连接失败：${error.message}`);
-        setConnectionError(error.message);
-        sseCloseRef.current = null;
-        drainSendQueue();
-      }, bridgeToken);
+      subscribeToRun(runId, activeSessionId);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setMessages((prev) => [
@@ -468,12 +476,72 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
         {
           id: crypto.randomUUID(),
           role: "assistant",
-          content: `发送失败：${message}`,
+          content: `Send failed: ${message}`,
           createdAt: new Date().toISOString(),
         },
       ]);
       setConnectionError(message);
       drainSendQueue();
+    }
+  };
+
+
+  const handleAttachImage = async (file: File): Promise<void> => {
+    const mime = file.type.toLowerCase();
+    if (mime !== "image/jpeg" && mime !== "image/png") {
+      appendAssistantError("Only JPEG and PNG images are supported.");
+      return;
+    }
+    if (runInFlightRef.current || isImageAnalyzing) {
+      appendAssistantError("Wait for the current run to finish before attaching an image.");
+      return;
+    }
+    setIsImageAnalyzing(true);
+    try {
+      let activeSessionId = sessionId;
+      if (!activeSessionId) {
+        const created = await createChatSession(bridgeUrl, bridgeToken);
+        activeSessionId = created.sessionId;
+        setSessionId(activeSessionId);
+      }
+      const upload = await uploadChatImage(bridgeUrl, file, activeSessionId, bridgeToken);
+      activeSessionId = upload.sessionId;
+      setSessionId(activeSessionId);
+      const imageUrl = upload.imageUrl.startsWith("http")
+        ? upload.imageUrl
+        : `${bridgeUrl.replace(/\/$/, "")}${upload.imageUrl}`;
+      const analysis = await analyzeChatImage(bridgeUrl, {
+        sessionId: activeSessionId,
+        imageId: upload.imageId,
+        fileName: upload.fileName,
+        model: selectedModel || undefined,
+        modelLabel: selectedModelLabel,
+      }, bridgeToken);
+      const userContent = `[Image analysis]: ${analysis.analysisText}`;
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          role: "user",
+          content: userContent,
+          createdAt: new Date().toISOString(),
+          imageUrl,
+        },
+      ]);
+      runInFlightRef.current = true;
+      setIsSending(true);
+      setIsThinking(true);
+      assistantBufferRef.current = "";
+      stderrBufferRef.current = "";
+      currentAssistantLabelRef.current = selectedModelLabel;
+      sseCloseRef.current?.();
+      subscribeToRun(analysis.runId, analysis.sessionId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      appendAssistantError(`Image attach failed: ${message}`);
+      setConnectionError(message);
+    } finally {
+      setIsImageAnalyzing(false);
     }
   };
 
@@ -556,12 +624,15 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
               isSpeaking={speakingKey === message.id}
               agentLabel={message.modelLabel || selectedModelLabel}
               isFocused={focusedMessageId === message.id}
+              onAttachImage={message.role === "assistant" ? (picked) => void handleAttachImage(picked) : undefined}
+              imageAttachBusy={isImageAnalyzing}
+              imageAttachDisabled={isSending && !isImageAnalyzing}
             />
           ))}
           {showTypingIndicator && (
             <div className="bubble-row bubble-row-assistant bubble-typing" aria-live="polite" aria-label={`${currentAssistantLabelRef.current} 正在输入`}>
-              <div className="bubble-avatar bubble-avatar-agent" title={currentAssistantLabelRef.current} aria-hidden="true">
-                {currentAssistantLabelRef.current}
+              <div className="bubble-model-pill bubble-model-pill-static" title={currentAssistantLabelRef.current} aria-hidden="true">
+                <span className="bubble-model-pill-label">{currentAssistantLabelRef.current}</span>
               </div>
               <div className="bubble-main">
                 <div className="bubble bubble-assistant bubble-assistant-typing">

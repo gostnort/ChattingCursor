@@ -1,3 +1,4 @@
+import { useRef, type ChangeEvent } from "react";
 import type { ChatMessage } from "@chatting-cursor/shared";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -9,13 +10,44 @@ interface MessageBubbleProps {
   isSpeaking: boolean;
   agentLabel?: string;
   isFocused?: boolean;
+  onAttachImage?: (file: File) => void;
+  imageAttachBusy?: boolean;
+  imageAttachDisabled?: boolean;
 }
 
 
 /** 微信风格单条聊天气泡 */
-export function MessageBubble({ message, onSpeakToggle, isSpeaking, agentLabel = "Agent", isFocused = false }: MessageBubbleProps) {
+export function MessageBubble({
+  message,
+  onSpeakToggle,
+  isSpeaking,
+  agentLabel = "Agent",
+  isFocused = false,
+  onAttachImage,
+  imageAttachBusy = false,
+  imageAttachDisabled = false,
+}: MessageBubbleProps) {
   const isUser = message.role === "user";
   const label = isUser ? "" : agentLabel;
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+
+  const handleModelPillClick = (): void => {
+    if (!onAttachImage || imageAttachBusy || imageAttachDisabled) {
+      return;
+    }
+    fileInputRef.current?.click();
+  };
+
+
+  const handleFileChange = (event: ChangeEvent<HTMLInputElement>): void => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !onAttachImage) {
+      return;
+    }
+    onAttachImage(file);
+  };
 
 
   return (
@@ -28,21 +60,55 @@ export function MessageBubble({ message, onSpeakToggle, isSpeaking, agentLabel =
           <button
             type="button"
             className={`bubble-tts${isSpeaking ? " bubble-tts-active" : ""}`}
-            aria-label={`朗读${label}消息`}
-            title={isSpeaking ? "停止朗读" : "朗读"}
+            aria-label={`Read ${label} message aloud`}
+            title={isSpeaking ? "Stop reading" : "Read aloud"}
             aria-pressed={isSpeaking}
             onClick={() => onSpeakToggle(message.id, message.content)}
           >
             <span aria-hidden="true">{isSpeaking ? "■" : "🔊"}</span>
           </button>
-          <div className="bubble-avatar bubble-avatar-agent" title={label} aria-hidden="true">
-            {label}
-          </div>
+          {onAttachImage ? (
+            <>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/jpeg,image/png"
+                className="bubble-image-input"
+                tabIndex={-1}
+                aria-hidden="true"
+                onChange={handleFileChange}
+              />
+              <button
+                type="button"
+                className={`bubble-model-pill${imageAttachBusy ? " bubble-model-pill-busy" : ""}`}
+                title={imageAttachBusy ? "Analyzing image…" : "Attach image for analysis"}
+                aria-label={imageAttachBusy ? "Analyzing image" : `Attach image (${label})`}
+                disabled={imageAttachBusy || imageAttachDisabled}
+                onClick={handleModelPillClick}
+              >
+                <span className="bubble-model-pill-label">{label}</span>
+                <span className="bubble-model-pill-icon" aria-hidden="true">
+                  {imageAttachBusy ? "…" : "📷"}
+                </span>
+              </button>
+            </>
+          ) : (
+            <div className="bubble-model-pill bubble-model-pill-static" title={label} aria-hidden="true">
+              <span className="bubble-model-pill-label">{label}</span>
+            </div>
+          )}
         </div>
       )}
       <div className="bubble-main">
         <div className={`bubble bubble-${message.role}`}>
           <div className="bubble-text">
+            {message.imageUrl && (
+              <img
+                className="bubble-inline-image"
+                src={message.imageUrl}
+                alt="Attached"
+              />
+            )}
             {isUser ? (
               message.content
             ) : (
@@ -54,8 +120,8 @@ export function MessageBubble({ message, onSpeakToggle, isSpeaking, agentLabel =
           <button
             type="button"
             className={`bubble-tts${isSpeaking ? " bubble-tts-active" : ""}`}
-            aria-label="朗读用户消息"
-            title={isSpeaking ? "停止朗读" : "朗读"}
+            aria-label="Read user message aloud"
+            title={isSpeaking ? "Stop reading" : "Read aloud"}
             aria-pressed={isSpeaking}
             onClick={() => onSpeakToggle(message.id, message.content)}
           >

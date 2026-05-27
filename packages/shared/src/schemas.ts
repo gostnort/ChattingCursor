@@ -123,6 +123,17 @@ export const chatAnalyzeImageRequestSchema = z.object({
 export type ChatAnalyzeImageRequest = z.infer<typeof chatAnalyzeImageRequestSchema>;
 
 
+/** POST /chat/analyze-image 响应体 */
+export const chatAnalyzeImageResponseSchema = z.object({
+  runId: z.string().min(1),
+  sessionId: z.string().min(1),
+  imageId: z.string().min(1),
+  analysisText: z.string().min(1),
+});
+
+export type ChatAnalyzeImageResponse = z.infer<typeof chatAnalyzeImageResponseSchema>;
+
+
 /** POST /chat/new-session 响应体 */
 export const chatNewSessionResponseSchema = z.object({
   sessionId: z.string().min(1),

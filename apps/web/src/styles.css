@@ -639,7 +639,31 @@ body {
 
 
 
-.bubble-avatar {
+.bubble-image-input {
+
+  position: absolute;
+
+  width: 1px;
+
+  height: 1px;
+
+  padding: 0;
+
+  margin: -1px;
+
+  overflow: hidden;
+
+  clip: rect(0, 0, 0, 0);
+
+  white-space: nowrap;
+
+  border: 0;
+
+}
+
+
+
+.bubble-model-pill {
 
   flex-shrink: 0;
 
@@ -649,15 +673,23 @@ body {
 
   min-height: 2.25rem;
 
-  padding: 0.25rem 0.55rem;
+  padding: 0.25rem 0.5rem;
 
   border-radius: 999px;
 
-  display: flex;
+  border: 1px solid #484f58;
+
+  background: #30363d;
+
+  color: #c9d1d9;
+
+  display: inline-flex;
 
   align-items: center;
 
   justify-content: center;
+
+  gap: 0.25rem;
 
   font-size: clamp(0.72rem, 2.4vw, 0.9rem);
 
@@ -667,7 +699,51 @@ body {
 
   user-select: none;
 
-  max-width: 7.5rem;
+  max-width: 8.5rem;
+
+  cursor: pointer;
+
+}
+
+
+
+.bubble-model-pill:hover:not(:disabled) {
+
+  border-color: #58a6ff;
+
+  color: #e6edf3;
+
+}
+
+
+
+.bubble-model-pill:disabled {
+
+  opacity: 0.65;
+
+  cursor: not-allowed;
+
+}
+
+
+
+.bubble-model-pill-busy .bubble-model-pill-icon {
+
+  animation: bubble-model-pulse 1s ease-in-out infinite;
+
+}
+
+
+
+.bubble-model-pill-static {
+
+  cursor: default;
+
+}
+
+
+
+.bubble-model-pill-label {
 
   white-space: nowrap;
 
@@ -675,15 +751,57 @@ body {
 
   text-overflow: ellipsis;
 
+  max-width: 6rem;
+
 }
 
 
 
-.bubble-avatar-agent {
+.bubble-model-pill-icon {
 
-  background: #30363d;
+  font-size: 0.85em;
 
-  color: #c9d1d9;
+  line-height: 1;
+
+  flex-shrink: 0;
+
+}
+
+
+
+@keyframes bubble-model-pulse {
+
+  0%,
+
+  100% {
+
+    opacity: 0.45;
+
+  }
+
+  50% {
+
+    opacity: 1;
+
+  }
+
+}
+
+
+
+.bubble-inline-image {
+
+  display: block;
+
+  max-width: min(100%, 20rem);
+
+  max-height: 12rem;
+
+  object-fit: contain;
+
+  border-radius: 6px;
+
+  margin-bottom: 0.35rem;
 
 }
 
