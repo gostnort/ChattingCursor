@@ -6,7 +6,7 @@ const TTS_CHUNK_LIMIT = 2000;
 
 /** 朗读前去掉 Markdown 符号，避免 TTS 读出星号等 */
 function sanitizeTextForTts(text: string): string {
-  return text.replace(/[*_`]/g, "");
+  return text.replace(/[*_`#/:]/g, "");
 }
 
 
