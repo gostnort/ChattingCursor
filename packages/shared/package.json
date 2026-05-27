@@ -9,6 +9,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./chrome-endpoint": {
+      "types": "./dist/chrome-endpoint.d.ts",
+      "import": "./dist/chrome-endpoint.js"
     }
   },
   "scripts": {

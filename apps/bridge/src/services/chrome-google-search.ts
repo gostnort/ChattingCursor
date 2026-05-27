@@ -1,6 +1,6 @@
 /** 通过 Chrome 远程调试（默认 9222）在 Google 打开搜索页 */
 
-import { resolveChromeEndpoint } from "@chatting-cursor/shared";
+import { resolveChromeEndpoint } from "@chatting-cursor/shared/chrome-endpoint";
 
 const NAVIGATE_TIMEOUT_MS = 15000;
 

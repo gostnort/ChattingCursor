@@ -3,7 +3,8 @@ import { access, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import path from "node:path";
 import { tmpdir } from "node:os";
-import { resolveChromeEndpoint, type CrewRunResponse } from "@chatting-cursor/shared";
+import type { CrewRunResponse } from "@chatting-cursor/shared";
+import { resolveChromeEndpoint } from "@chatting-cursor/shared/chrome-endpoint";
 import { RUN_CREW_SCRIPT, REPO_ROOT, resolveCrewConfigPath } from "./load-crew.js";
 
 

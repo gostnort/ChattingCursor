@@ -34,11 +34,6 @@ export type {
 } from "./schemas.js";
 
 export {
-  DEFAULT_CHROME_DEBUG_ENDPOINT,
-  resolveChromeEndpoint,
-} from "./chrome-endpoint.js";
-
-export {
   agentSpecSchema,
   taskSpecSchema,
   crewSpecSchema,
