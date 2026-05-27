@@ -1,33 +1,15 @@
 # ChattingCursor
 
-A local-first multi-agent chat platform that talks to **Cursor CLI** on your PC. The web UI can run on GitHub Pages while the **Bridge** API stays on your machine. Use a Cloudflare quick tunnel when you want to chat from your phone.
+Local-first chat UI that talks to **Cursor CLI** on your PC. The web app can run on [GitHub Pages](https://gostnort.github.io/ChattingCursor/); the **Bridge** API stays on your machine. Use a Cloudflare quick tunnel when you want to chat from your phone.
 
-## What it does
+## Run (Windows)
 
-- **apps/web** — Vite + React UI (GitHub Pages or local dev server)
-- **apps/bridge** — Node.js API that wraps `cursor-agent`, auth, history, and optional crew hooks
-- **packages/shared** — Shared types and Zod schemas
-- **packages/cli-client** — Cursor CLI wrapper (v1)
-- **packages/orchestrator** — Optional crewAI orchestration and environment checks
-- **packages/evaluator** — Evaluation placeholder
+- **`run.bat`** — starts Bridge, optional local web dev server, Cloudflare quick tunnel, and updates the synced token file. Defaults to **`CURSOR_CLI_MODE=native`** (Windows `cursor-agent`, not WSL).
+- **`shutdown.bat`** — stops Bridge, web dev, and tunnel processes started by `run.bat`.
 
-## Quick start
+First-time setup: run **`install.bat`**, then **`run.bat`**. Step-by-step (English UI paths in Chinese doc): [docs/QUICKSTART.md](docs/QUICKSTART.md) · [docs/readme_chn.md](docs/readme_chn.md).
 
-**Easiest (Windows):** double-click or run `run.bat` from the repo root. That starts Bridge, an optional local web dev server, cloudflared quick tunnel, and keeps the synced token file updated. `run.bat` sets **`CURSOR_CLI_MODE=native`** so Bridge uses the **Windows** `cursor-agent` (not WSL). Set `CURSOR_CLI_MODE=wsl` before launch if you prefer WSL.
-
-**Manual dev (two terminals):**
-
-```powershell
-pnpm install
-pnpm dev:bridge    # Bridge on http://127.0.0.1:4321
-pnpm dev:web       # UI on http://127.0.0.1:43210/ChattingCursor/
-```
-
-Open the web URL, go to **Local → Config**, confirm Bridge port **4321**, then chat.
-
-**GitHub Pages (UI only):** https://gostnort.github.io/ChattingCursor/ — you still need a reachable Bridge URL and today’s token for remote use.
-
-Chinese quickstart with the same sections: [docs/QUICKSTART.md](docs/QUICKSTART.md).
+Open **http://127.0.0.1:43210/ChattingCursor/** → **Local → Config** → confirm Bridge port **4321**.
 
 ## Ports
 
@@ -35,160 +17,25 @@ Chinese quickstart with the same sections: [docs/QUICKSTART.md](docs/QUICKSTART.
 |---------|---------|--------|
 | Bridge | `4321` | `BRIDGE_PORT`, `BRIDGE_HOST` |
 | Web dev | `43210` | Vite; base path `/ChattingCursor/` |
-| Chrome debug (free web search) | `9222` | Bridge opens Google in Chrome; no Kimi API spend |
+| Chrome debug (optional) | `9222` | Free `/websearch` via local Chrome CDP; see [docs/QUICKSTART.md](docs/QUICKSTART.md) |
 
-### Cursor CLI: native vs WSL (Windows)
+## Token file (phone)
 
-| `CURSOR_CLI_MODE` | Behavior |
-|-------------------|----------|
-| `native` (default via `run.bat` / `scripts/run-all.ps1`) | Use Windows `cursor-agent` / `cursor agent` |
-| `wsl` | Run CLI inside WSL Ubuntu |
-| unset on Windows | Same as legacy: try WSL first |
+Bridge writes a small text file (default `%USERPROFILE%\.chattingcursor\chattingcursor-token.txt`, or a path you set under **Local → Config**). Put it in a folder your phone can read (cloud sync). The file contains `datetime`, a 32-character daily `token`, and `publicBridgeUrl` — no salt. When the quick tunnel restarts, copy the updated file to your phone.
 
-Manual dev: `$env:CURSOR_CLI_MODE = "native"` before `pnpm dev:bridge`.
+## Remote access
 
-### Free web search (Chrome, not Kimi)
+`run.bat` uses a temporary `*.trycloudflare.com` URL and refreshes `publicBridgeUrl` in the token file. For tunnel options and ops detail: [docs/CLOUDFLARE_TUNNEL_SETUP.md](docs/CLOUDFLARE_TUNNEL_SETUP.md).
 
-Bridge intercepts web-search intent **before** Cursor CLI runs and opens Google in your local Chrome (CDP port **9222**). This does **not** use Kimi’s paid API search.
+## WSL (alternative on Windows)
 
-**Triggers (chat input):**
-
-- `/websearch your query` or `/google your query`
-- Natural language, e.g. “search the web for …”, “网上搜一下 …”
-
-**Not** the same as local history search (`/search …` or “find our earlier chat about …”).
-
-Choosing model **Kimi** or **auto** in the UI may still enable Kimi API web search inside `cursor-agent`; for **free** search, use the phrases above so Bridge handles it via Chrome.
-
-### Chrome remote debugging (Windows + MCP)
-
-Start Chrome on **Windows** with remote debugging, for example:
-
-```powershell
-& "C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222
-```
-
-On Windows, Bridge and `curl.exe http://127.0.0.1:9222/json/version` should succeed.
-
-**Windows Chrome MCP (Cursor IDE, optional):**
-
-1. Start Chrome with `--remote-debugging-port=9222` (command above).
-2. In `%USERPROFILE%\.cursor\mcp.json`, add **chrome-devtools** pointing at `http://127.0.0.1:9222` (see [.cursor/mcp.json.example](.cursor/mcp.json.example)).
-3. Use **`CURSOR_CLI_MODE=native`** for ChattingCursor (`run.bat` sets this).
-4. In ChattingCursor chat, **`/websearch query`** works without MCP or Kimi — Bridge uses Chrome directly.
-
-**WSL ≠ Windows localhost:** crew Python, `pnpm crew:status`, or Cursor’s **chrome-devtools** MCP running inside WSL cannot reach Chrome at `127.0.0.1:9222` on the Windows host. The repo rewrites `http://127.0.0.1:9222` to the Windows host IP from `/etc/resolv.conf` when it detects WSL. You can also set an explicit URL:
-
-```bash
-# WSL — replace 172.x.x.x with: grep nameserver /etc/resolv.conf | awk '{print $2}'
-export CHROME_DEBUG_ENDPOINT=http://172.x.x.x:9222
-```
-
-For **chrome-devtools MCP** in WSL, point `--browserUrl` at the same Windows host IP (not `127.0.0.1`). See [.cursor/mcp.json.example](.cursor/mcp.json.example).
-
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `CHROME_DEBUG_ENDPOINT` | `http://127.0.0.1:9222` (WSL: auto-rewrite to Windows host) | Chrome CDP HTTP endpoint |
-| `CURSOR_CLI_MODE` | `native` when using `run.bat` | `native` / `windows` = host CLI; `wsl` = WSL |
-
-## Token file (phone setup)
-
-Bridge writes a small text file (default: `%USERPROFILE%\.chattingcursor\chattingcursor-token.txt`, or a path you set in **Local → Config**). Put that file in a folder your phone can read (e.g. cloud sync).
-
-**You must configure where the token file is saved locally.** Use cloud sync (OneDrive, iCloud Drive, etc.) or another channel your phone can read. The project does not provide automatic email delivery. If you skip sync, when the temporary tunnel restarts you will not receive the updated tunnel URL and token on your phone.
-
-**The synced file is minimal and safe to share with your phone:**
-
-```text
-datetime: 2026-05-27T14:30:00.000Z
-token: <32-character daily token>
-publicBridgeUrl: https://xxxx.trycloudflare.com
-```
-
-- **No salt** — derivation salt lives only on the PC under `~/.chattingcursor/token-meta-*.json`, not in the synced file.
-- **`datetime`** — ISO timestamp of the last token write (e.g. tunnel reconnect / regenerate).
-- **Token length** — 32 characters (regenerating or changing salt invalidates older tokens).
-
-On the phone: open the GitHub Pages app → **Local → Config** → paste `publicBridgeUrl` and `token` from the file.
-
-Legacy files may still contain `generatedAt:`, `date:`, or `salt:`; Bridge migrates on read (salt moves server-side, file is rewritten to the three fields above).
-
-## Cloudflare tunnel
-
-`run.bat` / `scripts/run-all.ps1` start a **temporary** `*.trycloudflare.com` URL, update `publicBridgeUrl` in the token file, and restart on health failure.
-
-- **Periodic check:** every **5 minutes**, `GET {publicBridgeUrl}/health`.
-- **Caveat:** quick tunnel URLs change when the tunnel restarts; re-copy the synced file to your phone.
-
-Full operational comparison (temporary vs fixed named tunnel): [docs/CLOUDFLARE_TUNNEL_SETUP.md](docs/CLOUDFLARE_TUNNEL_SETUP.md).
-
-## Optional: quality watch
-
-```powershell
-.\scripts\run-all.ps1 -WithQualityWatch
-# or
-pnpm quality:watch
-```
-
-Runs typecheck/lint and a crew dry-run in the background. Not required for normal chat.
-
-## Optional: crewAI
-
-Python crew tooling is optional. On branches such as `with-crewai`, use `pnpm crew:status` / `pnpm crew:run` after `pnpm crew:setup`. **main** may omit the `crewAI/` reference tree via `.gitignore`.
-
-See [docs/QUICKSTART.md](docs/QUICKSTART.md) for crew commands and local-mode API tables.
+Default is **native** Windows CLI (`run.bat` sets this). To run `cursor-agent` inside WSL instead, see [docs/WSL_SETUP.md](docs/WSL_SETUP.md) (install, `CURSOR_CLI_MODE=wsl`, Chrome on the Windows host for port 9222).
 
 ## Prerequisites
 
 - Node.js >= 20, pnpm >= 9
-- Windows: `run.bat` defaults to **native** CLI; WSL + Ubuntu optional (`CURSOR_CLI_MODE=wsl`)
-- [Cursor CLI](https://cursor.com/docs/cli) installed and logged in (`cursor-agent login`)
-- **cloudflared** for remote quick tunnel (install script can help)
-
-## Environment variables (Bridge)
-
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `BRIDGE_HOST` | `127.0.0.1` | Listen address |
-| `BRIDGE_PORT` | `4321` | Listen port |
-| `BRIDGE_PUBLIC_URL` | `http://127.0.0.1:4321` | Advertised public URL |
-| `BRIDGE_CORS_ORIGINS` | see `.env.example` | Allowed web origins |
-| `CHATTINGCURSOR_TOKEN_SYNC_DIR` | `~/.chattingcursor` | Token file directory |
-| `CHROME_DEBUG_ENDPOINT` | `http://127.0.0.1:9222` | Chrome CDP URL; WSL auto-rewrites localhost to Windows host |
-| `CURSOR_CLI_MODE` | `native` via `run.bat` | `native` = Windows CLI; `wsl` = WSL CLI |
-
-## Project layout
-
-```
-ChattingCursor/
-├── apps/web/           # Frontend (Vite; dev server, Pages build)
-├── apps/bridge/        # Bridge API (TypeScript source in src/)
-├── packages/shared/
-├── packages/cli-client/
-├── packages/orchestrator/
-├── packages/evaluator/
-├── configs/crews/      # Crew YAML examples (optional; see below)
-├── scripts/            # run-all.ps1, install, tunnel helpers
-└── run.bat             # One-click Windows startup
-```
-
-### `configs/` (crew-only)
-
-Everything under **`configs/`** is for **optional crewAI** workflows (`configs/crews/*.yaml`, example inputs). The core chat app (web + bridge + CLI) does **not** need these files at runtime.
-
-- **GitHub Pages / main upload:** the static UI build does not bundle `configs/`; you do not need them on Pages.
-- **Keep in repo:** useful on `with-crewai` for `pnpm crew:run`, Bridge `/crews/*`, and `packages/orchestrator` loading YAML paths.
-
-Do not delete without checking your branch — crew examples and dry-run scripts depend on this folder.
-
-### Build output (`dist/`) — not committed
-
-Root `.gitignore` ignores **`dist/`** everywhere. For Bridge, `pnpm build` in `apps/bridge` runs `tsc` and writes **`apps/bridge/dist/`** (e.g. `dist/index.js`). That folder is **generated locally**, same as other packages’ `dist/` after build.
-
-- **Dev:** `pnpm dev:bridge` uses `tsx` on `src/` (no commit needed).
-- **Production-style start:** `pnpm build` then `node apps/bridge/dist/index.js` (or package `start` script).
-
-Do not commit `dist/` unless the project changes convention; CI and clones run `pnpm build` as needed.
+- [Cursor CLI](https://cursor.com/docs/cli) installed and logged in
+- **cloudflared** for the quick tunnel (`install.bat` can help)
 
 ## License
 
