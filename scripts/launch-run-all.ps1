@@ -4,7 +4,7 @@
   [string[]]$Remaining
 )
 
-# 在隐藏窗口中启动 run-all.ps1，轮询日志直到启动完成或失败，然后退出（不阻塞控制台）。
+# 后台启动并监控 run-all.ps1，轮询日志直到启动完成或失败，然后退出（不占用控制台窗口）
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot "Resolve-CursorCliMode.ps1")
@@ -22,6 +22,28 @@ if ($Remaining) {
 foreach ($path in @($LogPath, $ErrLogPath)) {
   if (Test-Path $path) {
     Remove-Item $path -Force -ErrorAction SilentlyContinue
+  }
+}
+function Test-LocalServicesHealthy {
+  param(
+    [int]$BridgePort = 4321,
+    [int]$WebPort = 43210,
+    [switch]$RequireWeb
+  )
+  try {
+    $null = Invoke-RestMethod -Uri "http://127.0.0.1:$BridgePort/health" -Method Get -TimeoutSec 3 -ErrorAction Stop
+  } catch {
+    return $false
+  }
+  if (-not $RequireWeb) {
+    return $true
+  }
+  $webUrl = "http://127.0.0.1:$WebPort/ChattingCursor/"
+  try {
+    $resp = Invoke-WebRequest -Uri $webUrl -Method Get -TimeoutSec 3 -UseBasicParsing -ErrorAction Stop
+    return ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 500)
+  } catch {
+    return $false
   }
 }
 $argList = @(
@@ -42,6 +64,7 @@ Write-Host "Err: $ErrLogPath"
 $deadline = (Get-Date).AddSeconds(150)
 $startupOk = $false
 $startupFail = $false
+$requireWeb = -not $NoWeb
 while ((Get-Date) -lt $deadline) {
   if ($proc.HasExited) {
     break
@@ -56,12 +79,13 @@ while ((Get-Date) -lt $deadline) {
       $startupOk = $true
       break
     }
-    if ($tail -match '\[FAIL\]' -and $tail -notmatch 'Public health not confirmed yet') {
-      $startupFail = $true
-      break
-    }
   }
   Start-Sleep -Milliseconds 500
+}
+if (-not $startupOk) {
+  if (Test-LocalServicesHealthy -RequireWeb:$requireWeb) {
+    $startupOk = $true
+  }
 }
 function Write-RunAllErrTail {
   if (-not (Test-Path $ErrLogPath)) {
@@ -88,11 +112,15 @@ if ($proc.HasExited -and $proc.ExitCode -eq 2) {
   Write-RunAllErrTail
   exit 2
 }
-if ($startupFail -or ($proc.HasExited -and $proc.ExitCode -ne 0)) {
-  $code = if ($proc.HasExited) { $proc.ExitCode } else { 1 }
-  Write-Host "[FAIL] Startup did not finish successfully (exit $code). See log: $LogPath"
+if ($startupFail) {
+  Write-Host "[FAIL] Startup did not finish successfully. See log: $LogPath"
   Write-RunAllErrTail
-  exit $code
+  exit 2
+}
+if ($proc.HasExited -and $proc.ExitCode -ne 0) {
+  Write-Host "[FAIL] Startup did not finish successfully (exit $($proc.ExitCode)). See log: $LogPath"
+  Write-RunAllErrTail
+  exit $proc.ExitCode
 }
 Write-Host "[OK] Background launcher is still starting (PID $($proc.Id))."
 Write-Host "     Watch the log for ""Startup flow complete"": $LogPath"
