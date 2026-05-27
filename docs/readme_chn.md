@@ -13,7 +13,7 @@
 
 ## 快速开始
 
-**最省事（Windows）：** 在仓库根目录双击或运行 `run.bat`，自动启动 Bridge、可选本地 Web、`cloudflared` 快速隧道，并维护同步用的 token 文件。
+**最省事（Windows）：** 在仓库根目录双击或运行 `run.bat`，自动启动 Bridge、可选本地 Web、`cloudflared` 快速隧道，并维护同步用的 token 文件。`run.bat` 默认设置 **`CURSOR_CLI_MODE=native`**（本机 `cursor-agent`，不走 WSL）。
 
 **手动开发（两个终端）：**
 
@@ -36,7 +36,7 @@ pnpm dev:web       # http://127.0.0.1:43210/ChattingCursor/
 |------|------|------|
 | Bridge | `4321` | `BRIDGE_PORT`、`BRIDGE_HOST` |
 | Web 开发 | `43210` | Vite，base `/ChattingCursor/` |
-| Chrome 调试（可选联网搜索） | `9222` | 非 Kimi「搜索网页」意图时使用 |
+| Chrome 调试（免费联网搜索） | `9222` | Bridge 用 CDP 打开 Google；`/websearch`、网上搜…，不经 Kimi API |
 
 ## Token 文件（手机配置）
 
@@ -95,7 +95,7 @@ pnpm crew:run
 ## 前置条件
 
 - Node.js >= 20，pnpm >= 9
-- Windows 建议 WSL + Ubuntu，与 CLI 行为一致
+- Windows：`run.bat` 默认 **native** 本机 CLI；可选 WSL（`CURSOR_CLI_MODE=wsl`）
 - 已安装并登录 [Cursor CLI](https://cursor.com/docs/cli)（`cursor-agent login`）
 - 远程快速隧道需 **cloudflared**（安装脚本可协助）
 
