@@ -3,6 +3,7 @@ import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
 import { probeCursorCli } from "@chatting-cursor/cli-client";
 import { loadConfig, isOriginAllowed } from "./config.js";
+import { inspectChromeEndpoint } from "./services/chrome-google-search.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerChatRoutes } from "./routes/chat.js";
 import { registerCrewRoutes } from "./routes/crews.js";
@@ -27,10 +28,15 @@ async function main(): Promise<void> {
     },
   });
   app.get("/health", async () => {
-    const cli = await probeCursorCli();
+    const [cli, chrome] = await Promise.all([
+      probeCursorCli(),
+      inspectChromeEndpoint(),
+    ]);
     return {
       status: "ok",
       cli,
+      chrome,
+      webSearchAvailable: chrome.available,
       publicBridgeUrl: tokenRotationService.getPublicBridgeUrl(),
       timestamp: new Date().toISOString(),
     };

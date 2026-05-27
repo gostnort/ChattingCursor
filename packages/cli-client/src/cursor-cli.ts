@@ -9,9 +9,28 @@ import type { CursorCliRunOptions, CursorCliRunResult } from "./types.js";
 const DEFAULT_TIMEOUT_MS = 600_000;
 
 
+export type CursorCliTransport = "native" | "wsl" | "none";
+
+
+export interface CursorCliProbeResult {
+  available: boolean;
+  mode: CursorCliTransport;
+  requestedMode?: string;
+  command?: string;
+  message?: string;
+  fallbackFromNative?: boolean;
+}
+
+
+/** 读取 CURSOR_CLI_MODE 环境变量（小写、去空白） */
+function getConfiguredCliMode(): string {
+  return (process.env.CURSOR_CLI_MODE ?? "").trim().toLowerCase();
+}
+
+
 /** 是否强制或允许通过 WSL 调用 Agent CLI */
 function shouldTryWslCli(): boolean {
-  const mode = (process.env.CURSOR_CLI_MODE ?? "").trim().toLowerCase();
+  const mode = getConfiguredCliMode();
   if (mode === "wsl") {
     return true;
   }
@@ -19,6 +38,22 @@ function shouldTryWslCli(): boolean {
     return false;
   }
   return process.platform === "win32";
+}
+
+
+/** Windows 上常见的 cursor-agent 安装路径（PATH 未配置时） */
+function getWindowsCursorAgentCandidates(): string[] {
+  if (process.platform !== "win32") {
+    return [];
+  }
+  const localAppData = process.env.LOCALAPPDATA ?? "";
+  const userProfile = process.env.USERPROFILE ?? process.env.HOME ?? "";
+  const candidates = [
+    path.join(localAppData, "Programs", "cursor", "resources", "app", "bin", "cursor-agent.exe"),
+    path.join(userProfile, ".cursor", "bin", "cursor-agent.exe"),
+    path.join(localAppData, "cursor-agent", "cursor-agent.exe"),
+  ];
+  return candidates.filter((candidate) => candidate.length > 0);
 }
 
 
@@ -260,8 +295,8 @@ async function resolveWslCursorAgentExecutable(): Promise<string | null> {
 
 
 /** 通过 WSL 解析 cursor-agent 命令 */
-async function resolveWslCommand(): Promise<{ command: string; argsPrefix: string[] } | null> {
-  if (!shouldTryWslCli()) {
+async function resolveWslCommand(force = false): Promise<{ command: string; argsPrefix: string[] } | null> {
+  if (!force && !shouldTryWslCli()) {
     return null;
   }
   const executable = await resolveWslCursorAgentExecutable();
@@ -281,6 +316,10 @@ async function resolveWslCommand(): Promise<{ command: string; argsPrefix: strin
 async function resolveNativeCommand(): Promise<{ command: string; argsPrefix: string[]; hasIdeLauncher: boolean } | null> {
   const candidates: Array<{ command: string; argsPrefix: string[] }> = [
     { command: "cursor-agent", argsPrefix: [] },
+    ...getWindowsCursorAgentCandidates().map((executable) => ({
+      command: executable,
+      argsPrefix: [] as string[],
+    })),
     { command: "cursor", argsPrefix: ["agent"] },
   ];
   let hasIdeLauncher = false;
@@ -301,17 +340,42 @@ async function resolveNativeCommand(): Promise<{ command: string; argsPrefix: st
 
 
 /** 解析默认 Cursor CLI 命令 */
-async function resolveDefaultCommand(): Promise<{ command: string; argsPrefix: string[] }> {
-  const mode = (process.env.CURSOR_CLI_MODE ?? "").trim().toLowerCase();
+async function resolveDefaultCommand(): Promise<{
+  command: string;
+  argsPrefix: string[];
+  transport: CursorCliTransport;
+  fallbackFromNative?: boolean;
+}> {
+  const mode = getConfiguredCliMode();
   if (mode !== "wsl") {
     const native = await resolveNativeCommand();
-    if (native && native.command) {
-      return { command: native.command, argsPrefix: native.argsPrefix };
+    if (native?.command) {
+      return {
+        command: native.command,
+        argsPrefix: native.argsPrefix,
+        transport: "native",
+      };
+    }
+    if (mode === "native" || mode === "windows") {
+      const wsl = await resolveWslCommand(true);
+      if (wsl) {
+        return { ...wsl, transport: "wsl", fallbackFromNative: true };
+      }
     }
   }
   const wsl = await resolveWslCommand();
   if (wsl) {
-    return wsl;
+    return { ...wsl, transport: "wsl" };
+  }
+  if (mode !== "wsl") {
+    const nativeRetry = await resolveNativeCommand();
+    if (nativeRetry?.command) {
+      return {
+        command: nativeRetry.command,
+        argsPrefix: nativeRetry.argsPrefix,
+        transport: "native",
+      };
+    }
   }
   const nativeFallback = await resolveNativeCommand();
   const hasIdeLauncher = Boolean(nativeFallback?.hasIdeLauncher);
@@ -554,13 +618,29 @@ export async function listCursorModels(): Promise<{
 
 
 /** 探测 Cursor CLI 是否可用 */
-export async function probeCursorCli(): Promise<{ available: boolean; command?: string; message?: string }> {
+export async function probeCursorCli(): Promise<CursorCliProbeResult> {
+  const requestedMode = getConfiguredCliMode() || undefined;
   try {
     const resolved = await resolveDefaultCommand();
     const label = resolved.command === "wsl" ? "wsl cursor-agent" : resolved.command;
-    return { available: true, command: label };
+    const message = resolved.fallbackFromNative
+      ? "CURSOR_CLI_MODE=native 但本机未找到可用 cursor-agent，已回退到 WSL。"
+      : undefined;
+    return {
+      available: true,
+      mode: resolved.transport,
+      requestedMode,
+      command: label,
+      message,
+      fallbackFromNative: resolved.fallbackFromNative,
+    };
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return { available: false, message };
+    const probeMessage = error instanceof Error ? error.message : String(error);
+    return {
+      available: false,
+      mode: "none",
+      requestedMode,
+      message: probeMessage,
+    };
   }
 }

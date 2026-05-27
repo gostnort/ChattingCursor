@@ -26,9 +26,19 @@ export interface BridgeHealthResponse {
   status: string;
   cli: {
     available: boolean;
+    mode: "native" | "wsl" | "none";
+    requestedMode?: string;
     command?: string;
     message?: string;
+    fallbackFromNative?: boolean;
   };
+  chrome?: {
+    available: boolean;
+    endpoint: string;
+    pages?: number;
+    message?: string;
+  };
+  webSearchAvailable?: boolean;
   publicBridgeUrl?: string;
   timestamp: string;
 }

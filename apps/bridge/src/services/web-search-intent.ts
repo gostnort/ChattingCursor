@@ -1,7 +1,11 @@
+const WEBSEARCH_PREFIX = /^\/websearch\s+/i;
+const GOOGLE_PREFIX = /^\/google\s+/i;
+
+
 /** 判断用户是否在请求联网搜索或核实（非本地聊天历史） */
 export function hasWebSearchIntent(prompt: string): boolean {
   const trimmed = prompt.trim();
-  if (trimmed.startsWith("/websearch ") || trimmed.startsWith("/google ")) {
+  if (WEBSEARCH_PREFIX.test(trimmed) || GOOGLE_PREFIX.test(trimmed)) {
     return true;
   }
   if (/^\/search\s+/i.test(trimmed)) {
@@ -26,11 +30,13 @@ export function hasWebSearchIntent(prompt: string): boolean {
 /** 从自然语言或 /websearch、/google 指令中提取联网搜索关键词 */
 export function extractWebSearchQuery(prompt: string): string {
   const trimmed = prompt.trim();
-  if (trimmed.startsWith("/websearch ")) {
-    return trimmed.slice("/websearch ".length).trim();
+  const websearchMatch = WEBSEARCH_PREFIX.exec(trimmed);
+  if (websearchMatch) {
+    return trimmed.slice(websearchMatch[0].length).trim();
   }
-  if (trimmed.startsWith("/google ")) {
-    return trimmed.slice("/google ".length).trim();
+  const googleMatch = GOOGLE_PREFIX.exec(trimmed);
+  if (googleMatch) {
+    return trimmed.slice(googleMatch[0].length).trim();
   }
   const topicPatterns = [
     /(?:帮我|请)?(?:搜索|搜|查)(?:一下|下)?(?:网页|网上|网络|互联网|在线)?[：:]\s*(.+)/,

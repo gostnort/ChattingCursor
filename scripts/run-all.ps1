@@ -31,10 +31,8 @@ try {
 }
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
-# Windows 一键启动默认走本机 cursor-agent（不经 WSL）；手动开发可设 CURSOR_CLI_MODE=wsl 覆盖
-if (-not $env:CURSOR_CLI_MODE) {
-  $env:CURSOR_CLI_MODE = "native"
-}
+. (Join-Path $PSScriptRoot "Resolve-CursorCliMode.ps1")
+Initialize-CursorCliMode
 
 $script:BridgeProcess = $null
 $script:BridgeOwned = $false

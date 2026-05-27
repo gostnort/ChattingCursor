@@ -788,7 +788,7 @@ export function ConfigSubPage({
               联网搜索默认走本机 Chrome（端口 9222），无需 Kimi 付费 API。聊天框使用{" "}
               <code>/websearch 关键词</code>、<code>/google 关键词</code> 或「网上搜一下…」；
               本地历史用 <code>/search 关键词</code> 或自然语言查找近 7 天记录。
-              <code>run.bat</code> 已设置 <code>CURSOR_CLI_MODE=native</code>（本机 CLI，非 WSL）。
+              <code>run.bat</code> 会在检测到本机 <code>cursor-agent</code> 时优先使用 native，否则尝试 WSL。
             </p>
           </section>
 

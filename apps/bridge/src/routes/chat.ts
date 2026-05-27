@@ -228,17 +228,20 @@ export async function registerChatRoutes(app: FastifyInstance): Promise<void> {
     if (!parsed.success) {
       return reply.status(400).send({ error: "invalid_request", details: parsed.error.flatten() });
     }
-    const cli = await probeCursorCli();
-    if (!cli.available) {
-      return reply.status(503).send({
-        error: "cli_unavailable",
-        message: cli.message ?? "Cursor Agent CLI 不可用",
-      });
+    const { prompt, model, modelLabel, workspace } = parsed.data;
+    const needsCursorCli = !hasHistorySearchIntent(prompt) && !hasWebSearchIntent(prompt);
+    if (needsCursorCli) {
+      const cli = await probeCursorCli();
+      if (!cli.available) {
+        return reply.status(503).send({
+          error: "cli_unavailable",
+          message: cli.message ?? "Cursor Agent CLI 不可用",
+        });
+      }
     }
     const session = sessionStore.getOrCreate(parsed.data.sessionId);
     const runId = uuidv4();
     runStore.create(runId);
-    const { prompt, model, modelLabel, workspace } = parsed.data;
     const startedAt = new Date().toISOString();
     sessionStore.setModel(session.sessionId, model);
     sessionStore.appendMessage(session.sessionId, {

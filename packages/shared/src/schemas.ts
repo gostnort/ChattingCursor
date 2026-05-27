@@ -218,8 +218,11 @@ export const localConfigResponseSchema = z.object({
   modelsSource: z.enum(["cli", "fallback"]),
   cli: z.object({
     available: z.boolean(),
+    mode: z.enum(["native", "wsl", "none"]),
+    requestedMode: z.string().optional(),
     command: z.string().optional(),
     message: z.string().optional(),
+    fallbackFromNative: z.boolean().optional(),
   }),
   timestamp: z.string().datetime(),
 });
