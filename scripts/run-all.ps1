@@ -832,7 +832,8 @@ function Start-TunnelProcess {
   $script:TunnelProcess = Start-Process -FilePath $cloudflaredExe `
     -ArgumentList @("tunnel", "--url", "http://127.0.0.1:$BridgePort") `
     -RedirectStandardError $script:TunnelLogPath `
-    -NoNewWindow -PassThru
+    -WindowStyle Hidden `
+    -PassThru
   Set-ServicePid -Key "cloudflared" -ProcessId $script:TunnelProcess.Id
   Write-Host "cloudflared: $cloudflaredExe (PID $($script:TunnelProcess.Id))"
   Write-Host "Tunnel log: $($script:TunnelLogPath)"
