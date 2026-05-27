@@ -4,6 +4,12 @@ import { useCallback, useRef, useState } from "react";
 const TTS_CHUNK_LIMIT = 2000;
 
 
+/** 朗读前去掉 Markdown 符号，避免 TTS 读出星号等 */
+function sanitizeTextForTts(text: string): string {
+  return text.replace(/[*_`]/g, "");
+}
+
+
 interface TtsPlayState {
   key: string;
   fullText: string;
@@ -108,7 +114,8 @@ export function useSpeech() {
 
 
   const toggleSpeak = useCallback((key: string, text: string, lang = "zh-CN"): void => {
-    if (!text.trim() || typeof window === "undefined" || !window.speechSynthesis) {
+    const ttsText = sanitizeTextForTts(text);
+    if (!ttsText.trim() || typeof window === "undefined" || !window.speechSynthesis) {
       return;
     }
     if (speakingKey === key) {
@@ -121,7 +128,7 @@ export function useSpeech() {
       : 0;
     playStateRef.current = {
       key,
-      fullText: text,
+      fullText: ttsText,
       charOffset: resumeFromSameMessage,
     };
     resumeOffsetRef.current = resumeFromSameMessage;

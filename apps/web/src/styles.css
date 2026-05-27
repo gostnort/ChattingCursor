@@ -1021,6 +1021,104 @@ body {
 }
 
 
+.bubble-text ul,
+
+.bubble-text ol {
+
+  padding-left: 1.35rem;
+
+}
+
+
+.bubble-text li + li {
+
+  margin-top: 0.2rem;
+
+}
+
+
+.bubble-text blockquote {
+
+  padding-left: 0.75rem;
+
+  border-left: 3px solid rgba(255, 255, 255, 0.25);
+
+}
+
+
+@media (max-width: 768px) {
+
+  .bubble-text {
+
+    line-height: 1.45;
+
+  }
+
+
+  .bubble-text p,
+
+  .bubble-text ul,
+
+  .bubble-text ol,
+
+  .bubble-text pre,
+
+  .bubble-text table,
+
+  .bubble-text blockquote {
+
+    margin: 0 0 0.35rem;
+
+  }
+
+
+  .bubble-text h1,
+
+  .bubble-text h2,
+
+  .bubble-text h3,
+
+  .bubble-text h4 {
+
+    margin: 0 0 0.35rem;
+
+  }
+
+
+  .bubble-text ul,
+
+  .bubble-text ol {
+
+    padding-left: 1.1rem;
+
+  }
+
+
+  .bubble-text li + li {
+
+    margin-top: 0.1rem;
+
+  }
+
+
+  .bubble-text blockquote {
+
+    padding-left: 0.55rem;
+
+  }
+
+
+  .bubble-text pre {
+
+    padding: 0.5rem;
+
+    margin-bottom: 0.35rem;
+
+  }
+
+}
+
+
 
 .bubble-tts {
 
