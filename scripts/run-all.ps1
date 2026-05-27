@@ -658,7 +658,7 @@ function Read-TunnelLogNewLines {
 }
 
 
-锘縡unction Show-BridgeStartupLog {
+function Show-BridgeStartupLog {
   if (-not $script:BridgeLogPath -or -not (Test-Path $script:BridgeLogPath)) {
     return
   }
@@ -763,7 +763,7 @@ function Test-BridgeHealthy {
 }
 
 
-锘縡unction Start-BridgeProcess {
+function Start-BridgeProcess {
   # Windows: pnpm.cmd dev; log file helps when build fails under Hidden window
   $env:CHATTINGCURSOR_TOKEN_SYNC_DIR = $TokenSyncDir
   $env:BRIDGE_PUBLIC_URL = "http://127.0.0.1:$BridgePort"
