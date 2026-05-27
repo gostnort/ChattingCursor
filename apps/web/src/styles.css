@@ -589,6 +589,14 @@ body {
 
 
 
+.bubble-row-focused .bubble {
+
+  box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.72);
+
+}
+
+
+
 .bubble-row-user {
 
   flex-direction: row;

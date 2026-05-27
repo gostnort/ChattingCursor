@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import type { ChatMessage, ModelInfo } from "@chatting-cursor/shared";
 import {
   createChatSession,
@@ -12,6 +12,7 @@ import { clearChatState, loadChatState, saveChatState } from "../chatPersistence
 import { isLocalBridgeUrl } from "../bridgeSettings";
 import { useSpeech } from "../hooks/useSpeech";
 import { playNotificationSound } from "../utils/notificationSound";
+import { isEditableFocusedTarget, selectElementText } from "../utils/selectBubbleText";
 import { MessageBubble } from "./MessageBubble";
 
 
@@ -130,6 +131,7 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
     () => restoredState?.selectedModel ?? localStorage.getItem(MODEL_STORAGE_KEY) ?? "",
   );
   const [sessionId, setSessionId] = useState<string | null>(() => restoredState?.sessionId ?? null);
+  const [focusedMessageId, setFocusedMessageId] = useState<string | null>(null);
   const assistantBufferRef = useRef("");
   const stderrBufferRef = useRef("");
   const currentAssistantLabelRef = useRef("Agent");
@@ -265,6 +267,41 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
   }, [input, resizeComposer]);
 
 
+  useEffect(() => {
+    const handleSelectAll = (event: KeyboardEvent): void => {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "a") {
+        return;
+      }
+      if (isEditableFocusedTarget(event.target)) {
+        return;
+      }
+      if (!focusedMessageId) {
+        return;
+      }
+      const bubbleText = document.querySelector<HTMLElement>(
+        `[data-message-id="${focusedMessageId}"] .bubble-text`,
+      );
+      if (!bubbleText) {
+        return;
+      }
+      event.preventDefault();
+      selectElementText(bubbleText);
+    };
+    document.addEventListener("keydown", handleSelectAll, true);
+    return () => document.removeEventListener("keydown", handleSelectAll, true);
+  }, [focusedMessageId]);
+
+
+  const handleMessagesPointerDown = (event: PointerEvent<HTMLDivElement>): void => {
+    const row = (event.target as HTMLElement).closest<HTMLElement>("[data-message-id]");
+    if (row?.dataset.messageId) {
+      setFocusedMessageId(row.dataset.messageId);
+      return;
+    }
+    setFocusedMessageId(null);
+  };
+
+
   const handleModelChange = (value: string): void => {
     setSelectedModel(value);
     localStorage.setItem(MODEL_STORAGE_KEY, value);
@@ -281,6 +318,7 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
     setMessages([]);
     setIsSending(false);
     setIsThinking(false);
+    setFocusedMessageId(null);
   };
 
 
@@ -506,7 +544,7 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
             当前 Bridge URL 不是本机地址。请先在“本地 → 配置”里输入当天口令，再开始聊天。
           </p>
         )}
-        <div className="messages">
+        <div className="messages" onPointerDown={handleMessagesPointerDown}>
           {messages.map((message) => (
             <MessageBubble
               key={message.id}
@@ -514,6 +552,7 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
               onSpeakToggle={toggleSpeak}
               isSpeaking={speakingKey === message.id}
               agentLabel={message.modelLabel || selectedModelLabel}
+              isFocused={focusedMessageId === message.id}
             />
           ))}
           {showTypingIndicator && (

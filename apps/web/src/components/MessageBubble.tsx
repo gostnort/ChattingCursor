@@ -8,17 +8,21 @@ interface MessageBubbleProps {
   onSpeakToggle: (key: string, text: string) => void;
   isSpeaking: boolean;
   agentLabel?: string;
+  isFocused?: boolean;
 }
 
 
 /** 微信风格单条聊天气泡 */
-export function MessageBubble({ message, onSpeakToggle, isSpeaking, agentLabel = "Agent" }: MessageBubbleProps) {
+export function MessageBubble({ message, onSpeakToggle, isSpeaking, agentLabel = "Agent", isFocused = false }: MessageBubbleProps) {
   const isUser = message.role === "user";
   const label = isUser ? "" : agentLabel;
 
 
   return (
-    <div className={`bubble-row bubble-row-${message.role}`}>
+    <div
+      className={`bubble-row bubble-row-${message.role}${isFocused ? " bubble-row-focused" : ""}`}
+      data-message-id={message.id}
+    >
       {!isUser && (
         <div className="bubble-side">
           <button
