@@ -1,8 +1,16 @@
-/** 通过 Chrome 远程调试（默认 9222）在 Google 打开搜索页 */
+/** 通过 Chrome 远程调试（默认 9222）在 Google 打开搜索页并摘录 SERP */
 
 import { resolveBridgeChromeEndpoint } from "@chatting-cursor/shared/chrome-endpoint";
+import {
+  GOOGLE_SERP_EXTRACT_EXPRESSION,
+  type GoogleSerpItem,
+  parseGoogleSerpEvaluateValue,
+} from "./google-serp-parse.js";
+import { maybeSummarizeWebSearchWithSdk } from "./web-search-summarize.js";
 
 const NAVIGATE_TIMEOUT_MS = 15000;
+const CDP_SESSION_TIMEOUT_MS = 20000;
+const EXCERPT_MAX_CHARS = 8000;
 
 
 export interface ChromeEndpointStatus {
@@ -20,6 +28,9 @@ export interface ChromeGoogleSearchResult {
   pageUrl?: string;
   title?: string;
   excerpt?: string;
+  serpItems?: GoogleSerpItem[];
+  block?: "consent" | "captcha" | null;
+  aiSummary?: string;
   message?: string;
 }
 
@@ -69,7 +80,7 @@ export async function inspectChromeEndpoint(): Promise<ChromeEndpointStatus> {
 }
 
 
-/** 在 Chrome 新标签页打开 Google 搜索，并尝试读取标题与正文摘录 */
+/** 在 Chrome 新标签页打开 Google 搜索，等待加载并摘录 SERP */
 export async function openGoogleSearchInChrome(query: string): Promise<ChromeGoogleSearchResult> {
   const endpoint = resolveBridgeChromeEndpoint();
   const searchUrl = buildGoogleSearchUrl(query);
@@ -85,16 +96,32 @@ export async function openGoogleSearchInChrome(query: string): Promise<ChromeGoo
   try {
     const created = await openTab(endpoint, searchUrl);
     const targetId = typeof created.id === "string" ? created.id : "";
-    const pageUrl = typeof created.url === "string" ? created.url : searchUrl;
-    await waitForPageLoad(endpoint, targetId, searchUrl);
-    const snapshot = await readPageSnapshot(endpoint, targetId);
+    const wsUrl = await resolveTargetWebSocket(endpoint, targetId);
+    if (!wsUrl) {
+      return {
+        ok: false,
+        endpoint,
+        searchUrl,
+        message: "已打开标签页，但无法获取 CDP WebSocket（无法导航或摘录）。",
+      };
+    }
+    const snapshot = await captureGoogleSerpViaCdp(wsUrl, searchUrl);
+    const structuredBullets = snapshot.serpItems
+      ?.map((item) => `- ${item.title}${item.snippet ? `: ${item.snippet.slice(0, 120)}` : ""}`)
+      .join("\n") ?? "";
+    const aiSummary = snapshot.block
+      ? undefined
+      : await maybeSummarizeWebSearchWithSdk(query, snapshot.excerpt ?? "", structuredBullets);
     return {
       ok: true,
       endpoint,
       searchUrl,
-      pageUrl: snapshot.url ?? pageUrl,
+      pageUrl: snapshot.url,
       title: snapshot.title,
       excerpt: snapshot.excerpt,
+      serpItems: snapshot.serpItems,
+      block: snapshot.block,
+      aiSummary,
       message: snapshot.message,
     };
   } catch (error: unknown) {
@@ -126,16 +153,17 @@ async function openTab(endpoint: string, url: string): Promise<Record<string, un
 }
 
 
-async function waitForPageLoad(endpoint: string, targetId: string, expectedUrl: string): Promise<void> {
+async function resolveTargetWebSocket(endpoint: string, targetId: string): Promise<string> {
   const deadline = Date.now() + NAVIGATE_TIMEOUT_MS;
   while (Date.now() < deadline) {
     const target = await fetchTarget(endpoint, targetId);
-    const url = typeof target?.url === "string" ? target.url : "";
-    if (url && url !== "about:blank" && (url.includes("google.") || url.startsWith(expectedUrl.split("?")[0] ?? ""))) {
-      return;
+    const wsUrl = typeof target?.webSocketDebuggerUrl === "string" ? target.webSocketDebuggerUrl : "";
+    if (wsUrl) {
+      return wsUrl;
     }
-    await sleep(400);
+    await sleep(300);
   }
+  return "";
 }
 
 
@@ -159,22 +187,17 @@ async function fetchTarget(endpoint: string, targetId: string): Promise<Record<s
 }
 
 
-async function readPageSnapshot(
-  endpoint: string,
-  targetId: string,
-): Promise<{ url?: string; title?: string; excerpt?: string; message?: string }> {
-  const target = await fetchTarget(endpoint, targetId);
-  const wsUrl = typeof target?.webSocketDebuggerUrl === "string" ? target.webSocketDebuggerUrl : "";
-  if (!wsUrl) {
-    return { message: "已打开标签页，但无法读取页面摘录（缺少 WebSocket 调试地址）。" };
-  }
-  return readSnapshotViaCdp(wsUrl);
+interface CdpSerpCapture {
+  url?: string;
+  title?: string;
+  excerpt?: string;
+  serpItems?: GoogleSerpItem[];
+  block?: "consent" | "captcha" | null;
+  message?: string;
 }
 
 
-async function readSnapshotViaCdp(
-  webSocketDebuggerUrl: string,
-): Promise<{ url?: string; title?: string; excerpt?: string; message?: string }> {
+async function captureGoogleSerpViaCdp(webSocketDebuggerUrl: string, searchUrl: string): Promise<CdpSerpCapture> {
   const WebSocketCtor = globalThis.WebSocket as (typeof WebSocket | undefined);
   if (!WebSocketCtor) {
     return { message: "当前 Node 环境无 WebSocket，仅返回搜索链接。" };
@@ -182,7 +205,9 @@ async function readSnapshotViaCdp(
   return new Promise((resolve) => {
     const socket = new WebSocketCtor(webSocketDebuggerUrl);
     let settled = false;
-    const finish = (payload: { url?: string; title?: string; excerpt?: string; message?: string }): void => {
+    let nextId = 1;
+    const pending = new Map<number, { resolve: (msg: Record<string, unknown>) => void; reject: (err: Error) => void }>();
+    const finish = (payload: CdpSerpCapture): void => {
       if (settled) {
         return;
       }
@@ -194,44 +219,136 @@ async function readSnapshotViaCdp(
       }
       resolve(payload);
     };
+    const sendCommand = (method: string, params?: Record<string, unknown>): Promise<Record<string, unknown>> => {
+      const id = nextId++;
+      return new Promise((commandResolve, commandReject) => {
+        pending.set(id, {
+          resolve: commandResolve,
+          reject: commandReject,
+        });
+        socket.send(JSON.stringify({ id, method, params }));
+      });
+    };
     const timer = setTimeout(() => {
-      finish({ message: "读取页面摘录超时，请在 Chrome 中查看搜索结果。" });
-    }, 8000);
+      finish({ message: "CDP 摘录超时，请在 Chrome 中查看搜索结果。" });
+    }, CDP_SESSION_TIMEOUT_MS);
+    const runSession = async (): Promise<void> => {
+      await sendCommand("Page.enable");
+      await sendCommand("Runtime.enable");
+      const current = await sendCommand("Runtime.evaluate", {
+        expression: "({ url: location.href, ready: document.readyState })",
+        returnByValue: true,
+      });
+      const currentValue = readEvaluateValue(current) as { url?: string; ready?: string } | undefined;
+      const href = typeof currentValue?.url === "string" ? currentValue.url : "";
+      const needsNavigate = !href || href === "about:blank" || !href.includes("google.");
+      if (needsNavigate) {
+        await sendCommand("Page.navigate", { url: searchUrl });
+        await waitForGooglePageLoad(sendCommand, searchUrl);
+      } else {
+        await waitForDocumentReady(sendCommand);
+      }
+      const extractResponse = await sendCommand("Runtime.evaluate", {
+        expression: GOOGLE_SERP_EXTRACT_EXPRESSION,
+        returnByValue: true,
+      });
+      const parsed = parseGoogleSerpEvaluateValue(readEvaluateValue(extractResponse));
+      clearTimeout(timer);
+      finish({
+        url: parsed.url,
+        title: parsed.title,
+        excerpt: parsed.text?.slice(0, EXCERPT_MAX_CHARS),
+        serpItems: parsed.items,
+        block: parsed.block,
+      });
+    };
     socket.addEventListener("open", () => {
-      socket.send(JSON.stringify({ id: 1, method: "Runtime.enable" }));
-      socket.send(JSON.stringify({ id: 2, method: "Page.enable" }));
-      socket.send(JSON.stringify({
-        id: 3,
-        method: "Runtime.evaluate",
-        params: {
-          expression: "({ title: document.title, url: location.href, text: (document.body?.innerText || '').slice(0, 2000) })",
-          returnByValue: true,
-        },
-      }));
+      void runSession().catch((error: unknown) => {
+        clearTimeout(timer);
+        const detail = error instanceof Error ? error.message : String(error);
+        finish({ message: `CDP 会话失败：${detail}` });
+      });
     });
     socket.addEventListener("message", (event: MessageEvent) => {
-      let payload: { id?: number; result?: { result?: { value?: { title?: string; url?: string; text?: string } } } };
+      let payload: Record<string, unknown>;
       try {
-        payload = JSON.parse(String(event.data)) as typeof payload;
+        payload = JSON.parse(String(event.data)) as Record<string, unknown>;
       } catch {
         return;
       }
-      if (payload.id !== 3) {
+      const id = typeof payload.id === "number" ? payload.id : 0;
+      const waiter = pending.get(id);
+      if (!waiter) {
         return;
       }
-      clearTimeout(timer);
-      const value = payload.result?.result?.value;
-      finish({
-        url: value?.url,
-        title: value?.title,
-        excerpt: value?.text,
-      });
+      pending.delete(id);
+      if (payload.error && typeof payload.error === "object") {
+        const message = typeof (payload.error as Record<string, unknown>).message === "string"
+          ? (payload.error as Record<string, unknown>).message as string
+          : "CDP error";
+        waiter.reject(new Error(message));
+        return;
+      }
+      waiter.resolve(payload);
     });
     socket.addEventListener("error", () => {
       clearTimeout(timer);
       finish({ message: "CDP WebSocket 连接失败，请在 Chrome 中查看搜索结果。" });
     });
   });
+}
+
+
+function readEvaluateValue(response: Record<string, unknown>): unknown {
+  const result = response.result as Record<string, unknown> | undefined;
+  const inner = result?.result as Record<string, unknown> | undefined;
+  return inner?.value;
+}
+
+
+async function waitForGooglePageLoad(
+  sendCommand: (method: string, params?: Record<string, unknown>) => Promise<Record<string, unknown>>,
+  searchUrl: string,
+): Promise<void> {
+  const expectedHost = "google.";
+  const deadline = Date.now() + NAVIGATE_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const response = await sendCommand("Runtime.evaluate", {
+      expression: "({ url: location.href, ready: document.readyState })",
+      returnByValue: true,
+    });
+    const value = readEvaluateValue(response) as { url?: string; ready?: string } | undefined;
+    const url = typeof value?.url === "string" ? value.url : "";
+    const ready = typeof value?.ready === "string" ? value.ready : "";
+    if (url && url !== "about:blank" && url.includes(expectedHost) && (ready === "interactive" || ready === "complete")) {
+      await sleep(600);
+      return;
+    }
+    if (url.startsWith(searchUrl.split("?")[0] ?? "") && ready === "complete") {
+      await sleep(600);
+      return;
+    }
+    await sleep(400);
+  }
+}
+
+
+async function waitForDocumentReady(
+  sendCommand: (method: string, params?: Record<string, unknown>) => Promise<Record<string, unknown>>,
+): Promise<void> {
+  const deadline = Date.now() + 8000;
+  while (Date.now() < deadline) {
+    const response = await sendCommand("Runtime.evaluate", {
+      expression: "document.readyState",
+      returnByValue: true,
+    });
+    const ready = readEvaluateValue(response);
+    if (ready === "complete" || ready === "interactive") {
+      await sleep(400);
+      return;
+    }
+    await sleep(300);
+  }
 }
 
 

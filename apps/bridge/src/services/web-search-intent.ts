@@ -1,3 +1,9 @@
+import {
+  buildStructuredSerpSummary,
+  preferChineseWebSearchReply,
+  type GoogleSerpItem,
+} from "./google-serp-parse.js";
+
 const WEBSEARCH_PREFIX = /^\/websearch\s+/i;
 const GOOGLE_PREFIX = /^\/google\s+/i;
 
@@ -86,42 +92,66 @@ export function formatWebSearchReply(
     pageUrl?: string;
     title?: string;
     excerpt?: string;
+    serpItems?: GoogleSerpItem[];
+    block?: "consent" | "captcha" | null;
+    aiSummary?: string;
     endpoint: string;
     message?: string;
   },
 ): string {
+  const zh = preferChineseWebSearchReply(query);
   if (!result.ok) {
     return [
-      `无法在 Chrome（${result.endpoint}）中打开 Google 搜索「${query}」。`,
-      result.message ?? "请确认 Chrome 已启用远程调试端口 9222。",
+      zh
+        ? `无法在 Chrome（${result.endpoint}）中打开 Google 搜索「${query}」。`
+        : `Could not open Google search for "${query}" in Chrome (${result.endpoint}).`,
+      result.message ?? (zh ? "请确认 Chrome 已启用远程调试端口 9222。" : "Ensure Chrome remote debugging on port 9222."),
       "",
-      "启动示例（Windows）：",
+      zh ? "启动示例（Windows）：" : "Example (Windows):",
       '  "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --remote-debugging-port=9222',
       "",
-      `预备搜索链接：${result.searchUrl}`,
+      `${zh ? "预备搜索链接" : "Search URL"}：${result.searchUrl}`,
     ].join("\n");
   }
+  const sourceUrl = result.pageUrl && result.pageUrl !== "about:blank" ? result.pageUrl : result.searchUrl;
+  const summaryHeading = zh ? "## 搜索摘要" : "## Search summary";
+  const snapshot = {
+    title: result.title,
+    url: sourceUrl,
+    text: result.excerpt,
+    items: result.serpItems ?? [],
+    block: result.block ?? null,
+  };
+  const structured = buildStructuredSerpSummary(query, snapshot);
   const lines = [
-    `已通过 Windows CDP（${result.endpoint}）在 Chrome 中打开 Google 搜索「${query}」。`,
+    summaryHeading,
     "",
-    `搜索链接：${result.searchUrl}`,
+    zh ? `关键词：${query}` : `Query: ${query}`,
+    "",
+    structured,
   ];
-  if (result.pageUrl && result.pageUrl !== result.searchUrl) {
-    lines.push(`当前页面：${result.pageUrl}`);
+  if (result.aiSummary?.trim()) {
+    lines.push("", zh ? "### AI 补充摘要" : "### AI summary", "", result.aiSummary.trim());
   }
   if (result.title) {
-    lines.push(`页面标题：${result.title}`);
+    lines.push("", `${zh ? "页面标题" : "Page title"}：${result.title}`);
   }
-  if (result.excerpt) {
-    lines.push("", "页面摘录（前 500 字）：", result.excerpt.slice(0, 500));
-  }
+  lines.push(
+    "",
+    `${zh ? "来源" : "Source"}：${sourceUrl}`,
+    "",
+    zh
+      ? `已在 Chrome（${result.endpoint}）打开完整结果页。`
+      : `Full results opened in Chrome (${result.endpoint}).`,
+  );
   if (result.message) {
     lines.push("", result.message);
   }
   lines.push(
     "",
-    "提示：联网搜索走 Bridge → Windows Chrome CDP（9222），非 WSL MCP。",
-    "勿依赖 Kimi「auto」付费 API 联网；可用 /websearch、/google 或「网上搜一下…」。",
+    zh
+      ? "提示：联网搜索走 Bridge → Windows Chrome CDP（9222），非 WSL MCP；勿依赖 Kimi「auto」付费 API。"
+      : "Tip: web search uses Bridge → Windows Chrome CDP (9222), not WSL MCP or Kimi paid web.",
   );
   return lines.join("\n");
 }
