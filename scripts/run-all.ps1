@@ -41,9 +41,12 @@ $script:ShuttingDown = $false
 $script:TunnelLogOffset = 0
 # 每 5 分钟对公网隧道做一次 /health 探测；进程退出等仍立即恢复
 $script:HealthCheckIntervalSeconds = 300
-$script:CommunicationFailureThreshold = 1
+$script:HealthCheckTimeoutSeconds = 15
+$script:CommunicationFailureThreshold = 3
+$script:RecoveryCooldownSeconds = 600
 $script:ConsecutiveCommunicationFailures = 0
 $script:SecondsSinceHealthCheck = 0
+$script:LastRecoveryAt = $null
 $TunnelUrlPattern = [regex]"https://[a-z0-9-]+\.trycloudflare\.com"
 
 
@@ -364,6 +367,37 @@ function Get-TokenFilePublicUrl {
 }
 
 
+function Get-RecoveryTimestamp {
+  return (Get-Date).ToUniversalTime().ToString('o')
+}
+
+
+function Test-RecoveryCooldownActive {
+  if (-not $script:LastRecoveryAt) {
+    return $false
+  }
+  $elapsed = ((Get-Date) - $script:LastRecoveryAt).TotalSeconds
+  return $elapsed -lt $script:RecoveryCooldownSeconds
+}
+
+
+function Get-RecoveryCooldownRemainingSeconds {
+  if (-not $script:LastRecoveryAt) {
+    return 0
+  }
+  $remaining = $script:RecoveryCooldownSeconds - ((Get-Date) - $script:LastRecoveryAt).TotalSeconds
+  if ($remaining -lt 0) {
+    return 0
+  }
+  return [math]::Ceiling($remaining)
+}
+
+
+function Mark-RecoveryCompleted {
+  $script:LastRecoveryAt = Get-Date
+}
+
+
 function Write-PublicBridgeUrlToTokenFileDirect([string]$PublicUrl) {
   $filePath = Get-TokenFilePath
   $dir = Split-Path -Parent $filePath
@@ -467,7 +501,7 @@ function Test-PublicBridgeCommunication([string]$PublicUrl) {
   }
   $healthUrl = "$PublicUrl/health"
   try {
-    $resp = Invoke-RestMethod -Uri $healthUrl -Method Get -TimeoutSec 10 -ErrorAction Stop
+    $resp = Invoke-RestMethod -Uri $healthUrl -Method Get -TimeoutSec $script:HealthCheckTimeoutSeconds -ErrorAction Stop
     return $resp.status -eq "ok"
   } catch {
     return $false
@@ -476,19 +510,21 @@ function Test-PublicBridgeCommunication([string]$PublicUrl) {
 
 
 function Invoke-TunnelRecovery([string]$Reason) {
-  Write-Fail $Reason
+  $timestamp = Get-RecoveryTimestamp
+  Write-Fail "[$timestamp] $Reason"
   Write-Step "Restarting cloudflared and refreshing token file..."
   $null = Invoke-BridgeRegenerateToken
   Restart-TunnelProcess
   if (-not (Wait-ForTunnelUrl -MaxSeconds 90)) {
-    Write-Fail "No new URL detected within timeout after tunnel restart"
+    Write-Fail "[$timestamp] No new URL detected within timeout after tunnel restart"
     return $false
   }
   $onDisk = Get-TokenFilePublicUrl
   if ($onDisk) {
     $null = Test-PublicBridgeHealth -PublicUrl $onDisk
   }
-  Write-Ok "Tunnel recovered and token file updated"
+  Mark-RecoveryCompleted
+  Write-Ok "[$timestamp] Tunnel recovered and token file updated"
   return $true
 }
 
@@ -878,13 +914,19 @@ try {
       $publicUrl = Get-TokenFilePublicUrl
       if ($publicUrl -and -not (Test-PublicBridgeCommunication -PublicUrl $publicUrl)) {
         $script:ConsecutiveCommunicationFailures += 1
-        Write-Fail "Public communication failed (consecutive $($script:ConsecutiveCommunicationFailures)/$($script:CommunicationFailureThreshold))"
+        $timestamp = Get-RecoveryTimestamp
+        Write-Fail "[$timestamp] Public communication failed (consecutive $($script:ConsecutiveCommunicationFailures)/$($script:CommunicationFailureThreshold))"
         if ($script:ConsecutiveCommunicationFailures -ge $script:CommunicationFailureThreshold) {
-          if (-not (Invoke-TunnelRecovery -Reason "Public communication failed repeatedly; restarting tunnel")) {
-            $exitCode = 1
-            break
+          if (Test-RecoveryCooldownActive) {
+            $remaining = Get-RecoveryCooldownRemainingSeconds
+            Write-Fail "[$timestamp] Recovery skipped: cooldown active (${remaining}s remaining); will retry after cooldown"
+          } else {
+            if (-not (Invoke-TunnelRecovery -Reason "Public communication failed $($script:ConsecutiveCommunicationFailures) consecutive times; restarting tunnel")) {
+              $exitCode = 1
+              break
+            }
+            $script:ConsecutiveCommunicationFailures = 0
           }
-          $script:ConsecutiveCommunicationFailures = 0
         }
       } else {
         $script:ConsecutiveCommunicationFailures = 0

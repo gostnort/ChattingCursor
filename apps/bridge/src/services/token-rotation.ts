@@ -18,6 +18,7 @@ export interface DailyTokenRecord {
 
 interface ParsedTokenFile {
   datetime?: string;
+  previousDatetime?: string;
   date?: string;
   token?: string;
   salt?: string;
@@ -65,6 +66,9 @@ function parseTokenFile(content: string): ParsedTokenFile {
     const value = trimmed.slice(separator + 1).trim();
     if (key === "datetime") {
       parsed.datetime = value;
+    }
+    if (key === "previousdatetime") {
+      parsed.previousDatetime = value;
     }
     if (key === "date") {
       parsed.date = value;
@@ -129,15 +133,29 @@ function deriveDailyToken(date: string, salt: string): string {
 
 function buildTokenFileContent(options: {
   datetime: string;
+  previousDatetime?: string;
   token: string;
   publicBridgeUrl: string;
 }): string {
-  return [
-    `datetime: ${options.datetime}`,
-    `token: ${options.token}`,
-    `publicBridgeUrl: ${options.publicBridgeUrl}`,
-    "",
-  ].join("\n");
+  const lines = [`datetime: ${options.datetime}`];
+  if (options.previousDatetime) {
+    lines.push(`previousDatetime: ${options.previousDatetime}`);
+  }
+  lines.push(`token: ${options.token}`);
+  lines.push(`publicBridgeUrl: ${options.publicBridgeUrl}`);
+  lines.push("");
+  return lines.join("\n");
+}
+
+
+async function readExistingDatetime(filePath: string): Promise<string | undefined> {
+  try {
+    const existing = await readFile(filePath, "utf8");
+    const parsed = parseTokenFile(existing);
+    return parsed.datetime;
+  } catch {
+    return undefined;
+  }
 }
 
 
@@ -358,12 +376,21 @@ export class TokenRotationService {
     token: string;
     publicBridgeUrl: string;
     datetime?: string;
+    previousDatetime?: string;
   }): Promise<DailyTokenRecord> {
     const today = this.getToday();
     const filePath = this.getFilePath();
     const datetime = options.datetime ?? nowIso();
+    let previousDatetime = options.previousDatetime;
+    if (previousDatetime === undefined) {
+      const existingDatetime = await readExistingDatetime(filePath);
+      if (existingDatetime) {
+        previousDatetime = existingDatetime;
+      }
+    }
     const content = buildTokenFileContent({
       datetime,
+      previousDatetime,
       token: options.token,
       publicBridgeUrl: options.publicBridgeUrl,
     });
