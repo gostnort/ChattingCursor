@@ -613,7 +613,7 @@ body {
 
   justify-content: flex-start;
 
-  align-items: flex-start;
+  align-items: flex-end;
 
 }
 
@@ -627,11 +627,13 @@ body {
 
   align-items: center;
 
+  justify-content: flex-end;
+
   gap: 0.35rem;
 
   flex-shrink: 0;
 
-  align-self: flex-start;
+  align-self: flex-end;
 
 }
 
