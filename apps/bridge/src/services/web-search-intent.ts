@@ -112,6 +112,10 @@ export function formatWebSearchReply(
   if (result.message) {
     lines.push("", result.message);
   }
-  lines.push("", "提示：仅 Kimi 模型支持 API 联网搜索；其他模型可通过 Chrome 查看结果后继续在对话中说明。");
+  lines.push(
+    "",
+    "提示：本路径使用本机 Chrome（免费）。勿依赖 Kimi「auto」模型的付费 API 联网；",
+    "可用 /websearch 关键词、/google 关键词，或自然语言如「网上搜一下…」。",
+  );
   return lines.join("\n");
 }

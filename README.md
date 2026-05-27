@@ -13,7 +13,7 @@ A local-first multi-agent chat platform that talks to **Cursor CLI** on your PC.
 
 ## Quick start
 
-**Easiest (Windows):** double-click or run `run.bat` from the repo root. That starts Bridge, an optional local web dev server, cloudflared quick tunnel, and keeps the synced token file updated.
+**Easiest (Windows):** double-click or run `run.bat` from the repo root. That starts Bridge, an optional local web dev server, cloudflared quick tunnel, and keeps the synced token file updated. `run.bat` sets **`CURSOR_CLI_MODE=native`** so Bridge uses the **Windows** `cursor-agent` (not WSL). Set `CURSOR_CLI_MODE=wsl` before launch if you prefer WSL.
 
 **Manual dev (two terminals):**
 
@@ -35,9 +35,32 @@ Chinese quickstart with the same sections: [docs/QUICKSTART.md](docs/QUICKSTART.
 |---------|---------|--------|
 | Bridge | `4321` | `BRIDGE_PORT`, `BRIDGE_HOST` |
 | Web dev | `43210` | Vite; base path `/ChattingCursor/` |
-| Chrome debug (optional web search) | `9222` | For non-Kimi “search the web” intents |
+| Chrome debug (free web search) | `9222` | Bridge opens Google in Chrome; no Kimi API spend |
 
-### Chrome remote debugging (Windows + WSL)
+### Cursor CLI: native vs WSL (Windows)
+
+| `CURSOR_CLI_MODE` | Behavior |
+|-------------------|----------|
+| `native` (default via `run.bat` / `scripts/run-all.ps1`) | Use Windows `cursor-agent` / `cursor agent` |
+| `wsl` | Run CLI inside WSL Ubuntu |
+| unset on Windows | Same as legacy: try WSL first |
+
+Manual dev: `$env:CURSOR_CLI_MODE = "native"` before `pnpm dev:bridge`.
+
+### Free web search (Chrome, not Kimi)
+
+Bridge intercepts web-search intent **before** Cursor CLI runs and opens Google in your local Chrome (CDP port **9222**). This does **not** use Kimi’s paid API search.
+
+**Triggers (chat input):**
+
+- `/websearch your query` or `/google your query`
+- Natural language, e.g. “search the web for …”, “网上搜一下 …”
+
+**Not** the same as local history search (`/search …` or “find our earlier chat about …”).
+
+Choosing model **Kimi** or **auto** in the UI may still enable Kimi API web search inside `cursor-agent`; for **free** search, use the phrases above so Bridge handles it via Chrome.
+
+### Chrome remote debugging (Windows + MCP)
 
 Start Chrome on **Windows** with remote debugging, for example:
 
@@ -46,6 +69,13 @@ Start Chrome on **Windows** with remote debugging, for example:
 ```
 
 On Windows, Bridge and `curl.exe http://127.0.0.1:9222/json/version` should succeed.
+
+**Windows Chrome MCP (Cursor IDE, optional):**
+
+1. Start Chrome with `--remote-debugging-port=9222` (command above).
+2. In `%USERPROFILE%\.cursor\mcp.json`, add **chrome-devtools** pointing at `http://127.0.0.1:9222` (see [.cursor/mcp.json.example](.cursor/mcp.json.example)).
+3. Use **`CURSOR_CLI_MODE=native`** for ChattingCursor (`run.bat` sets this).
+4. In ChattingCursor chat, **`/websearch query`** works without MCP or Kimi — Bridge uses Chrome directly.
 
 **WSL ≠ Windows localhost:** crew Python, `pnpm crew:status`, or Cursor’s **chrome-devtools** MCP running inside WSL cannot reach Chrome at `127.0.0.1:9222` on the Windows host. The repo rewrites `http://127.0.0.1:9222` to the Windows host IP from `/etc/resolv.conf` when it detects WSL. You can also set an explicit URL:
 
@@ -59,6 +89,7 @@ For **chrome-devtools MCP** in WSL, point `--browserUrl` at the same Windows hos
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `CHROME_DEBUG_ENDPOINT` | `http://127.0.0.1:9222` (WSL: auto-rewrite to Windows host) | Chrome CDP HTTP endpoint |
+| `CURSOR_CLI_MODE` | `native` when using `run.bat` | `native` / `windows` = host CLI; `wsl` = WSL |
 
 ## Token file (phone setup)
 
@@ -110,7 +141,7 @@ See [docs/QUICKSTART.md](docs/QUICKSTART.md) for crew commands and local-mode AP
 ## Prerequisites
 
 - Node.js >= 20, pnpm >= 9
-- Windows: WSL + Ubuntu recommended for CLI parity
+- Windows: `run.bat` defaults to **native** CLI; WSL + Ubuntu optional (`CURSOR_CLI_MODE=wsl`)
 - [Cursor CLI](https://cursor.com/docs/cli) installed and logged in (`cursor-agent login`)
 - **cloudflared** for remote quick tunnel (install script can help)
 
@@ -124,6 +155,7 @@ See [docs/QUICKSTART.md](docs/QUICKSTART.md) for crew commands and local-mode AP
 | `BRIDGE_CORS_ORIGINS` | see `.env.example` | Allowed web origins |
 | `CHATTINGCURSOR_TOKEN_SYNC_DIR` | `~/.chattingcursor` | Token file directory |
 | `CHROME_DEBUG_ENDPOINT` | `http://127.0.0.1:9222` | Chrome CDP URL; WSL auto-rewrites localhost to Windows host |
+| `CURSOR_CLI_MODE` | `native` via `run.bat` | `native` = Windows CLI; `wsl` = WSL CLI |
 
 ## Project layout
 

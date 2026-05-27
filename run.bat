@@ -1,6 +1,8 @@
 @echo off
 chcp 65001 >nul 2>&1
 cd /d "%~dp0"
+rem 默认本机 cursor-agent（非 WSL）；可在系统环境变量中设 CURSOR_CLI_MODE=wsl 覆盖
+if not defined CURSOR_CLI_MODE set "CURSOR_CLI_MODE=native"
 
 where powershell >nul 2>&1
 if errorlevel 1 (

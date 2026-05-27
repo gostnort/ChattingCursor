@@ -6,6 +6,10 @@
 
 # 在隐藏窗口中启动 run-all.ps1，轮询日志直到启动完成或失败，然后退出（不阻塞控制台）。
 $ErrorActionPreference = "Stop"
+# 与 run-all.ps1 一致：run.bat 路径默认本机 CLI（可被外部环境变量覆盖）
+if (-not $env:CURSOR_CLI_MODE) {
+  $env:CURSOR_CLI_MODE = "native"
+}
 $Root = Split-Path -Parent $PSScriptRoot
 $RunAllScript = Join-Path $PSScriptRoot "run-all.ps1"
 $LogPath = Join-Path $env:TEMP "chattingcursor-run-all.log"

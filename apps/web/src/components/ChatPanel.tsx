@@ -674,7 +674,7 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
             value={input}
             onChange={(event) => setInput(event.target.value)}
             onInput={() => resizeComposer()}
-            placeholder="输入消息…（例如：帮我找之前关于端口的对话）"
+            placeholder="输入消息…（本地历史：帮我找之前关于端口的对话；联网：/websearch 关键词 或 网上搜一下…）"
             rows={4}
           />
           <button
