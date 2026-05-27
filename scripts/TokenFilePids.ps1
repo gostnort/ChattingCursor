@@ -55,6 +55,32 @@ function Format-TokenPidSectionLines {
 }
 
 
+
+
+function Write-TokenFileContentWithRetry {
+  param(
+    [string]$FilePath,
+    [string[]]$Lines
+  )
+  if (-not $FilePath) {
+    return $false
+  }
+  $maxAttempts = 8
+  for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+    try {
+      Set-Content -LiteralPath $FilePath -Value $Lines -Encoding utf8 -ErrorAction Stop
+      return $true
+    } catch {
+      if ($attempt -ge $maxAttempts) {
+        Write-Warning ("Token file write failed (file may be locked): {0} - {1}" -f $FilePath, $_.Exception.Message)
+        return $false
+      }
+      Start-Sleep -Milliseconds 250
+    }
+  }
+  return $false
+}
+
 function Merge-TokenFilePidSection {
   param(
     [string]$FilePath,
@@ -102,7 +128,7 @@ function Merge-TokenFilePidSection {
     }
     return
   }
-  Set-Content -LiteralPath $FilePath -Value $allLines -Encoding utf8
+  Write-TokenFileContentWithRetry -FilePath $FilePath -Lines $allLines | Out-Null
 }
 
 
@@ -117,5 +143,5 @@ function Clear-TokenFilePidSection {
     Remove-Item -LiteralPath $FilePath -Force -ErrorAction SilentlyContinue
     return
   }
-  Set-Content -LiteralPath $FilePath -Value $authLines -Encoding utf8
+  Write-TokenFileContentWithRetry -FilePath $FilePath -Lines $authLines | Out-Null
 }

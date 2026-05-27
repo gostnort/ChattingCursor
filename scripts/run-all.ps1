@@ -406,22 +406,31 @@ function Get-RecoveryTimestamp {
 
 
 function Invoke-BridgeRegenerateToken {
-  try {
-    $response = Invoke-RestMethod `
-      -Uri "http://127.0.0.1:$BridgePort/local/regenerate-token" `
-      -Method Post `
-      -ContentType "application/json; charset=utf-8" `
-      -ErrorAction Stop
-    Write-Ok "Bridge regenerated today's token (date: $($response.tokenDate))"
-    if ($response.tokenFilePath) {
-      Write-Host "     Token file: $($response.tokenFilePath)"
+  $maxAttempts = 6
+  for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+    try {
+      $response = Invoke-RestMethod `
+        -Uri "http://127.0.0.1:$BridgePort/local/regenerate-token" `
+        -Method Post `
+        -ContentType "application/json; charset=utf-8" `
+        -ErrorAction Stop
+      Write-Ok "Bridge regenerated today's token (date: $($response.tokenDate))"
+      if ($response.tokenFilePath) {
+        Write-Host "     Token file: $($response.tokenFilePath)"
+      }
+      Restore-ServicePidsAfterBridgeTokenWrite
+      return $true
+    } catch {
+      if ($attempt -lt $maxAttempts) {
+        Write-Host "Bridge regenerate-token attempt $attempt failed, retrying in 3s..."
+        Start-Sleep -Seconds 3
+        continue
+      }
+      Write-Fail "Bridge failed to regenerate token: $($_.Exception.Message)"
+      return $false
     }
-    Restore-ServicePidsAfterBridgeTokenWrite
-    return $true
-  } catch {
-    Write-Fail "Bridge failed to regenerate token: $($_.Exception.Message)"
-    return $false
   }
+  return $false
 }
 
 
@@ -487,6 +496,38 @@ function Test-PublicBridgeCommunication([string]$PublicUrl) {
   }
 }
 
+
+
+
+function Wait-PublicBridgeCommunication {
+  param(
+    [string]$PublicUrl,
+    [int]$MaxWaitSeconds = 90,
+    [int]$IntervalSeconds = 5
+  )
+  if (-not $PublicUrl) {
+    return $false
+  }
+  $deadline = (Get-Date).AddSeconds($MaxWaitSeconds)
+  $attempt = 0
+  while ((Get-Date) -lt $deadline) {
+    if ($script:ShuttingDown) {
+      return $false
+    }
+    $attempt++
+    if (Test-PublicBridgeCommunication -PublicUrl $PublicUrl) {
+      if ($attempt -gt 1) {
+        Write-Ok "Public health check passed after $attempt attempt(s): $PublicUrl/health"
+      }
+      return $true
+    }
+    if ($attempt -eq 1) {
+      Write-Host "Waiting for public Bridge health at $PublicUrl/health (up to ${MaxWaitSeconds}s)..."
+    }
+    Start-Sleep -Seconds $IntervalSeconds
+  }
+  return $false
+}
 
 function Invoke-TunnelRecovery([string]$Reason) {
   $timestamp = Get-RecoveryTimestamp
@@ -870,6 +911,8 @@ try {
 
   $tunnelWaitSeconds = 90
   $startupTunnelReady = $false
+  $script:StartupPublicHealthWaitDone = $false
+  $script:StartupTunnelRecoveryAttempted = $false
   Write-Host "Waiting for tunnel URL (max ${tunnelWaitSeconds}s)..."
   for ($tick = 0; $tick -lt ($tunnelWaitSeconds * 2); $tick++) {
     if ($script:ShuttingDown) {
@@ -887,14 +930,29 @@ try {
         $startupTunnelReady = $true
         break
       }
-      $healthReason = if ($publicUrl) {
-        "Startup health check failed: $publicUrl/health"
-      } else {
-        "Token file missing public URL after tunnel URL was applied"
+      if (-not $script:StartupPublicHealthWaitDone) {
+        $script:StartupPublicHealthWaitDone = $true
+        if ($publicUrl -and (Wait-PublicBridgeCommunication -PublicUrl $publicUrl -MaxWaitSeconds 75 -IntervalSeconds 5)) {
+          Write-Ok "Public health check passed: $publicUrl/health"
+          $startupTunnelReady = $true
+          break
+        }
       }
-      Write-Fail "$healthReason; starting tunnel-only recovery..."
-      if (-not (Invoke-TunnelRecovery -Reason $healthReason)) {
-        break
+      if (-not $script:StartupTunnelRecoveryAttempted) {
+        $script:StartupTunnelRecoveryAttempted = $true
+        $healthReason = if ($publicUrl) {
+          "Startup health check failed: $publicUrl/health"
+        } else {
+          "Token file missing public URL after tunnel URL was applied"
+        }
+        Write-Fail "$healthReason; starting tunnel-only recovery (one attempt)..."
+        $null = Invoke-TunnelRecovery -Reason $healthReason
+        $afterUrl = Get-TokenFilePublicUrl
+        if ($afterUrl -and (Wait-PublicBridgeCommunication -PublicUrl $afterUrl -MaxWaitSeconds 60 -IntervalSeconds 5)) {
+          Write-Ok "Public health check passed after recovery: $afterUrl/health"
+          $startupTunnelReady = $true
+          break
+        }
       }
       continue
     }
@@ -905,8 +963,8 @@ try {
       }
     }
     if ($script:BridgeOwned -and $script:BridgeProcess -and $script:BridgeProcess.HasExited -and -not (Test-BridgeHealthy)) {
-        Write-Fail "Bridge process exited, code: $($script:BridgeProcess.ExitCode)"
-      exit 1
+      Write-Fail "Bridge process exited, code: $($script:BridgeProcess.ExitCode)"
+      break
     }
   }
 
@@ -914,11 +972,10 @@ try {
     Read-TunnelLogNewLines
     if (-not $script:TunnelUrlApplied) {
       Write-Fail "No trycloudflare URL detected within ${tunnelWaitSeconds}s. Check tunnel log: $($script:TunnelLogPath)"
-    } else {
-      $failedUrl = Get-TokenFilePublicUrl
-      Write-Fail "Tunnel URL not reachable after recovery attempts: $failedUrl/health"
+      exit 1
     }
-    exit 1
+    $failedUrl = Get-TokenFilePublicUrl
+    Write-Fail "Public health not confirmed yet ($failedUrl/health). Entering monitor loop; will keep retrying."
   }
 
   Write-Ok "Startup flow complete. Services are running."
@@ -936,8 +993,7 @@ try {
     if ($script:TunnelProcess -and $script:TunnelProcess.HasExited) {
       Read-TunnelLogNewLines
       if (-not (Invoke-TunnelRecovery -Reason "cloudflared exited, code: $($script:TunnelProcess.ExitCode)")) {
-        $exitCode = 1
-        break
+        Write-Fail "Tunnel recovery failed; will retry on next check."
       }
       $script:SecondsSinceHealthCheck = 0
       continue
@@ -950,8 +1006,7 @@ try {
         $timestamp = Get-RecoveryTimestamp
         Write-Fail "[$timestamp] Public health check failed ($publicUrl/health); starting tunnel-only recovery now"
         if (-not (Invoke-TunnelRecovery -Reason "Public health check failed: $publicUrl/health")) {
-          $exitCode = 1
-          break
+          Write-Fail "Tunnel recovery failed; will retry on next health check interval."
         }
       }
     }
