@@ -426,11 +426,18 @@ function Invoke-BridgeRegenerateToken {
 
 
 function Restart-TunnelProcess {
-  if ($script:TunnelProcess -and -not $script:TunnelProcess.HasExited) {
-    try {
-      & taskkill /PID $script:TunnelProcess.Id /T /F *>$null
-    } catch {
-      # 隧道进程可能已退出
+  $oldPid = $null
+  if ($script:TunnelProcess) {
+    $oldPid = $script:TunnelProcess.Id
+    if (-not $script:TunnelProcess.HasExited) {
+      try {
+        & taskkill /PID $oldPid /T /F *>$null
+        Write-Host "Stopped old tunnel PID $oldPid"
+      } catch {
+        # 隧道进程可能已退出
+      }
+    } elseif ($oldPid) {
+      Write-Host "Old tunnel PID $oldPid already exited"
     }
   }
   $script:TunnelProcess = $null
@@ -438,6 +445,7 @@ function Restart-TunnelProcess {
   $script:DetectedTunnelUrl = $null
   $script:TunnelLogOffset = 0
   Start-TunnelProcess
+  Write-Host "Started new cloudflared (PID $($script:TunnelProcess.Id))"
 }
 
 
@@ -490,13 +498,15 @@ function Invoke-TunnelRecovery([string]$Reason) {
     return $false
   }
   $onDisk = Get-TokenFilePublicUrl
-  if ($onDisk) {
-    $null = Test-PublicBridgeHealth -PublicUrl $onDisk
-    Write-Host "[RECOVERY COMPLETE] New URL: $onDisk"
-  } else {
+  if (-not $onDisk) {
     Write-Fail "[$timestamp] Tunnel restarted but token file has no public URL"
     return $false
   }
+  if (-not (Test-PublicBridgeHealth -PublicUrl $onDisk)) {
+    Write-Fail "[$timestamp] [RECOVERY FAILED] New URL not reachable: $onDisk/health"
+    return $false
+  }
+  Write-Host "[RECOVERY COMPLETE] New URL: $onDisk"
   Write-Ok "[$timestamp] Tunnel-only recovery finished (Bridge/Web unchanged)"
   return $true
 }
@@ -594,9 +604,6 @@ function Invoke-TunnelLine([string]$Line) {
   $script:DetectedTunnelUrl = $url
   Write-Ok "Detected cloudflared tunnel URL: $url"
   $null = Set-PublicBridgeUrlInTokenFile -PublicUrl $url
-  if ($script:TunnelUrlApplied) {
-    $null = Test-PublicBridgeHealth -PublicUrl $url
-  }
 }
 
 
@@ -828,6 +835,7 @@ try {
   Start-TunnelProcess
 
   $tunnelWaitSeconds = 90
+  $startupTunnelReady = $false
   Write-Host "Waiting for tunnel URL (max ${tunnelWaitSeconds}s)..."
   for ($tick = 0; $tick -lt ($tunnelWaitSeconds * 2); $tick++) {
     if ($script:ShuttingDown) {
@@ -839,7 +847,22 @@ try {
       $null = Set-PublicBridgeUrlInTokenFile -PublicUrl $script:DetectedTunnelUrl
     }
     if ($script:TunnelUrlApplied) {
-      break
+      $publicUrl = Get-TokenFilePublicUrl
+      if ($publicUrl -and (Test-PublicBridgeCommunication -PublicUrl $publicUrl)) {
+        Write-Ok "Public health check passed: $publicUrl/health"
+        $startupTunnelReady = $true
+        break
+      }
+      $healthReason = if ($publicUrl) {
+        "Startup health check failed: $publicUrl/health"
+      } else {
+        "Token file missing public URL after tunnel URL was applied"
+      }
+      Write-Fail "$healthReason; starting tunnel-only recovery..."
+      if (-not (Invoke-TunnelRecovery -Reason $healthReason)) {
+        break
+      }
+      continue
     }
     if ($script:TunnelProcess -and $script:TunnelProcess.HasExited) {
       Read-TunnelLogNewLines
@@ -853,9 +876,14 @@ try {
     }
   }
 
-  if (-not $script:TunnelUrlApplied) {
+  if (-not $startupTunnelReady) {
     Read-TunnelLogNewLines
-    Write-Fail "No trycloudflare URL detected within ${tunnelWaitSeconds}s. Check tunnel log: $($script:TunnelLogPath)"
+    if (-not $script:TunnelUrlApplied) {
+      Write-Fail "No trycloudflare URL detected within ${tunnelWaitSeconds}s. Check tunnel log: $($script:TunnelLogPath)"
+    } else {
+      $failedUrl = Get-TokenFilePublicUrl
+      Write-Fail "Tunnel URL not reachable after recovery attempts: $failedUrl/health"
+    }
     exit 1
   }
 
