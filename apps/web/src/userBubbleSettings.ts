@@ -3,7 +3,7 @@ import { normalizeHexColor } from "./assistantBubbleSettings";
 
 export const USER_BUBBLE_BACKGROUND_KEY = "userBubbleBackground";
 
-export const DEFAULT_USER_BUBBLE_BACKGROUND = "#95ec69";
+export const DEFAULT_USER_BUBBLE_BACKGROUND = "#238636";
 
 
 export function getUserBubbleBackground(): string {

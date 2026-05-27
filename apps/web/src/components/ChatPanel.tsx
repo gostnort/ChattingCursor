@@ -134,6 +134,8 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
   const stderrBufferRef = useRef("");
   const currentAssistantLabelRef = useRef("Agent");
   const sseCloseRef = useRef<(() => void) | null>(null);
+  const sendQueueRef = useRef<string[]>([]);
+  const runInFlightRef = useRef(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const { toggleSpeak, speakingKey } = useSpeech();
@@ -272,9 +274,23 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
   const resetChatState = (): void => {
     sseCloseRef.current?.();
     sseCloseRef.current = null;
+    sendQueueRef.current = [];
+    runInFlightRef.current = false;
     assistantBufferRef.current = "";
     stderrBufferRef.current = "";
     setMessages([]);
+    setIsSending(false);
+    setIsThinking(false);
+  };
+
+
+  const drainSendQueue = (): void => {
+    const next = sendQueueRef.current.shift();
+    if (next) {
+      void startRun(next);
+      return;
+    }
+    runInFlightRef.current = false;
     setIsSending(false);
     setIsThinking(false);
   };
@@ -368,8 +384,6 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
       });
     }
     if (event.type === "run_finished") {
-      setIsSending(false);
-      setIsThinking(false);
       sseCloseRef.current = null;
       const exitCode = typeof event.data?.exitCode === "number" ? event.data.exitCode : null;
       if (!assistantBufferRef.current && stderrBufferRef.current) {
@@ -379,29 +393,19 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
       }
       stderrBufferRef.current = "";
       playNotificationSound();
+      drainSendQueue();
     }
   };
 
 
-  const handleSend = async (): Promise<void> => {
-    const prompt = input.trim();
-    if (!prompt || isSending) {
-      return;
-    }
+  const startRun = async (prompt: string): Promise<void> => {
+    runInFlightRef.current = true;
     setIsSending(true);
     setIsThinking(true);
-    setInput("");
     assistantBufferRef.current = "";
     stderrBufferRef.current = "";
     currentAssistantLabelRef.current = selectedModelLabel;
     sseCloseRef.current?.();
-    const userMessage: ChatMessage = {
-      id: crypto.randomUUID(),
-      role: "user",
-      content: prompt,
-      createdAt: new Date().toISOString(),
-    };
-    setMessages((prev) => [...prev, userMessage]);
     try {
       const { runId, sessionId: activeSessionId } = await sendChatMessage(bridgeUrl, prompt, {
         model: selectedModel || undefined,
@@ -415,9 +419,8 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
       sseCloseRef.current = subscribeRunEvents(bridgeUrl, runId, handleStreamEvent, (error) => {
         appendAssistantError(`流式连接失败：${error.message}`);
         setConnectionError(error.message);
-        setIsSending(false);
-        setIsThinking(false);
         sseCloseRef.current = null;
+        drainSendQueue();
       }, bridgeToken);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -431,9 +434,29 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
         },
       ]);
       setConnectionError(message);
-      setIsSending(false);
-      setIsThinking(false);
+      drainSendQueue();
     }
+  };
+
+
+  const handleSend = async (): Promise<void> => {
+    const prompt = input.trim();
+    if (!prompt) {
+      return;
+    }
+    setInput("");
+    const userMessage: ChatMessage = {
+      id: crypto.randomUUID(),
+      role: "user",
+      content: prompt,
+      createdAt: new Date().toISOString(),
+    };
+    setMessages((prev) => [...prev, userMessage]);
+    if (runInFlightRef.current) {
+      sendQueueRef.current.push(prompt);
+      return;
+    }
+    await startRun(prompt);
   };
 
 
@@ -517,13 +540,12 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
             onInput={() => resizeComposer()}
             placeholder="输入消息…（例如：帮我找之前关于端口的对话）"
             rows={4}
-            disabled={isSending}
           />
           <button
             type="button"
             className="composer-send"
             onClick={() => void handleSend()}
-            disabled={isSending || !input.trim()}
+            disabled={!input.trim()}
           >
             {isSending ? "运行中…" : "发送"}
           </button>

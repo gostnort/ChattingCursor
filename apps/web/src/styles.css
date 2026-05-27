@@ -216,9 +216,7 @@ body {
 
   background: #1f2937;
 
-  color: #e6edf3;
-
-  box-shadow: inset 0 0 0 1px #388bfd;
+  color: #58a6ff;
 
 }
 
@@ -527,9 +525,9 @@ body {
 
   border-radius: 6px;
 
-  background: #238636;
+  background: #95ec69;
 
-  color: #fff;
+  color: #1a1a1a;
 
   cursor: pointer;
 
@@ -735,9 +733,9 @@ body {
 
 .bubble-user {
 
-  background: #95ec69;
+  background: #238636;
 
-  color: #1a1a1a;
+  color: #fff;
 
   border-bottom-right-radius: 0.2rem;
 
@@ -757,7 +755,7 @@ body {
 
   border: 0.35rem solid transparent;
 
-  border-left-color: #95ec69;
+  border-left-color: #238636;
 
   border-right: 0;
 
@@ -1143,9 +1141,9 @@ body {
 
   border-radius: 6px;
 
-  background: #238636;
+  background: #95ec69;
 
-  color: #fff;
+  color: #1a1a1a;
 
   cursor: pointer;
 

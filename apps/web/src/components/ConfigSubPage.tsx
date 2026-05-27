@@ -491,7 +491,7 @@ export function ConfigSubPage({
                   handleUserBubbleBackgroundChange(event.target.value);
                 }}
                 onBlur={() => handleUserBubbleBackgroundBlur(userBackgroundInput)}
-                placeholder="#95ec69"
+                placeholder="#238636"
                 spellCheck={false}
               />
               <input

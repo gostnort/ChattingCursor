@@ -39,8 +39,9 @@ $script:TunnelUrlApplied = $false
 $script:DetectedTunnelUrl = $null
 $script:ShuttingDown = $false
 $script:TunnelLogOffset = 0
-$script:HealthCheckIntervalSeconds = 30
-$script:CommunicationFailureThreshold = 2
+# 每 5 分钟对公网隧道做一次 /health 探测；进程退出等仍立即恢复
+$script:HealthCheckIntervalSeconds = 300
+$script:CommunicationFailureThreshold = 1
 $script:ConsecutiveCommunicationFailures = 0
 $script:SecondsSinceHealthCheck = 0
 $TunnelUrlPattern = [regex]"https://[a-z0-9-]+\.trycloudflare\.com"
@@ -374,11 +375,11 @@ function Write-PublicBridgeUrlToTokenFileDirect([string]$PublicUrl) {
     $content = Get-Content -Path $filePath -Raw -ErrorAction SilentlyContinue
   }
   if ([string]::IsNullOrWhiteSpace($content)) {
-    $today = (Get-Date).ToString("yyyy-MM-dd")
+    $nowIso = (Get-Date).ToUniversalTime().ToString('o')
     $content = @(
-      "date: $today",
+      "datetime: $nowIso",
       "token: PENDING_SYNC_FROM_BRIDGE",
-      "generatedAt: $((Get-Date).ToUniversalTime().ToString('o'))",
+      "generatedAt: $nowIso",
       "publicBridgeUrl: $PublicUrl",
       ""
     ) -join "`n"
