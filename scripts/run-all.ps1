@@ -22,7 +22,7 @@ try {
   [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
   $OutputEncoding = [Console]::OutputEncoding
 } catch {
-  # 非交互环境可能无法设置控制台编码
+  # 闈炰氦浜掔幆澧冨彲鑳芥棤娉曡缃帶鍒跺彴缂栫爜
 }
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
@@ -35,11 +35,13 @@ $script:QualityWatchProcess = $null
 $script:QualityWatchOwned = $false
 $script:TunnelProcess = $null
 $script:TunnelLogPath = Join-Path $env:TEMP "chattingcursor-cloudflared.log"
+$script:BridgeLogPath = Join-Path $env:TEMP "chattingcursor-bridge.log"
+$script:BridgeErrLogPath = Join-Path $env:TEMP "chattingcursor-bridge.err.log"
 $script:TunnelUrlApplied = $false
 $script:DetectedTunnelUrl = $null
 $script:ShuttingDown = $false
 $script:TunnelLogOffset = 0
-# 每 5 分钟对公网隧道做一次 /health 探测；任一次失败即仅重启隧道
+# 姣?5 鍒嗛挓瀵瑰叕缃戦毀閬撳仛涓€娆?/health 鎺㈡祴锛涗换涓€娆″け璐ュ嵆浠呴噸鍚毀閬?
 $script:HealthCheckIntervalSeconds = 300
 $script:HealthCheckTimeoutSeconds = 15
 $script:SecondsSinceHealthCheck = 0
@@ -260,7 +262,7 @@ function Stop-ChildProcesses {
     try {
       & taskkill /PID $script:QualityWatchProcess.Id /T /F *>$null
     } catch {
-      # 质量守护进程可能已退出
+      # 璐ㄩ噺瀹堟姢杩涚▼鍙兘宸查€€鍑?
     }
     $script:QualityWatchProcess = $null
   }
@@ -268,7 +270,7 @@ function Stop-ChildProcesses {
     try {
       & taskkill /PID $script:WebProcess.Id /T /F *>$null
     } catch {
-      # Web 进程可能已退出
+      # Web 杩涚▼鍙兘宸查€€鍑?
     }
     $script:WebProcess = $null
   }
@@ -276,7 +278,7 @@ function Stop-ChildProcesses {
     try {
       & taskkill /PID $script:TunnelProcess.Id /T /F *>$null
     } catch {
-      # 隧道进程可能已退出
+      # 闅ч亾杩涚▼鍙兘宸查€€鍑?
     }
     $script:TunnelProcess = $null
   }
@@ -284,7 +286,7 @@ function Stop-ChildProcesses {
     try {
       & taskkill /PID $script:BridgeProcess.Id /T /F *>$null
     } catch {
-      # Bridge 进程可能已退出
+      # Bridge 杩涚▼鍙兘宸查€€鍑?
     }
     $script:BridgeProcess = $null
   }
@@ -434,7 +436,7 @@ function Restart-TunnelProcess {
         & taskkill /PID $oldPid /T /F *>$null
         Write-Host "Stopped old tunnel PID $oldPid"
       } catch {
-        # 隧道进程可能已退出
+        # 闅ч亾杩涚▼鍙兘宸查€€鍑?
       }
     } elseif ($oldPid) {
       Write-Host "Old tunnel PID $oldPid already exited"
@@ -489,8 +491,8 @@ function Test-PublicBridgeCommunication([string]$PublicUrl) {
 
 function Invoke-TunnelRecovery([string]$Reason) {
   $timestamp = Get-RecoveryTimestamp
-  Write-Host "[RECOVERY START] Tunnel-only restart — reason: $Reason"
-  # 仅重启 cloudflared；通过 Bridge API 更新 token/URL，不重启 Bridge/Web 等进程
+  Write-Host "[RECOVERY START] Tunnel-only restart 鈥?reason: $Reason"
+  # 浠呴噸鍚?cloudflared锛涢€氳繃 Bridge API 鏇存柊 token/URL锛屼笉閲嶅惎 Bridge/Web 绛夎繘绋?
   $null = Invoke-BridgeRegenerateToken
   Restart-TunnelProcess
   if (-not (Wait-ForTunnelUrl -MaxSeconds 90)) {
@@ -625,7 +627,7 @@ function Poll-TunnelOutput {
       }
     }
   } catch {
-    # 流可能暂时不可读
+    # 娴佸彲鑳芥殏鏃朵笉鍙
   }
 }
 
@@ -651,27 +653,52 @@ function Read-TunnelLogNewLines {
       $stream.Dispose()
     }
   } catch {
-    # 日志可能正被 cloudflared 写入，下一轮再读
+    # 鏃ュ織鍙兘姝ｈ cloudflared 鍐欏叆锛屼笅涓€杞啀璇?
   }
+}
+
+
+锘縡unction Show-BridgeStartupLog {
+  if (-not $script:BridgeLogPath -or -not (Test-Path $script:BridgeLogPath)) {
+    return
+  }
+  Write-Host ""
+  Write-Host "Bridge startup log (last 40 lines): $($script:BridgeLogPath)"
+  try {
+    Get-Content -LiteralPath $script:BridgeLogPath -Tail 40 -ErrorAction Stop | ForEach-Object { Write-Host $_ }
+  } catch {
+    Write-Host "(could not read bridge log)"
+  }
+  Write-Host ""
 }
 
 
 function Wait-BridgeReady {
   param([int]$MaxSeconds = 120)
   $healthUrl = "http://127.0.0.1:$BridgePort/health"
+  Write-Host "Waiting for Bridge /health at $healthUrl (max ${MaxSeconds}s)..."
   for ($i = 0; $i -lt $MaxSeconds; $i++) {
+    if ($script:BridgeOwned -and $script:BridgeProcess -and $script:BridgeProcess.HasExited) {
+      Write-Fail "Bridge startup process exited, code: $($script:BridgeProcess.ExitCode)"
+      Show-BridgeStartupLog
+      return $false
+    }
     try {
       $null = Invoke-RestMethod -Uri $healthUrl -Method Get -TimeoutSec 2 -ErrorAction Stop
       return $true
     } catch {
+      if ($i -gt 0 -and ($i % 15) -eq 0) {
+        Write-Host "Still waiting for Bridge /health (${i}s / ${MaxSeconds}s)..."
+      }
       Start-Sleep -Seconds 1
     }
   }
   if ($script:BridgeProcess -and $script:BridgeProcess.HasExited) {
-      Write-Fail "Bridge startup process exited, code: $($script:BridgeProcess.ExitCode)"
+    Write-Fail "Bridge startup process exited, code: $($script:BridgeProcess.ExitCode)"
   } else {
     Write-Fail "Bridge did not pass /health check within ${MaxSeconds}s"
   }
+  Show-BridgeStartupLog
   return $false
 }
 
@@ -682,7 +709,7 @@ function Get-ListenerPids([int]$Port) {
     $pids = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue |
       Select-Object -ExpandProperty OwningProcess -Unique)
   } catch {
-    # Get-NetTCPConnection 不可用时回退 netstat
+    # Get-NetTCPConnection 涓嶅彲鐢ㄦ椂鍥為€€ netstat
   }
   if ($pids.Count -eq 0) {
     $pattern = (':{0}\s' -f $Port)
@@ -736,15 +763,25 @@ function Test-BridgeHealthy {
 }
 
 
-function Start-BridgeProcess {
-  # Windows：勿对 pnpm.cmd 使用 stdout 重定向；用 Start-Process 保持 dev 子进程存活
+锘縡unction Start-BridgeProcess {
+  # Windows: pnpm.cmd dev; log file helps when build fails under Hidden window
   $env:CHATTINGCURSOR_TOKEN_SYNC_DIR = $TokenSyncDir
   $env:BRIDGE_PUBLIC_URL = "http://127.0.0.1:$BridgePort"
   $env:BRIDGE_PORT = "$BridgePort"
   $pnpmExe = Resolve-PnpmExe
-  $script:BridgeProcess = Start-Process -FilePath $pnpmExe -ArgumentList "dev:bridge" -WorkingDirectory $Root -WindowStyle Hidden -PassThru
+  if (Test-Path $script:BridgeLogPath) {
+    Remove-Item $script:BridgeLogPath -Force -ErrorAction SilentlyContinue
+  }
+  $script:BridgeProcess = Start-Process -FilePath $pnpmExe `
+    -ArgumentList "dev:bridge" `
+    -WorkingDirectory $Root `
+    -RedirectStandardOutput $script:BridgeLogPath `
+    -RedirectStandardError $script:BridgeErrLogPath `
+    -WindowStyle Hidden `
+    -PassThru
   $script:BridgeOwned = $true
   Write-Host "Bridge process PID: $($script:BridgeProcess.Id) (pnpm: $pnpmExe)"
+  Write-Host "Bridge log: $($script:BridgeLogPath)"
 }
 
 
@@ -757,7 +794,7 @@ function Start-TunnelProcess {
     Remove-Item $script:TunnelLogPath -Force -ErrorAction SilentlyContinue
   }
   $script:TunnelLogOffset = 0
-  # cloudflared 日志走 stderr；Start-Process 重定向到文件，避免管道缓冲区塞满
+  # cloudflared 鏃ュ織璧?stderr锛汼tart-Process 閲嶅畾鍚戝埌鏂囦欢锛岄伩鍏嶇閬撶紦鍐插尯濉炴弧
   $script:TunnelProcess = Start-Process -FilePath $cloudflaredExe `
     -ArgumentList @("tunnel", "--url", "http://127.0.0.1:$BridgePort") `
     -RedirectStandardError $script:TunnelLogPath `
@@ -778,7 +815,7 @@ try {
     Stop-ChildProcesses
   }) | Out-Null
 } catch {
-  # 非交互终端无法注册 Ctrl+C
+  # 闈炰氦浜掔粓绔棤娉曟敞鍐?Ctrl+C
 }
 
 $exitCode = 0
