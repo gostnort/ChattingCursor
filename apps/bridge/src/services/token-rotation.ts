@@ -156,11 +156,28 @@ function deriveRotatedToken(datetime: string, salt: string): string {
 }
 
 
+const TOKEN_PID_HEADER = "# processes (managed by run-all)";
+const TOKEN_PID_LINE_PATTERN = /^\s*pid\.[a-z0-9-]+\s*=/i;
+
+
+function extractPreservedPidLines(content: string): string[] {
+  const preserved: string[] = [];
+  for (const line of content.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (trimmed === TOKEN_PID_HEADER || TOKEN_PID_LINE_PATTERN.test(line)) {
+      preserved.push(line.replace(/\r$/, ""));
+    }
+  }
+  return preserved;
+}
+
+
 function buildTokenFileContent(options: {
   datetime: string;
   previousDatetime?: string;
   token: string;
   publicBridgeUrl: string;
+  preservedPidLines?: string[];
 }): string {
   const lines = [`datetime: ${options.datetime}`];
   if (options.previousDatetime) {
@@ -168,6 +185,10 @@ function buildTokenFileContent(options: {
   }
   lines.push(`token: ${options.token}`);
   lines.push(`publicBridgeUrl: ${options.publicBridgeUrl}`);
+  if (options.preservedPidLines && options.preservedPidLines.length > 0) {
+    lines.push("");
+    lines.push(...options.preservedPidLines);
+  }
   lines.push("");
   return lines.join("\n");
 }
@@ -252,11 +273,19 @@ async function migrateLegacySaltFromSyncedFile(
     tokenDay === today
       ? parsed.token.trim()
       : deriveDailyToken(today, salt);
+  let preservedPidLines: string[] = [];
+  try {
+    const existingRaw = await readFile(filePath, "utf8");
+    preservedPidLines = extractPreservedPidLines(existingRaw);
+  } catch {
+    // 迁移时可能尚无 pid 段
+  }
   const content = buildTokenFileContent({
     datetime: tokenDay === today ? (prior ?? nowIso()) : nowIso(),
     previousDatetime: tokenDay === today ? parsed.previousDatetime : prior,
     token,
     publicBridgeUrl,
+    preservedPidLines,
   });
   await writeFile(filePath, content, "utf8");
   return { date: today, token, filePath };
@@ -381,11 +410,19 @@ export class TokenRotationService {
         previousDatetime = prior;
       }
     }
+    let preservedPidLines: string[] = [];
+    try {
+      const existingRaw = await readFile(filePath, "utf8");
+      preservedPidLines = extractPreservedPidLines(existingRaw);
+    } catch {
+      // 新文件尚无 pid 段
+    }
     const content = buildTokenFileContent({
       datetime,
       previousDatetime,
       token: options.token,
       publicBridgeUrl: options.publicBridgeUrl,
+      preservedPidLines,
     });
     await writeFile(filePath, content, "utf8");
     this.cachedRecord = { date: today, token: options.token, filePath };

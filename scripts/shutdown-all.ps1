@@ -7,6 +7,10 @@ param(
 )
 
 $ErrorActionPreference = "Continue"
+. (Join-Path $PSScriptRoot "Resolve-TokenSyncDir.ps1")
+. (Join-Path $PSScriptRoot "TokenFilePids.ps1")
+$TokenSyncDir = Resolve-TokenSyncDir -Override ""
+$TokenFilePath = Join-Path $TokenSyncDir "chattingcursor-token.txt"
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $RootPattern = [regex]::Escape($Root)
 $StoppedBridge = $false
@@ -277,8 +281,34 @@ function Get-AllCandidateProcesses() {
 
 Write-Host "=== ChattingCursor shutdown ==="
 Write-Host "Project root: $Root"
+Write-Host "Token file: $TokenFilePath"
 Write-Host "Port wait timeout: ${PortWaitSeconds}s"
 Write-Host ""
+
+$tokenPidMap = Get-TokenFilePidMap -FilePath $TokenFilePath
+if ($tokenPidMap.Count -gt 0) {
+  Write-Step "Stopping processes from token file (pid.*)..."
+  foreach ($key in $script:ManagedPidKeyOrder) {
+    if (-not $tokenPidMap.ContainsKey($key)) {
+      continue
+    }
+    $procId = [int]$tokenPidMap[$key]
+    if ($procId -le 4) {
+      continue
+    }
+    $label = "pid.$key"
+    if (Stop-ProcessSafe -ProcessId $procId -Label $label) {
+      switch ($key) {
+        "bridge" { $StoppedBridge = $true }
+        "cloudflared" { $StoppedCloudflared = $true }
+        "web" { $StoppedWeb = $true }
+        "quality-watch" { $StoppedQualityWatch = $true }
+        default { }
+      }
+    }
+  }
+  Start-Sleep -Milliseconds 500
+}
 
 $candidatePids = @{}
 $processes = Get-AllCandidateProcesses
@@ -451,6 +481,7 @@ if ($shutdownFailed) {
 }
 
 Write-Ok "All checked ports and cloudflared are stopped."
+Clear-TokenFilePidSection -FilePath $TokenFilePath
 Write-Host ""
 Write-Host "Shutdown complete. Start again with run.bat"
 Write-Host ""

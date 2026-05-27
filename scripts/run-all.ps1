@@ -17,7 +17,9 @@ if ($NoWeb) {
 
 $ErrorActionPreference = "Continue"
 . (Join-Path $PSScriptRoot "Resolve-TokenSyncDir.ps1")
+. (Join-Path $PSScriptRoot "TokenFilePids.ps1")
 $TokenSyncDir = Resolve-TokenSyncDir -Override $TokenSyncDir
+$script:ServicePids = @{}
 try {
   [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
   $OutputEncoding = [Console]::OutputEncoding
@@ -139,6 +141,7 @@ function Start-WebProcess {
   $pnpmExe = Resolve-PnpmExe
   $script:WebProcess = Start-Process -FilePath $pnpmExe -ArgumentList "dev:web" -WorkingDirectory $Root -WindowStyle Hidden -PassThru
   $script:WebOwned = $true
+  Set-ServicePid -Key "web" -ProcessId $script:WebProcess.Id
   Write-Host "Web process PID: $($script:WebProcess.Id) (pnpm: $pnpmExe)"
 }
 
@@ -167,6 +170,7 @@ function Start-QualityWatchProcess {
     -WindowStyle Hidden `
     -PassThru
   $script:QualityWatchOwned = $true
+  Set-ServicePid -Key "quality-watch" -ProcessId $script:QualityWatchProcess.Id
   Write-Ok "Quality watcher started (PID $($script:QualityWatchProcess.Id), log: $logPath)"
   return $true
 }
@@ -313,6 +317,37 @@ function Get-TokenFilePath {
 }
 
 
+function Initialize-FreshStartupPidTracking {
+  $script:ServicePids = @{ "run-all" = $PID }
+  Clear-TokenFilePidSection -FilePath (Get-TokenFilePath)
+  Sync-ServicePidsToTokenFile
+}
+
+
+function Set-ServicePid {
+  param(
+    [string]$Key,
+    [int]$ProcessId
+  )
+  if ($ProcessId -le 0) {
+    return
+  }
+  $script:ServicePids[$Key] = $ProcessId
+  Sync-ServicePidsToTokenFile
+}
+
+
+function Sync-ServicePidsToTokenFile {
+  param([switch]$CloudflaredOnly)
+  Merge-TokenFilePidSection -FilePath (Get-TokenFilePath) -PidMap $script:ServicePids -CloudflaredOnly:$CloudflaredOnly
+}
+
+
+function Restore-ServicePidsAfterBridgeTokenWrite {
+  Sync-ServicePidsToTokenFile
+}
+
+
 function Get-TokenFilePathResolved {
   $path = Get-TokenFilePath
   if (Test-Path $path) {
@@ -381,6 +416,7 @@ function Invoke-BridgeRegenerateToken {
     if ($response.tokenFilePath) {
       Write-Host "     Token file: $($response.tokenFilePath)"
     }
+    Restore-ServicePidsAfterBridgeTokenWrite
     return $true
   } catch {
     Write-Fail "Bridge failed to regenerate token: $($_.Exception.Message)"
@@ -409,6 +445,7 @@ function Restart-TunnelProcess {
   $script:DetectedTunnelUrl = $null
   $script:TunnelLogOffset = 0
   Start-TunnelProcess
+  Set-ServicePid -Key "cloudflared" -ProcessId $script:TunnelProcess.Id
   Write-Host "Started new cloudflared (PID $($script:TunnelProcess.Id))"
 }
 
@@ -510,6 +547,7 @@ function Set-PublicBridgeUrlInTokenFile([string]$PublicUrl, [switch]$Force) {
     return $false
   }
   Write-Ok "Token file now contains public URL: $onDisk"
+  Restore-ServicePidsAfterBridgeTokenWrite
   $script:TunnelUrlApplied = $true
   Show-TokenFileOpenReminder -PublicUrl $onDisk
   Write-Host "Phone setup path: GitHub Pages -> Local -> Config"
@@ -734,6 +772,7 @@ function Start-BridgeProcess {
     -WindowStyle Hidden `
     -PassThru
   $script:BridgeOwned = $true
+  Set-ServicePid -Key "bridge" -ProcessId $script:BridgeProcess.Id
   Write-Host "Bridge process PID: $($script:BridgeProcess.Id) (pnpm: $pnpmExe)"
   Write-Host "Bridge log: $($script:BridgeLogPath)"
 }
@@ -753,6 +792,7 @@ function Start-TunnelProcess {
     -ArgumentList @("tunnel", "--url", "http://127.0.0.1:$BridgePort") `
     -RedirectStandardError $script:TunnelLogPath `
     -NoNewWindow -PassThru
+  Set-ServicePid -Key "cloudflared" -ProcessId $script:TunnelProcess.Id
   Write-Host "cloudflared: $cloudflaredExe (PID $($script:TunnelProcess.Id))"
   Write-Host "Tunnel log: $($script:TunnelLogPath)"
 }
@@ -801,6 +841,8 @@ try {
     }
   }
 
+  Initialize-FreshStartupPidTracking
+
   if (-not (Test-BridgeHealthy)) {
     Write-Step "Starting Bridge (port $BridgePort)..."
     Start-BridgeProcess
@@ -810,6 +852,7 @@ try {
     }
   }
   Write-Ok "Bridge local health: http://127.0.0.1:$BridgePort/health"
+  Restore-ServicePidsAfterBridgeTokenWrite
 
   if ($WithQualityWatch) {
     Write-Step "Starting quality watcher (typecheck/lint + crew dry-run)..."

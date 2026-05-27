@@ -10,6 +10,16 @@ if errorlevel 1 (
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\run-all.ps1" -WithWeb %*
 set EXITCODE=%ERRORLEVEL%
-if "%EXITCODE%"=="2" exit /b 2
-if not "%EXITCODE%"=="0" exit /b %EXITCODE%
+if "%EXITCODE%"=="2" (
+  echo.
+  echo [FAIL] Port conflict or cleanup failed. Exit code 2.
+  pause
+  exit /b 2
+)
+if not "%EXITCODE%"=="0" (
+  echo.
+  echo [FAIL] run-all exited with code %EXITCODE%. See messages above.
+  pause
+  exit /b %EXITCODE%
+)
 exit /b 0
