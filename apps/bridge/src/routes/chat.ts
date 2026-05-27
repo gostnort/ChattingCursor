@@ -19,7 +19,7 @@ import {
 } from "../services/history-search-intent.js";
 import {
   extractWebSearchQuery,
-  extractWebSearchUserContext,
+  extractWebSearchUserIntent,
   formatWebSearchReply,
   hasWebSearchIntent,
 } from "../services/web-search-intent.js";
@@ -270,26 +270,26 @@ export async function registerChatRoutes(app: FastifyInstance): Promise<void> {
     }
     if (hasWebSearchIntent(prompt)) {
       const query = extractWebSearchQuery(prompt);
-      const userContext = extractWebSearchUserContext(prompt);
+      const userIntent = extractWebSearchUserIntent(prompt, session.messages);
       request.log.info(
-        { query, userContext: userContext || undefined, endpoint: "http://127.0.0.1:9222", path: "chrome-google-search" },
+        { query, userIntent: userIntent || undefined, endpoint: "http://127.0.0.1:9222", path: "chrome-google-search" },
         "Windows CDP search (Bridge → Chrome 9222, not WSL MCP)",
       );
-      void openGoogleSearchInChrome(query, { userContext: userContext || undefined }).then((result) => {
+      void openGoogleSearchInChrome(query, { userIntent: userIntent || undefined }).then((result) => {
         request.log.info(
           {
             query,
             ok: result.ok,
-            serpStartOffsets: result.serpStartOffsets,
-            isRepeatSearch: result.isRepeatSearch,
-            linksQueued: result.linksQueued,
-            linksCrawled: result.linksCrawled,
-            crawlBatchCount: result.crawlBatchCount,
-            statePath: result.statePath,
+            serpStartOffsets: result.meta.serpStartOffsets,
+            isRepeatSearch: result.meta.isRepeatSearch,
+            linksQueued: result.meta.linksQueued,
+            linksCrawled: result.meta.linksCrawled,
+            crawlBatchCount: result.meta.crawlBatchCount,
+            statePath: result.meta.statePath,
           },
           "websearch finished",
         );
-        const replyText = formatWebSearchReply(query, result);
+        const replyText = formatWebSearchReply(userIntent || query, result);
         finishDirectReplyRun(runId, session.sessionId, prompt, replyText, "chrome_web_search", modelLabel);
       }).catch((error: unknown) => {
         const message = error instanceof Error ? error.message : String(error);

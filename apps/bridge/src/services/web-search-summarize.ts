@@ -6,44 +6,34 @@ const SUMMARIZE_TIMEOUT_MS = 90000;
 const AGGREGATE_PROMPT_MAX_CHARS = 30000;
 
 
-/** 若配置了 CURSOR_API_KEY，用 SDK 对聚合摘录做综合评述（失败则忽略） */
+/** 若配置了 CURSOR_API_KEY，用 SDK 对聚合摘录做综合回答（失败则忽略） */
 export async function maybeSummarizeWebSearchWithSdk(
   query: string,
   extractedText: string,
   structuredBullets: string,
-  userContext?: string,
+  userIntent?: string,
 ): Promise<string | undefined> {
   const apiKey = process.env.CURSOR_API_KEY?.trim();
   if (!apiKey || !extractedText.trim()) {
     return undefined;
   }
   const modelId = process.env.CURSOR_WEB_SEARCH_MODEL?.trim() || "composer-2";
-  const zh = preferChineseWebSearchReply(query) || preferChineseWebSearchReply(userContext ?? "");
-  const contextBlock = userContext?.trim()
-    ? (zh ? `用户背景：${userContext.trim()}` : `User context: ${userContext.trim()}`)
-    : "";
-  const instruction = zh
-    ? [
-      "你是一位研究助手。请综合评述以下 Google 搜索后抓取的资料（SERP 摘要与各结果页正文摘录）。",
-      "要求：结构清晰；归纳共识与分歧；标注可信度有限之处；直接回答用户关心的问题。",
-      "使用中文回复；可用小标题与要点列表；不要编造未出现在材料中的具体事实。",
-    ].join("\n")
-    : [
-      "You are a research assistant. Synthesize the following Google SERP snippets and crawled page excerpts.",
-      "Be structured; note agreement vs disagreement; flag uncertainty; answer the user's underlying question.",
-      "Use the same language as the query. Do not invent facts not present in the material.",
-    ].join("\n");
+  const zh = preferChineseWebSearchReply(userIntent ?? "") || preferChineseWebSearchReply(query);
+  const answerLanguage = zh ? "Chinese" : "English";
+  const question = userIntent?.trim() || query.trim();
   const prompt = [
-    instruction,
-    `${zh ? "搜索词" : "Query"}: ${query}`,
-    contextBlock,
+    `User question: ${question}`,
+    `Search terms: ${query.trim()}`,
+    `Based on the collected sources below, write a direct answer in ${answerLanguage}.`,
+    "Do not list URLs unless essential. Do not output a bullet list of search hits or paste page excerpts.",
+    "Write one coherent summary (综合回答) that answers the user's underlying question.",
     "",
-    zh ? "结构化命中：" : "Structured hits:",
+    zh ? "结构化命中（仅供综合，勿照抄到回复）：" : "Structured hits (for synthesis only):",
     structuredBullets || (zh ? "（无）" : "(none)"),
     "",
-    zh ? "聚合正文摘录：" : "Aggregated excerpts:",
+    zh ? "聚合正文摘录（仅供综合）：" : "Aggregated excerpts (for synthesis only):",
     extractedText.slice(0, AGGREGATE_PROMPT_MAX_CHARS),
-  ].filter(Boolean).join("\n");
+  ].join("\n");
   try {
     const result = await Promise.race([
       Agent.prompt(prompt, {

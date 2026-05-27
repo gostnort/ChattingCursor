@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   extractWebSearchQuery,
   extractWebSearchUserContext,
+  extractWebSearchUserIntent,
   formatWebSearchReply,
   hasWebSearchIntent,
 } from "./web-search-intent.js";
@@ -63,33 +64,47 @@ test("extractWebSearchQuery 多行取首个 /websearch 查询", () => {
 });
 
 
-test("formatWebSearchReply 含搜索摘要与来源", () => {
-  const reply = formatWebSearchReply("机票", {
-    ok: true,
-    endpoint: "http://127.0.0.1:9222",
-    searchUrl: "https://www.google.com/search?q=%E6%9C%BA%E7%A5%A8",
-    pageUrl: "https://www.google.com/search?q=%E6%9C%BA%E7%A5%A8",
-    serpItems: [{ title: "航班动态", url: "https://example.com", snippet: "CA988" }],
-    synthesizedSummary: "- 航班动态：CA988",
-  });
-  assert.match(reply, /## 搜索摘要/);
-  assert.match(reply, /## 搜索结果/);
-  assert.match(reply, /航班动态/);
-  assert.match(reply, /来源：/);
-  assert.match(reply, /标签页已自动关闭/);
+test("extractWebSearchUserIntent 优先行内背景", () => {
+  const mixed =
+    "古埃及太阳神拉在最早文献里叫什么? /websearch ra in oldest egypt history";
+  assert.equal(
+    extractWebSearchUserIntent(mixed, []),
+    "古埃及太阳神拉在最早文献里叫什么?",
+  );
 });
 
 
-test("formatWebSearchReply 提及分批打开", () => {
+test("formatWebSearchReply 仅输出综合回答与页脚", () => {
+  const reply = formatWebSearchReply("古埃及太阳神拉在最早文献里叫什么?", {
+    ok: true,
+    synthesis: "在古王国时期，太阳神常称 Ra（拉），最早可追溯至金字塔铭文等文献。",
+    meta: {
+      endpoint: "http://127.0.0.1:9222",
+      searchUrl: "https://www.google.com/search?q=ra",
+      linksCrawled: 8,
+      serpStartOffsets: [10, 20],
+    },
+  });
+  assert.match(reply, /## 回答/);
+  assert.match(reply, /太阳神常称 Ra/);
+  assert.match(reply, /已检索 8 个来源/);
+  assert.match(reply, /第 2–3 页/);
+  assert.doesNotMatch(reply, /## 搜索结果/);
+  assert.doesNotMatch(reply, /页面摘录/);
+});
+
+
+test("formatWebSearchReply 页脚可仅含分页信息", () => {
   const reply = formatWebSearchReply("测试", {
     ok: true,
-    endpoint: "http://127.0.0.1:9222",
-    searchUrl: "https://www.google.com/search?q=test",
-    linksQueued: 12,
-    linksCrawled: 10,
-    crawlBatchCount: 3,
-    crawlBatchSize: 5,
+    synthesis: "综合结论示例。",
+    meta: {
+      endpoint: "http://127.0.0.1:9222",
+      searchUrl: "https://www.google.com/search?q=test",
+      linksCrawled: 10,
+      serpStartOffsets: [10, 20],
+    },
   });
-  assert.match(reply, /分 3 批打开/);
-  assert.match(reply, /每批最多 5 个/);
+  assert.match(reply, /已检索 10 个来源/);
+  assert.doesNotMatch(reply, /分 \d+ 批打开/);
 });

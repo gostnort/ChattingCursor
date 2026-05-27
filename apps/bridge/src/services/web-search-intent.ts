@@ -1,8 +1,14 @@
-import {
-  buildStructuredSerpSummary,
-  preferChineseWebSearchReply,
-  type GoogleSerpItem,
-} from "./google-serp-parse.js";
+import { preferChineseWebSearchReply } from "./google-serp-parse.js";
+
+
+/** formatWebSearchReply 使用的检索元信息（不含正文摘录） */
+export interface WebSearchReplyMeta {
+  endpoint: string;
+  searchUrl: string;
+  linksCrawled?: number;
+  linksQueued?: number;
+  serpStartOffsets?: number[];
+}
 
 const SLASH_WEBSEARCH = /\/websearch\b/i;
 const SLASH_GOOGLE = /\/google\b/i;
@@ -93,6 +99,42 @@ export function extractWebSearchUserContext(prompt: string): string {
 }
 
 
+/** 合并行内背景与会话中较早的用户消息，得到待回答的用户意图 */
+export function extractWebSearchUserIntent(
+  prompt: string,
+  sessionMessages: { role: string; content: string }[] = [],
+): string {
+  const inline = extractWebSearchUserContext(prompt);
+  if (inline) {
+    return inline;
+  }
+  const trimmedPrompt = prompt.trim();
+  const priorLines: string[] = [];
+  for (let index = sessionMessages.length - 1; index >= 0; index -= 1) {
+    const message = sessionMessages[index];
+    if (message.role !== "user") {
+      continue;
+    }
+    const content = message.content.trim();
+    if (!content || content === trimmedPrompt) {
+      continue;
+    }
+    const withoutSlash = content
+      .replace(/\s*\/websearch\b[\s\S]*$/i, "")
+      .replace(/\s*\/google\b[\s\S]*$/i, "")
+      .trim();
+    const candidate = withoutSlash || (/^\/(?:websearch|google)\b/i.test(content) ? "" : content);
+    if (candidate) {
+      priorLines.unshift(candidate);
+    }
+    if (priorLines.length >= 3) {
+      break;
+    }
+  }
+  return priorLines.join("\n").trim();
+}
+
+
 /** 从自然语言或 /websearch、/google 指令中提取联网搜索关键词 */
 export function extractWebSearchQuery(prompt: string): string {
   const trimmed = prompt.trim();
@@ -139,121 +181,67 @@ function cleanupQuery(raw: string): string {
 }
 
 
-/** 将 Chrome 打开 Google 搜索的结果格式化为 assistant 回复 */
+function googleStartOffsetToPageNumber(start: number): number {
+  if (start <= 0) {
+    return 1;
+  }
+  return Math.floor(start / 10) + 1;
+}
+
+
+function buildWebSearchMetaFooter(meta: WebSearchReplyMeta, zh: boolean): string | undefined {
+  const crawled = meta.linksCrawled ?? 0;
+  const queued = meta.linksQueued ?? 0;
+  const sourceCount = crawled > 0 ? crawled : queued;
+  const offsets = meta.serpStartOffsets ?? [];
+  if (sourceCount <= 0 && offsets.length === 0) {
+    return undefined;
+  }
+  let pageSpan = "";
+  if (offsets.length > 0) {
+    const pages = offsets.map((offset) => googleStartOffsetToPageNumber(offset));
+    const minPage = Math.min(...pages);
+    const maxPage = Math.max(...pages);
+    pageSpan = zh ? `，第 ${minPage}–${maxPage} 页` : `, pages ${minPage}–${maxPage}`;
+  }
+  if (sourceCount > 0) {
+    return zh
+      ? `（已检索 ${sourceCount} 个来源${pageSpan}）`
+      : `(Searched ${sourceCount} source(s)${pageSpan})`;
+  }
+  return zh ? `（已检索 Google 结果${pageSpan}）` : `(Google SERP${pageSpan})`;
+}
+
+
+/** 将联网搜索综合结果格式化为 assistant 回复（仅综合回答，不含原始摘录） */
 export function formatWebSearchReply(
-  query: string,
+  userIntent: string,
   result: {
     ok: boolean;
-    searchUrl: string;
-    pageUrl?: string;
-    title?: string;
-    excerpt?: string;
-    serpItems?: GoogleSerpItem[];
-    crawledPages?: { title: string; url: string; text: string }[];
-    synthesizedSummary?: string;
-    serpPagesFetched?: number;
-    serpStartOffsets?: number[];
-    isRepeatSearch?: boolean;
-    linksCrawled?: number;
-    linksQueued?: number;
-    linksTruncated?: boolean;
-    crawlBatchCount?: number;
-    crawlBatchSize?: number;
-    block?: "consent" | "captcha" | null;
-    aiSummary?: string;
-    endpoint: string;
+    synthesis?: string;
+    meta: WebSearchReplyMeta;
     message?: string;
   },
 ): string {
-  const zh = preferChineseWebSearchReply(query);
+  const zh = preferChineseWebSearchReply(userIntent);
   if (!result.ok) {
     return [
       zh
-        ? `无法在 Chrome（${result.endpoint}）中打开 Google 搜索「${query}」。`
-        : `Could not open Google search for "${query}" in Chrome (${result.endpoint}).`,
+        ? `无法在 Chrome（${result.meta.endpoint}）中完成联网搜索。`
+        : `Web search failed in Chrome (${result.meta.endpoint}).`,
       result.message ?? (zh ? "请确认 Chrome 已启用远程调试端口 9222。" : "Ensure Chrome remote debugging on port 9222."),
       "",
       zh ? "启动示例（Windows）：" : "Example (Windows):",
       '  "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --remote-debugging-port=9222',
-      "",
-      `${zh ? "预备搜索链接" : "Search URL"}：${result.searchUrl}`,
     ].join("\n");
   }
-  const sourceUrl = result.pageUrl && result.pageUrl !== "about:blank" ? result.pageUrl : result.searchUrl;
-  const summaryHeading = zh ? "## 搜索摘要" : "## Search summary";
-  const resultsHeading = zh ? "## 搜索结果" : "## Search results";
-  const snapshot = {
-    title: result.title,
-    url: sourceUrl,
-    text: result.excerpt,
-    items: result.serpItems ?? [],
-    block: result.block ?? null,
-  };
-  const structured = buildStructuredSerpSummary(query, snapshot);
-  const synthesis = result.aiSummary?.trim()
-    ?? result.synthesizedSummary?.trim()
-    ?? (result.block ? structured : "");
-  const lines = [
-    summaryHeading,
-    "",
-    zh ? `关键词：${query}` : `Query: ${query}`,
-    "",
-    synthesis || structured || (zh ? "（暂无摘要）" : "(No summary yet)"),
-  ];
-  if (!result.block) {
-    lines.push("", resultsHeading, "", structured);
+  const heading = zh ? "## 回答" : "## Answer";
+  const body = result.synthesis?.trim()
+    || (zh ? "（未能根据检索结果生成回答，请稍后重试。）" : "(Could not synthesize an answer from sources.)");
+  const lines = [heading, "", body];
+  const footer = buildWebSearchMetaFooter(result.meta, zh);
+  if (footer) {
+    lines.push("", footer);
   }
-  if (result.crawledPages && result.crawledPages.length > 0) {
-    lines.push("", zh ? "### 已阅读页面摘录" : "### Pages read", "");
-    for (const page of result.crawledPages) {
-      const excerpt = page.text.replace(/\s+/g, " ").trim().slice(0, 280);
-      lines.push(`- **${page.title}**`, `  ${page.url}`, excerpt ? `  ${excerpt}…` : "");
-    }
-  }
-  if (result.serpStartOffsets && result.serpStartOffsets.length > 0) {
-    const offsetNote = zh
-      ? `（SERP start=${result.serpStartOffsets.join(",")}${result.isRepeatSearch ? "，续搜" : "，首次第2–3页"}）`
-      : `(SERP start=${result.serpStartOffsets.join(",")}${result.isRepeatSearch ? ", continued" : ", first pages 2–3"})`;
-    lines.push("", offsetNote);
-  } else if (typeof result.serpPagesFetched === "number" && result.serpPagesFetched > 1) {
-    lines.push("", zh ? `（已合并 ${result.serpPagesFetched} 页 Google 结果）` : `(Merged ${result.serpPagesFetched} SERP pages)`);
-  }
-  if (typeof result.linksQueued === "number" || typeof result.linksCrawled === "number") {
-    const queued = result.linksQueued ?? 0;
-    const crawled = result.linksCrawled ?? 0;
-    const batchSize = result.crawlBatchSize ?? 5;
-    const batchCount = result.crawlBatchCount ?? (queued > 0 ? Math.ceil(queued / batchSize) : 0);
-    const batchNote = batchCount > 0
-      ? (zh
-        ? `，分 ${batchCount} 批打开（每批最多 ${batchSize} 个）`
-        : `, opened in ${batchCount} batch(es) of up to ${batchSize}`)
-      : "";
-    lines.push(
-      "",
-      zh
-        ? `已排队打开 ${queued} 个结果链接，成功阅读 ${crawled} 个${batchNote}${result.linksTruncated ? "（部分链接因上限未打开）" : ""}。`
-        : `Queued ${queued} result link(s), read ${crawled}${batchNote}${result.linksTruncated ? " (some links skipped due to limits)" : ""}.`,
-    );
-  }
-  if (result.title) {
-    lines.push("", `${zh ? "页面标题" : "Page title"}：${result.title}`);
-  }
-  lines.push(
-    "",
-    `${zh ? "来源" : "Source"}：${sourceUrl}`,
-    "",
-    zh
-      ? `已通过 Chrome（${result.endpoint}）完成搜索与摘录，相关标签页已自动关闭。`
-      : `Search and extraction via Chrome (${result.endpoint}); opened tabs were closed.`,
-  );
-  if (result.message) {
-    lines.push("", result.message);
-  }
-  lines.push(
-    "",
-    zh
-      ? "提示：联网搜索走 Bridge → Windows Chrome CDP（9222），非 WSL MCP；勿依赖 Kimi「auto」付费 API。"
-      : "Tip: web search uses Bridge → Windows Chrome CDP (9222), not WSL MCP or Kimi paid web.",
-  );
   return lines.join("\n");
 }

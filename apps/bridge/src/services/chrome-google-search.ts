@@ -4,6 +4,7 @@ import { resolveBridgeChromeEndpoint } from "@chatting-cursor/shared/chrome-endp
 import {
   GOOGLE_PAGE_MAIN_TEXT_EXPRESSION,
   GOOGLE_SERP_EXTRACT_EXPRESSION,
+  buildStructuredSerpSummary,
   buildSynthesizedSearchSummary,
   collectNewOrganicResultUrls,
   type CrawledPageText,
@@ -20,7 +21,7 @@ import {
 import { maybeSummarizeWebSearchWithSdk } from "./web-search-summarize.js";
 
 const NAVIGATE_TIMEOUT_MS = 15000;
-const CDP_SESSION_TIMEOUT_MS = 90000;
+const CDP_SESSION_TIMEOUT_MS = 180000;
 const EXCERPT_MAX_CHARS = 8000;
 const PAGE_TEXT_MAX_CHARS = 3500;
 const AGGREGATE_EXCERPT_MAX_CHARS = 30000;
@@ -35,8 +36,26 @@ function logWebSearch(stage: string, details: Record<string, unknown>): void {
 
 
 export interface ChromeGoogleSearchOptions {
-  /** /websearch 行前的用户问题或背景 */
-  userContext?: string;
+  /** 用户待回答的问题（行内背景、会话上文或搜索词） */
+  userIntent?: string;
+}
+
+
+/** 对外返回的检索元信息（不含 SERP/页面摘录） */
+export interface WebSearchMeta {
+  endpoint: string;
+  searchUrl: string;
+  pageUrl?: string;
+  serpStartOffsets?: number[];
+  isRepeatSearch?: boolean;
+  linksCrawled?: number;
+  linksQueued?: number;
+  linksTruncated?: boolean;
+  crawlBatchCount?: number;
+  crawlBatchSize?: number;
+  serpPagesFetched?: number;
+  statePath?: string;
+  block?: "consent" | "captcha" | null;
 }
 
 
@@ -50,25 +69,9 @@ export interface ChromeEndpointStatus {
 
 export interface ChromeGoogleSearchResult {
   ok: boolean;
-  endpoint: string;
-  searchUrl: string;
-  pageUrl?: string;
-  title?: string;
-  excerpt?: string;
-  serpItems?: GoogleSerpItem[];
-  crawledPages?: CrawledPageText[];
-  synthesizedSummary?: string;
-  serpPagesFetched?: number;
-  serpStartOffsets?: number[];
-  isRepeatSearch?: boolean;
-  linksCrawled?: number;
-  linksQueued?: number;
-  linksTruncated?: boolean;
-  crawlBatchCount?: number;
-  crawlBatchSize?: number;
-  statePath?: string;
-  block?: "consent" | "captcha" | null;
-  aiSummary?: string;
+  /** 面向用户的综合回答（不含原始 SERP/摘录） */
+  synthesis?: string;
+  meta: WebSearchMeta;
   message?: string;
 }
 
@@ -145,8 +148,7 @@ export async function openGoogleSearchInChrome(
   if (!chrome.available) {
     return {
       ok: false,
-      endpoint,
-      searchUrl,
+      meta: { endpoint, searchUrl },
       message: chrome.message,
     };
   }
@@ -157,7 +159,7 @@ export async function openGoogleSearchInChrome(
   let serpOffsetsUsed: number[] = [];
   let crawlQueue: string[] = [];
   try {
-    const created = await openTab(endpoint, searchUrl);
+    const created = await openTab(endpoint, "about:blank");
     const searchTargetId = typeof created.id === "string" ? created.id : "";
     if (searchTargetId) {
       createdTabIds.push(searchTargetId);
@@ -166,8 +168,7 @@ export async function openGoogleSearchInChrome(
     if (!wsUrl) {
       return {
         ok: false,
-        endpoint,
-        searchUrl,
+        meta: { endpoint, searchUrl },
         message: "已打开标签页，但无法获取 CDP WebSocket（无法导航或摘录）。",
       };
     }
@@ -231,21 +232,35 @@ export async function openGoogleSearchInChrome(
     const pageBullets = crawledPages
       .map((page) => `- ${page.title} (${page.url}): ${page.text.slice(0, 240)}`)
       .join("\n");
-    const synthesizedSummary = serpCapture.block
+    const ruleSummary = serpCapture.block
       ? undefined
       : buildSynthesizedSearchSummary(query, serpItems, crawledPages);
     const aggregateExcerpt = [
       serpCapture.excerpt ?? "",
       ...crawledPages.map((page) => `## ${page.title}\n${page.url}\n${page.text}`),
     ].join("\n\n").slice(0, AGGREGATE_EXCERPT_MAX_CHARS);
+    const blockSnapshot = {
+      title: serpCapture.title,
+      url: serpCapture.url && serpCapture.url !== "about:blank" ? serpCapture.url : searchUrl,
+      text: serpCapture.excerpt,
+      items: serpItems,
+      block: serpCapture.block ?? null,
+    };
+    const blockNotice = serpCapture.block
+      ? buildStructuredSerpSummary(query, blockSnapshot)
+      : undefined;
     const aiSummary = serpCapture.block
       ? undefined
       : await maybeSummarizeWebSearchWithSdk(
         query,
         aggregateExcerpt,
         [structuredBullets, pageBullets].filter(Boolean).join("\n"),
-        options.userContext,
+        options.userIntent,
       );
+    const synthesis = blockNotice?.trim()
+      || aiSummary?.trim()
+      || ruleSummary?.trim()
+      || undefined;
     const statusNotes: string[] = [];
     if (plan.isRepeat) {
       statusNotes.push(`本次为重复查询，已抓取 Google start=${serpOffsets.join(",")} 共 ${serpOffsets.length} 页。`);
@@ -265,25 +280,22 @@ export async function openGoogleSearchInChrome(
     statusNotes.push(`状态文件：${plan.statePath}`);
     return {
       ok: true,
-      endpoint,
-      searchUrl,
-      pageUrl: serpCapture.url,
-      title: serpCapture.title,
-      excerpt: serpCapture.excerpt,
-      serpItems,
-      crawledPages,
-      synthesizedSummary,
-      serpPagesFetched: serpCapture.pagesFetched,
-      serpStartOffsets: serpOffsetsUsed,
-      isRepeatSearch: plan.isRepeat,
-      linksCrawled: crawledPages.length,
-      linksQueued: crawlQueue.length,
-      linksTruncated,
-      crawlBatchCount,
-      crawlBatchSize: WEBSEARCH_CRAWL_BATCH_SIZE,
-      statePath: plan.statePath,
-      block: serpCapture.block,
-      aiSummary,
+      synthesis,
+      meta: {
+        endpoint,
+        searchUrl,
+        pageUrl: serpCapture.url,
+        serpStartOffsets: serpOffsetsUsed,
+        isRepeatSearch: plan.isRepeat,
+        linksCrawled: crawledPages.length,
+        linksQueued: crawlQueue.length,
+        linksTruncated,
+        crawlBatchCount,
+        crawlBatchSize: WEBSEARCH_CRAWL_BATCH_SIZE,
+        serpPagesFetched: serpCapture.pagesFetched,
+        statePath: plan.statePath,
+        block: serpCapture.block,
+      },
       message: statusNotes.join(" "),
     };
   } catch (error: unknown) {
@@ -304,8 +316,7 @@ export async function openGoogleSearchInChrome(
     }
     return {
       ok: false,
-      endpoint,
-      searchUrl,
+      meta: { endpoint, searchUrl },
       message: detail,
     };
   } finally {
@@ -511,15 +522,28 @@ async function captureGoogleSerpForOffsets(
       const pageUrl = buildGoogleSearchUrl(query, start);
       await sendCommand("Page.navigate", { url: pageUrl });
       await waitForGooglePageLoad(sendCommand, pageUrl);
+      await waitForGoogleSerpResults(sendCommand);
       const extractResponse = await sendCommand("Runtime.evaluate", {
         expression: GOOGLE_SERP_EXTRACT_EXPRESSION,
         returnByValue: true,
       });
+      const probeResponse = await sendCommand("Runtime.evaluate", {
+        expression: `({
+          href: location.href,
+          h3: document.querySelectorAll("h3").length,
+          mjjYud: document.querySelectorAll(".MjjYud").length,
+        })`,
+        returnByValue: true,
+      });
+      const probe = readEvaluateValue(probeResponse) as { href?: string; h3?: number; mjjYud?: number } | undefined;
       const rawEvaluate = readEvaluateValue(extractResponse);
       const parsed = parseGoogleSerpEvaluateValue(rawEvaluate);
       logWebSearch("serp_page_eval", {
         start,
         pageUrl,
+        href: probe?.href ?? "",
+        h3Count: probe?.h3 ?? 0,
+        mjjYudCount: probe?.mjjYud ?? 0,
         rawItemCount: parsed.items.length,
         block: parsed.block ?? null,
         hasRaw: rawEvaluate !== undefined && rawEvaluate !== null,
@@ -703,6 +727,23 @@ function readEvaluateValue(response: Record<string, unknown>): unknown {
 }
 
 
+async function waitForGoogleSerpResults(sendCommand: SendCommand): Promise<void> {
+  const deadline = Date.now() + 20000;
+  while (Date.now() < deadline) {
+    const response = await sendCommand("Runtime.evaluate", {
+      expression: "document.querySelectorAll('.MjjYud h3, .LC20lb, #search .g h3, div.g h3').length",
+      returnByValue: true,
+    });
+    const count = readEvaluateValue(response);
+    if (typeof count === "number" && count > 0) {
+      await sleep(400);
+      return;
+    }
+    await sleep(500);
+  }
+}
+
+
 async function waitForGooglePageLoad(
   sendCommand: SendCommand,
   searchUrl: string,
@@ -715,7 +756,7 @@ async function waitForGooglePageLoad(
       expression: `({
         url: location.href,
         ready: document.readyState,
-        resultCount: document.querySelectorAll(".MjjYud h3, #search .g h3, div.g h3").length,
+        resultCount: document.querySelectorAll(".MjjYud h3, .LC20lb, #search .g h3, div.g h3").length,
         blocked: /consent\\.google|Before you continue|unusual traffic|recaptcha/i.test(
           ((document.body && document.body.innerText) || "") + " " + location.href
         )

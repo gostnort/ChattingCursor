@@ -91,11 +91,16 @@ export const GOOGLE_SERP_EXTRACT_EXPRESSION = `(() => {
     "div.g",
     "#search [data-sokoban-container]",
   ];
+  const readTitle = (node) => {
+    const h3 = node.querySelector("h3");
+    if (h3) return (h3.innerText || "").trim();
+    const lc20 = node.querySelector(".LC20lb, [role='heading']");
+    if (lc20) return (lc20.innerText || lc20.textContent || "").trim();
+    return "";
+  };
   for (const sel of selectors) {
     for (const node of document.querySelectorAll(sel)) {
-      const h3 = node.querySelector("h3");
-      if (!h3) continue;
-      const title = (h3.innerText || "").trim();
+      const title = readTitle(node);
       if (!title || seen.has(title)) continue;
       const url = findResultUrl(node);
       const snippetEl = node.querySelector("[data-snf], .VwiC3b, .IsZvec, .st, .aCOpRe, .MUxGbd");
