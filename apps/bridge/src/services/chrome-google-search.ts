@@ -527,26 +527,15 @@ async function captureGoogleSerpForOffsets(
         expression: GOOGLE_SERP_EXTRACT_EXPRESSION,
         returnByValue: true,
       });
-      const probeResponse = await sendCommand("Runtime.evaluate", {
-        expression: `({
-          href: location.href,
-          h3: document.querySelectorAll("h3").length,
-          mjjYud: document.querySelectorAll(".MjjYud").length,
-        })`,
-        returnByValue: true,
-      });
-      const probe = readEvaluateValue(probeResponse) as { href?: string; h3?: number; mjjYud?: number } | undefined;
       const rawEvaluate = readEvaluateValue(extractResponse);
       const parsed = parseGoogleSerpEvaluateValue(rawEvaluate);
+      const urlsOnPage = parsed.items.filter((item) => Boolean(item.url?.trim())).length;
       logWebSearch("serp_page_eval", {
         start,
         pageUrl,
-        href: probe?.href ?? "",
-        h3Count: probe?.h3 ?? 0,
-        mjjYudCount: probe?.mjjYud ?? 0,
         rawItemCount: parsed.items.length,
+        urlsOnPage,
         block: parsed.block ?? null,
-        hasRaw: rawEvaluate !== undefined && rawEvaluate !== null,
       });
       lastSnapshot = parsed;
       pagesFetched += 1;
@@ -729,15 +718,26 @@ function readEvaluateValue(response: Record<string, unknown>): unknown {
 
 async function waitForGoogleSerpResults(sendCommand: SendCommand): Promise<void> {
   const deadline = Date.now() + 20000;
+  let skeletonWaits = 0;
   while (Date.now() < deadline) {
     const response = await sendCommand("Runtime.evaluate", {
-      expression: "document.querySelectorAll('.MjjYud h3, .LC20lb, #search .g h3, div.g h3').length",
+      expression: `({
+        titles: document.querySelectorAll(".MjjYud h3, .LC20lb, #search .g h3, div.g h3").length,
+        blocks: document.querySelectorAll(".MjjYud").length
+      })`,
       returnByValue: true,
     });
-    const count = readEvaluateValue(response);
-    if (typeof count === "number" && count > 0) {
-      await sleep(400);
+    const value = readEvaluateValue(response) as { titles?: number; blocks?: number } | undefined;
+    const titles = typeof value?.titles === "number" ? value.titles : 0;
+    const blocks = typeof value?.blocks === "number" ? value.blocks : 0;
+    if (titles > 0) {
+      await sleep(500);
       return;
+    }
+    if (blocks >= 3 && skeletonWaits < 4) {
+      skeletonWaits += 1;
+      await sleep(2000);
+      continue;
     }
     await sleep(500);
   }

@@ -12,21 +12,19 @@ try {
   const first = await openGoogleSearchInChrome(query);
   console.log("first", {
     ok: first.ok,
-    serpStartOffsets: first.serpStartOffsets,
-    isRepeat: first.isRepeatSearch,
-    linksQueued: first.linksQueued,
-    linksCrawled: first.linksCrawled,
-    serpItemsWithUrl: first.serpItems?.filter((i) => i.url).length,
+    serpStartOffsets: first.meta.serpStartOffsets,
+    isRepeat: first.meta.isRepeatSearch,
+    linksQueued: first.meta.linksQueued,
+    linksCrawled: first.meta.linksCrawled,
   });
   const stateAfterFirst = JSON.parse(await readFile(statePath, "utf8"));
   const second = await openGoogleSearchInChrome(query);
   console.log("second", {
     ok: second.ok,
-    serpStartOffsets: second.serpStartOffsets,
-    isRepeat: second.isRepeatSearch,
-    linksQueued: second.linksQueued,
-    linksCrawled: second.linksCrawled,
-    serpItemsWithUrl: second.serpItems?.filter((i) => i.url).length,
+    serpStartOffsets: second.meta.serpStartOffsets,
+    isRepeat: second.meta.isRepeatSearch,
+    linksQueued: second.meta.linksQueued,
+    linksCrawled: second.meta.linksCrawled,
   });
   const stateAfterSecond = JSON.parse(await readFile(statePath, "utf8"));
   console.log("stateAfterFirst", stateAfterFirst);

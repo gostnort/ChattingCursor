@@ -52,9 +52,12 @@ export const GOOGLE_SERP_EXTRACT_EXPRESSION = `(() => {
     return "";
   };
   const findResultUrl = (node) => {
+    const primary = node.querySelector(".yuRUbf a[href], .tF2Cxc a[href], a[jsname][href]");
+    if (primary) {
+      const url = unwrapGoogleHref(primary.href || primary.getAttribute("href") || "");
+      if (url) return url;
+    }
     for (const a of node.querySelectorAll("a[href]")) {
-      const h3 = a.querySelector("h3");
-      if (!h3) continue;
       const url = unwrapGoogleHref(a.href || a.getAttribute("href") || "");
       if (url) return url;
     }

@@ -150,14 +150,6 @@ export async function planWebSearchRun(query: string): Promise<{
   const resolved = resolveSerpStartOffsets(hasPriorSerp ? lastOffset : undefined);
   const statePath = getWebSearchStatePath();
   const queryKey = webSearchQueryHash(trimmed);
-  console.info("[websearch] state load", {
-    statePath,
-    queryKey,
-    priorLastStartOffset: hasPriorSerp ? lastOffset : null,
-    isRepeat: resolved.isRepeat,
-    serpStartOffsets: resolved.offsets,
-    seenUrlCount: entry?.seenUrls?.length ?? 0,
-  });
   return {
     offsets: resolved.offsets,
     isRepeat: resolved.isRepeat,
