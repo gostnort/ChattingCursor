@@ -1,7 +1,8 @@
-﻿# 停止 ChattingCursor 相关后台服务（Bridge、cloudflared、可选 Web）
+﻿# Stop ChattingCursor background services (Bridge, cloudflared, Web, quality-watch, run-all)
 param(
   [int]$BridgePort = 4321,
   [int]$WebPort = 43210,
+  [int]$PortWaitSeconds = 30,
   [switch]$SkipWeb
 )
 
@@ -11,11 +12,22 @@ $RootPattern = [regex]::Escape($Root)
 $StoppedBridge = $false
 $StoppedCloudflared = $false
 $StoppedWeb = $false
+$StoppedQualityWatch = $false
 
 
 function Write-Step([string]$Message) {
   Write-Host ""
   Write-Host "==> $Message"
+}
+
+
+function Write-Ok([string]$Message) {
+  Write-Host "[OK] $Message"
+}
+
+
+function Write-Fail([string]$Message) {
+  Write-Host "[FAIL] $Message"
 }
 
 
@@ -29,13 +41,22 @@ function Get-ProcessCommandLine([int]$ProcessId) {
 }
 
 
+function Get-ProcessShortName([int]$ProcessId) {
+  $proc = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+  if ($proc) {
+    return $proc.ProcessName
+  }
+  return "unknown"
+}
+
+
 function Get-ListenerPids([int]$Port) {
   $pids = @()
   try {
     $pids = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue |
       Select-Object -ExpandProperty OwningProcess -Unique)
   } catch {
-    # Get-NetTCPConnection 不可用时回退 netstat
+    # Fall back to netstat when Get-NetTCPConnection is unavailable
   }
   if ($pids.Count -eq 0) {
     $pattern = ":$Port\s"
@@ -86,6 +107,17 @@ function Test-WebCommandLine([string]$CommandLine) {
 }
 
 
+function Test-QualityWatchCommandLine([string]$CommandLine) {
+  if ([string]::IsNullOrWhiteSpace($CommandLine)) {
+    return $false
+  }
+  if ($CommandLine -notmatch $RootPattern) {
+    return $false
+  }
+  return ($CommandLine -match 'quality-watch\.mjs|quality:watch')
+}
+
+
 function Test-CloudflaredCommandLine([string]$CommandLine) {
   if ([string]::IsNullOrWhiteSpace($CommandLine)) {
     return $false
@@ -125,18 +157,18 @@ function Stop-ProcessSafe([int]$ProcessId, [string]$Label) {
   if (-not $proc) {
     return $false
   }
-  # 优先结束整棵进程树，避免只杀掉 cmd/pnpm 而 node 仍占用端口
+  # Prefer killing the full process tree so node children do not keep ports open
   & taskkill /PID $ProcessId /T /F *>$null
   if ($LASTEXITCODE -eq 0) {
-    Write-Host "  已结束 $Label (PID $ProcessId，含子进程)"
+    Write-Host "  Stopped $Label (PID $ProcessId, including child processes)"
     return $true
   }
   try {
     Stop-Process -Id $ProcessId -Force -ErrorAction Stop
-    Write-Host "  已结束 $Label (PID $ProcessId)"
+    Write-Host "  Stopped $Label (PID $ProcessId)"
     return $true
   } catch {
-    Write-Host "  无法结束 $Label (PID $ProcessId): $($_.Exception.Message)"
+    Write-Host "  Could not stop $Label (PID $ProcessId): $($_.Exception.Message)"
     return $false
   }
 }
@@ -146,10 +178,15 @@ function Test-ProjectPortListener([string]$CommandLine, [int]$ProcessId) {
   if (Test-BridgeCommandLine -CommandLine $CommandLine) {
     return $true
   }
+  if (Test-WebCommandLine -CommandLine $CommandLine) {
+    return $true
+  }
+  if (Test-QualityWatchCommandLine -CommandLine $CommandLine) {
+    return $true
+  }
   if ($CommandLine -and ($CommandLine -match $RootPattern)) {
     return $true
   }
-  # 父进程已被结束时，子 node 可能拿不到完整命令行，向上查找是否属于本项目
   try {
     $currentId = $ProcessId
     for ($depth = 0; $depth -lt 5; $depth++) {
@@ -173,7 +210,7 @@ function Test-ProjectPortListener([string]$CommandLine, [int]$ProcessId) {
 }
 
 
-function Clear-PortListeners([int]$Port, [int]$MaxWaitSeconds = 15) {
+function Clear-PortListeners([int]$Port, [int]$MaxWaitSeconds) {
   $deadline = (Get-Date).AddSeconds($MaxWaitSeconds)
   while ((Get-Date) -lt $deadline) {
     $pids = @(Get-ListenerPids -Port $Port)
@@ -183,7 +220,7 @@ function Clear-PortListeners([int]$Port, [int]$MaxWaitSeconds = 15) {
     foreach ($procId in $pids) {
       $cmd = Get-ProcessCommandLine -ProcessId $procId
       if (Test-ProjectPortListener -CommandLine $cmd -ProcessId $procId) {
-        Stop-ProcessSafe -ProcessId $procId -Label "端口 $Port 监听进程" | Out-Null
+        Stop-ProcessSafe -ProcessId $procId -Label "listener on port $Port" | Out-Null
       }
     }
     Start-Sleep -Milliseconds 500
@@ -192,14 +229,38 @@ function Clear-PortListeners([int]$Port, [int]$MaxWaitSeconds = 15) {
 }
 
 
-function Wait-PortReleased([int]$Port, [int]$MaxWaitSeconds = 10) {
-  for ($i = 0; $i -lt ($MaxWaitSeconds * 2); $i++) {
-    if (-not (Test-PortInUse -Port $Port)) {
-      return $true
-    }
-    Start-Sleep -Milliseconds 500
+function Format-PortHolderReport([int]$Port) {
+  $pids = @(Get-ListenerPids -Port $Port)
+  if ($pids.Count -eq 0) {
+    return $null
   }
-  return -not (Test-PortInUse -Port $Port)
+  $details = @()
+  foreach ($procId in $pids) {
+    $name = Get-ProcessShortName -ProcessId $procId
+    $cmd = Get-ProcessCommandLine -ProcessId $procId
+    if ([string]::IsNullOrWhiteSpace($cmd)) {
+      $details += "PID $procId ($name)"
+    } else {
+      $shortCmd = if ($cmd.Length -gt 120) { $cmd.Substring(0, 117) + "..." } else { $cmd }
+      $details += "PID $procId ($name): $shortCmd"
+    }
+  }
+  return ($details -join "; ")
+}
+
+
+function Get-RemainingCloudflaredPids() {
+  $remaining = @()
+  foreach ($proc in (Get-AllCandidateProcesses)) {
+    $procId = [int]$proc.ProcessId
+    if ($procId -le 4) {
+      continue
+    }
+    if (($proc.Name -match 'cloudflared') -and (Test-CloudflaredCommandLine -CommandLine $proc.CommandLine)) {
+      $remaining += $procId
+    }
+  }
+  return @($remaining | Select-Object -Unique)
 }
 
 
@@ -214,8 +275,9 @@ function Get-AllCandidateProcesses() {
 }
 
 
-Write-Host "=== ChattingCursor 停止服务 ==="
-Write-Host "项目目录: $Root"
+Write-Host "=== ChattingCursor shutdown ==="
+Write-Host "Project root: $Root"
+Write-Host "Port wait timeout: ${PortWaitSeconds}s"
 Write-Host ""
 
 $candidatePids = @{}
@@ -233,6 +295,9 @@ foreach ($proc in $processes) {
   }
   if (Test-WebCommandLine -CommandLine $cmd) {
     $candidatePids[$procId] = "Web"
+  }
+  if (Test-QualityWatchCommandLine -CommandLine $cmd) {
+    $candidatePids[$procId] = "quality-watch"
   }
   if (($name -match 'cloudflared') -and (Test-CloudflaredCommandLine -CommandLine $cmd)) {
     $candidatePids[$procId] = "cloudflared"
@@ -258,10 +323,10 @@ if (-not $SkipWeb) {
   }
 }
 
-Write-Step "停止 Bridge (端口 $BridgePort)..."
+Write-Step "Stopping Bridge (port $BridgePort)..."
 $bridgePids = @($candidatePids.GetEnumerator() | Where-Object { $_.Value -eq "Bridge" } | ForEach-Object { $_.Key })
 if ($bridgePids.Count -eq 0) {
-  Write-Host "  未发现运行中的 Bridge 进程。"
+  Write-Host "  No Bridge process found."
 } else {
   foreach ($procId in ($bridgePids | Sort-Object -Descending)) {
     if (Stop-ProcessSafe -ProcessId $procId -Label "Bridge") {
@@ -269,17 +334,14 @@ if ($bridgePids.Count -eq 0) {
     }
   }
   if ($StoppedBridge) {
-    Write-Host "已停止 Bridge。"
+    Write-Host "Bridge stopped."
   }
 }
 
-# 结束仍占用 Bridge 端口的残留 node/cmd 子进程
-$null = Clear-PortListeners -Port $BridgePort -MaxWaitSeconds 15
-
-Write-Step "停止 cloudflared 隧道..."
+Write-Step "Stopping cloudflared tunnel..."
 $cloudPids = @($candidatePids.GetEnumerator() | Where-Object { $_.Value -eq "cloudflared" } | ForEach-Object { $_.Key })
 if ($cloudPids.Count -eq 0) {
-  Write-Host "  未发现运行中的 cloudflared 隧道。"
+  Write-Host "  No cloudflared tunnel process found."
 } else {
   foreach ($procId in ($cloudPids | Sort-Object -Descending)) {
     if (Stop-ProcessSafe -ProcessId $procId -Label "cloudflared") {
@@ -287,15 +349,30 @@ if ($cloudPids.Count -eq 0) {
     }
   }
   if ($StoppedCloudflared) {
-    Write-Host "已停止 cloudflared。"
+    Write-Host "cloudflared stopped."
+  }
+}
+
+Write-Step "Stopping quality-watch..."
+$watchPids = @($candidatePids.GetEnumerator() | Where-Object { $_.Value -eq "quality-watch" } | ForEach-Object { $_.Key })
+if ($watchPids.Count -eq 0) {
+  Write-Host "  No quality-watch process found."
+} else {
+  foreach ($procId in ($watchPids | Sort-Object -Descending)) {
+    if (Stop-ProcessSafe -ProcessId $procId -Label "quality-watch") {
+      $StoppedQualityWatch = $true
+    }
+  }
+  if ($StoppedQualityWatch) {
+    Write-Host "quality-watch stopped."
   }
 }
 
 if (-not $SkipWeb) {
-  Write-Step "停止 Web / Vite (端口 $WebPort)..."
+  Write-Step "Stopping Web / Vite (port $WebPort)..."
   $webPids = @($candidatePids.GetEnumerator() | Where-Object { $_.Value -eq "Web" } | ForEach-Object { $_.Key })
   if ($webPids.Count -eq 0) {
-    Write-Host "  未发现运行中的 Web 开发服务器。"
+    Write-Host "  No Web dev server found."
   } else {
     foreach ($procId in ($webPids | Sort-Object -Descending)) {
       if (Stop-ProcessSafe -ProcessId $procId -Label "Web") {
@@ -303,41 +380,78 @@ if (-not $SkipWeb) {
       }
     }
     if ($StoppedWeb) {
-      Write-Host "已停止 Web (Vite)。"
+      Write-Host "Web (Vite) stopped."
     }
   }
 }
 
 $runAllPids = @($candidatePids.GetEnumerator() | Where-Object { $_.Value -eq "run-all" } | ForEach-Object { $_.Key })
 if ($runAllPids.Count -gt 0) {
-  Write-Step "停止 run-all 启动脚本..."
+  Write-Step "Stopping run-all launcher..."
   foreach ($procId in ($runAllPids | Sort-Object -Descending)) {
     Stop-ProcessSafe -ProcessId $procId -Label "run-all.ps1" | Out-Null
   }
 }
 
-$null = Wait-PortReleased -Port $BridgePort -MaxWaitSeconds 10
-
-Write-Step "端口检查..."
-if (Test-PortInUse -Port $BridgePort) {
-  $stalePids = @(Get-ListenerPids -Port $BridgePort)
-  Write-Host "  警告: 端口 $BridgePort 仍被占用 (PID: $($stalePids -join ', '))。"
-  Write-Host "  可能是非本项目进程，请手动结束后再运行 run.bat。"
-} else {
-  Write-Host "  端口 $BridgePort 已释放。"
+Write-Step "Releasing ports (retry up to ${PortWaitSeconds}s)..."
+$portsToVerify = @(@{ Port = $BridgePort; Label = "Bridge" })
+if (-not $SkipWeb) {
+  $portsToVerify += @{ Port = $WebPort; Label = "Web" }
 }
 
-if (-not $SkipWeb) {
-  if (Test-PortInUse -Port $WebPort) {
-    Write-Host "  端口 $WebPort 仍被占用（可能不是本项目 Vite）。"
+foreach ($entry in $portsToVerify) {
+  $port = [int]$entry.Port
+  $label = [string]$entry.Label
+  if (Test-PortInUse -Port $port) {
+    Write-Host "  Port $port ($label) still in use; retrying project listener cleanup..."
+  }
+  $released = Clear-PortListeners -Port $port -MaxWaitSeconds $PortWaitSeconds
+  if ($released) {
+    Write-Ok "Port $port ($label) is free."
   } else {
-    Write-Host "  端口 $WebPort 已释放。"
+    $report = Format-PortHolderReport -Port $port
+    Write-Fail "Port $port ($label) still in use after ${PortWaitSeconds}s: $report"
   }
 }
 
+Write-Step "Verifying cloudflared..."
+$remainingCloud = @(Get-RemainingCloudflaredPids)
+if ($remainingCloud.Count -eq 0) {
+  Write-Ok "No project cloudflared tunnel process running."
+} else {
+  foreach ($procId in $remainingCloud) {
+    Stop-ProcessSafe -ProcessId $procId -Label "cloudflared (retry)" | Out-Null
+  }
+  Start-Sleep -Seconds 1
+  $remainingCloud = @(Get-RemainingCloudflaredPids)
+  if ($remainingCloud.Count -eq 0) {
+    Write-Ok "cloudflared stopped after retry."
+  } else {
+    Write-Fail "cloudflared still running (PID: $($remainingCloud -join ', '))."
+  }
+}
+
+$shutdownFailed = $false
+foreach ($entry in $portsToVerify) {
+  $port = [int]$entry.Port
+  $label = [string]$entry.Label
+  if (Test-PortInUse -Port $port) {
+    $shutdownFailed = $true
+  }
+}
+
+if ((Get-RemainingCloudflaredPids).Count -gt 0) {
+  $shutdownFailed = $true
+}
+
 Write-Host ""
-Write-Host "停止完成。重新启动请运行 run.bat"
+if ($shutdownFailed) {
+  Write-Fail "Shutdown incomplete. Free the ports/processes above, then run run.bat again."
+  exit 1
+}
+
+Write-Ok "All checked ports and cloudflared are stopped."
+Write-Host ""
+Write-Host "Shutdown complete. Start again with run.bat"
 Write-Host ""
 exit 0
-
-

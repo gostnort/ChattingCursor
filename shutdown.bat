@@ -3,7 +3,7 @@ cd /d "%~dp0"
 
 where powershell >nul 2>&1
 if errorlevel 1 (
-  echo PowerShell not found.
+  echo [FAIL] PowerShell not found.
   exit /b 1
 )
 
