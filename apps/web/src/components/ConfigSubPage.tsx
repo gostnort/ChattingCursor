@@ -16,14 +16,21 @@ import { GITHUB_PAGES_URL, isGitHubPages, isLocalWebOrigin } from "../environmen
 import { MAX_TEXT_SIZE_PX, MIN_TEXT_SIZE_PX } from "../textSizeSettings";
 import {
   fetchAuthStatus,
+  fetchCloudflareTunnelConfig,
   fetchCrewStatus,
   fetchHistoryContent,
   fetchHistoryList,
   fetchLocalConfig,
   fetchLocalTokenFile,
+  saveCloudflareTunnelConfig,
   updateTokenDirectory,
   verifyBridgeToken,
 } from "../api/bridge";
+import {
+  loadCloudflareTunnelSettings,
+  saveCloudflareTunnelSettings,
+  type CloudflareTunnelLocalSettings,
+} from "../cloudflareTunnelSettings";
 import { parseTodayTokenFromContent } from "../tokenFile";
 
 
@@ -111,6 +118,9 @@ export function ConfigSubPage({
   const [assistantBackgroundInput, setAssistantBackgroundInput] = useState(assistantBubbleColors.background);
   const [assistantTextInput, setAssistantTextInput] = useState(assistantBubbleColors.text);
   const [userBackgroundInput, setUserBackgroundInput] = useState(userBubbleBackground);
+  const [cloudflareTunnel, setCloudflareTunnel] = useState<CloudflareTunnelLocalSettings>(() => loadCloudflareTunnelSettings());
+  const [cloudflareConfigPath, setCloudflareConfigPath] = useState("");
+  const [cloudflareNamedEnabled, setCloudflareNamedEnabled] = useState(false);
   const normalizedBridgeUrl = useMemo(() => normalizeBridgeUrl(bridgeUrl), [bridgeUrl]);
   const normalizedBridgeUrlInput = useMemo(() => normalizeBridgeUrl(bridgeUrlInput), [bridgeUrlInput]);
   const parsedWebPort = useMemo(() => parsePortInput(webPortInput), [webPortInput]);
@@ -182,11 +192,12 @@ export function ConfigSubPage({
           setLoading(false);
           return;
         }
-        const [config, history, crew, tokenFile] = await Promise.all([
+        const [config, history, crew, tokenFile, tunnelConfig] = await Promise.all([
           fetchLocalConfig(normalizedBridgeUrl, bridgeToken),
           fetchHistoryList(normalizedBridgeUrl, bridgeToken),
           fetchCrewStatus(normalizedBridgeUrl, bridgeToken).catch(() => null),
           fetchLocalTokenFile(normalizedBridgeUrl, bridgeToken).catch(() => null),
+          fetchCloudflareTunnelConfig(normalizedBridgeUrl, bridgeToken).catch(() => null),
         ]);
         if (cancelled) {
           return;
@@ -195,6 +206,19 @@ export function ConfigSubPage({
         setTokenDirectoryInput(config.tokenFilePath.replace(new RegExp(`[\\\\/]${config.tokenFilePath.split(/[\\\\/]/).pop() ?? ""}$`), ""));
         setSessions(history.sessions);
         setCrewStatus(crew);
+        if (tunnelConfig) {
+          const merged: CloudflareTunnelLocalSettings = {
+            tunnelName: tunnelConfig.tunnelName?.trim() ?? "",
+            accountId: tunnelConfig.accountId?.trim() ?? "",
+            publicHostname: tunnelConfig.publicHostname?.trim() ?? "",
+            credentialsFilePath: tunnelConfig.credentialsFilePath?.trim() ?? "",
+            tunnelToken: tunnelConfig.tunnelToken?.trim() ?? "",
+          };
+          setCloudflareTunnel(merged);
+          saveCloudflareTunnelSettings(merged);
+          setCloudflareConfigPath(tunnelConfig.configPath);
+          setCloudflareNamedEnabled(Boolean(tunnelConfig.namedTunnelEnabled));
+        }
         setTokenFileName(config.tokenFilePath.split(/[\\/]/).pop() ?? "chattingcursor-token.txt");
         const fileToken = tokenFile ? parseTodayTokenFromContent(tokenFile.content) : "";
         if (fileToken && fileToken !== bridgeToken) {
@@ -302,6 +326,28 @@ export function ConfigSubPage({
     } catch (selectError) {
       const message = selectError instanceof Error ? selectError.message : String(selectError);
       setHistoryContent(`读取失败：${message}`);
+    }
+  };
+
+
+  const handleSaveCloudflareTunnel = async (): Promise<void> => {
+    if (!canUseLocalApi) {
+      setSaveMessage("Named tunnel settings require a local Bridge connection.");
+      return;
+    }
+    saveCloudflareTunnelSettings(cloudflareTunnel);
+    try {
+      const result = await saveCloudflareTunnelConfig(normalizedBridgeUrl, cloudflareTunnel, bridgeToken);
+      setCloudflareConfigPath(result.configPath);
+      setCloudflareNamedEnabled(Boolean(result.namedTunnelEnabled));
+      setSaveMessage(
+        result.namedTunnelEnabled
+          ? `Saved. run.bat will use cloudflared tunnel run (${cloudflareTunnel.tunnelName}). Restart run.bat to apply.`
+          : "Saved (quick tunnel remains default until tunnel name and hostname are both set).",
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setSaveMessage(`Saved in browser only; Bridge write failed: ${message}`);
     }
   };
 
@@ -584,6 +630,94 @@ export function ConfigSubPage({
           </div>
         </div>
       </section>
+
+      {canUseLocalApi && (
+        <section className="config-section">
+          <h2>Cloudflare tunnel (optional — named tunnel)</h2>
+          <p className="config-hint">
+            Stored locally in your browser and on this PC at{" "}
+            <code>{cloudflareConfigPath || "%USERPROFILE%\\.chattingcursor\\cloudflare-tunnel.json"}</code>.
+            Leave blank to keep the default quick tunnel (<code>trycloudflare.com</code>) from run.bat.
+          </p>
+          <div className="config-grid config-grid-form">
+            <label className="config-field" htmlFor="cf-tunnel-name">
+              <span className="config-field-label">Tunnel name</span>
+              <input
+                id="cf-tunnel-name"
+                type="text"
+                value={cloudflareTunnel.tunnelName}
+                onChange={(event) => setCloudflareTunnel({ ...cloudflareTunnel, tunnelName: event.target.value })}
+                placeholder="chattingcursor-bridge"
+                spellCheck={false}
+              />
+              <span className="config-hint">Matches the name in your Cloudflare tunnel and config.yml.</span>
+            </label>
+            <label className="config-field" htmlFor="cf-public-hostname">
+              <span className="config-field-label">Public hostname</span>
+              <input
+                id="cf-public-hostname"
+                type="text"
+                value={cloudflareTunnel.publicHostname}
+                onChange={(event) => setCloudflareTunnel({ ...cloudflareTunnel, publicHostname: event.target.value })}
+                placeholder="bridge.example.com"
+                spellCheck={false}
+              />
+              <span className="config-hint">Stable HTTPS host routed to Bridge (no https:// prefix needed).</span>
+            </label>
+            <label className="config-field" htmlFor="cf-account-id">
+              <span className="config-field-label">Cloudflare account ID (optional)</span>
+              <input
+                id="cf-account-id"
+                type="text"
+                value={cloudflareTunnel.accountId}
+                onChange={(event) => setCloudflareTunnel({ ...cloudflareTunnel, accountId: event.target.value })}
+                placeholder="For your reference only"
+                spellCheck={false}
+              />
+              <span className="config-hint">Not required by run.bat; helps you find the right dashboard account.</span>
+            </label>
+            <label className="config-field" htmlFor="cf-credentials-path">
+              <span className="config-field-label">Credentials JSON path (optional)</span>
+              <input
+                id="cf-credentials-path"
+                type="text"
+                value={cloudflareTunnel.credentialsFilePath}
+                onChange={(event) => setCloudflareTunnel({ ...cloudflareTunnel, credentialsFilePath: event.target.value })}
+                placeholder="%USERPROFILE%\\.cloudflared\\&lt;tunnel-id&gt;.json"
+                spellCheck={false}
+              />
+              <span className="config-hint">From cloudflared tunnel create; usually referenced in config.yml.</span>
+            </label>
+            <label className="config-field" htmlFor="cf-tunnel-token">
+              <span className="config-field-label">Tunnel token (optional)</span>
+              <input
+                id="cf-tunnel-token"
+                type="password"
+                value={cloudflareTunnel.tunnelToken}
+                onChange={(event) => setCloudflareTunnel({ ...cloudflareTunnel, tunnelToken: event.target.value })}
+                placeholder="Only if you run via tunnel token instead of config.yml"
+                autoComplete="off"
+                spellCheck={false}
+              />
+              <span className="config-hint">Stored locally only; run.bat uses tunnel name + your existing config.yml.</span>
+            </label>
+          </div>
+          <div className="config-actions">
+            <button
+              type="button"
+              className="btn-secondary config-action-secondary"
+              onClick={() => void handleSaveCloudflareTunnel()}
+            >
+              Save Cloudflare tunnel settings
+            </button>
+          </div>
+          {cloudflareNamedEnabled && (
+            <p className="config-hint">
+              Named tunnel is active for this PC. Restart run.bat to switch from quick tunnel.
+            </p>
+          )}
+        </section>
+      )}
 
       <section className="config-section">
         <h2>每日口令</h2>

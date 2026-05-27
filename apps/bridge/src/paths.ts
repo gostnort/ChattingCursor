@@ -26,6 +26,12 @@ export function getUserConfigPath(): string {
 }
 
 
+/** 命名 Cloudflare 隧道配置（本机 only） */
+export function getCloudflareTunnelConfigPath(): string {
+  return path.join(getChattingCursorHomeDir(), "cloudflare-tunnel.json");
+}
+
+
 /** 默认历史目录 */
 export function getDefaultHistoryDir(): string {
   return path.join(getChattingCursorHomeDir(), "history");

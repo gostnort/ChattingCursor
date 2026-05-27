@@ -18,7 +18,9 @@ if ($NoWeb) {
 
 $ErrorActionPreference = "Continue"
 . (Join-Path $PSScriptRoot "Resolve-TokenSyncDir.ps1")
+. (Join-Path $PSScriptRoot "Resolve-CloudflareTunnel.ps1")
 . (Join-Path $PSScriptRoot "TokenFilePids.ps1")
+$script:NamedTunnelConfig = Read-NamedCloudflareTunnelConfig
 $TokenSyncDir = Resolve-TokenSyncDir -Override $TokenSyncDir
 $script:ServicePids = @{}
 try {
@@ -387,6 +389,19 @@ function Test-TokenFileHasTrycloudflareUrl {
 }
 
 
+function Test-TokenFileHasExpectedPublicUrl {
+  param([string]$FilePath = (Get-TokenFilePath))
+  $onDisk = Get-TokenFilePublicUrl -FilePath $FilePath
+  if (-not $onDisk) {
+    return $false
+  }
+  if ($script:NamedTunnelConfig) {
+    return $onDisk -eq $script:NamedTunnelConfig.PublicBridgeUrl
+  }
+  return (Test-TokenFileHasTrycloudflareUrl -FilePath $FilePath)
+}
+
+
 function Get-TokenFilePublicUrl {
   param([string]$FilePath = (Get-TokenFilePath))
   if (-not (Test-Path $FilePath)) {
@@ -462,6 +477,13 @@ function Restart-TunnelProcess {
 
 function Wait-ForTunnelUrl {
   param([int]$MaxSeconds = 90)
+  if ($script:NamedTunnelConfig) {
+    $script:DetectedTunnelUrl = $script:NamedTunnelConfig.PublicBridgeUrl
+    if (-not $script:TunnelUrlApplied) {
+      $null = Set-PublicBridgeUrlInTokenFile -PublicUrl $script:DetectedTunnelUrl
+    }
+    return [bool]$script:TunnelUrlApplied
+  }
   for ($tick = 0; $tick -lt ($MaxSeconds * 2); $tick++) {
     if ($script:ShuttingDown) {
       return $false
@@ -579,8 +601,12 @@ function Set-PublicBridgeUrlInTokenFile([string]$PublicUrl, [switch]$Force) {
     Write-Fail "Bridge API failed to rotate token and set URL: $($_.Exception.Message)"
     return $false
   }
-  if (-not (Test-TokenFileHasTrycloudflareUrl)) {
-    Write-Fail "No trycloudflare public URL found in token file"
+  if (-not (Test-TokenFileHasExpectedPublicUrl)) {
+    if ($script:NamedTunnelConfig) {
+      Write-Fail "Token file publicBridgeUrl does not match named tunnel hostname"
+    } else {
+      Write-Fail "No trycloudflare public URL found in token file"
+    }
     return $false
   }
   $onDisk = Get-TokenFilePublicUrl
@@ -838,12 +864,21 @@ function Start-TunnelProcess {
     Remove-Item $script:TunnelLogPath -Force -ErrorAction SilentlyContinue
   }
   $script:TunnelLogOffset = 0
-  # cloudflared 鏃ュ織璧?stderr锛汼tart-Process 閲嶅畾鍚戝埌鏂囦欢锛岄伩鍏嶇閬撶紦鍐插尯濉炴弧
-  $script:TunnelProcess = Start-Process -FilePath $cloudflaredExe `
-    -ArgumentList @("tunnel", "--url", "http://127.0.0.1:$BridgePort") `
-    -RedirectStandardError $script:TunnelLogPath `
-    -WindowStyle Hidden `
-    -PassThru
+  if ($script:NamedTunnelConfig) {
+    $tunnelName = $script:NamedTunnelConfig.TunnelName
+    Write-Host "cloudflared named tunnel: $tunnelName -> $($script:NamedTunnelConfig.PublicBridgeUrl)"
+    $script:TunnelProcess = Start-Process -FilePath $cloudflaredExe `
+      -ArgumentList @("tunnel", "run", $tunnelName) `
+      -RedirectStandardError $script:TunnelLogPath `
+      -WindowStyle Hidden `
+      -PassThru
+  } else {
+    $script:TunnelProcess = Start-Process -FilePath $cloudflaredExe `
+      -ArgumentList @("tunnel", "--url", "http://127.0.0.1:$BridgePort") `
+      -RedirectStandardError $script:TunnelLogPath `
+      -WindowStyle Hidden `
+      -PassThru
+  }
   Set-ServicePid -Key "cloudflared" -ProcessId $script:TunnelProcess.Id
   Write-Host "cloudflared: $cloudflaredExe (PID $($script:TunnelProcess.Id))"
   Write-Host "Tunnel log: $($script:TunnelLogPath)"
@@ -917,14 +952,22 @@ try {
     }
   }
 
-  Write-Step "Starting cloudflared quick tunnel..."
+  if ($script:NamedTunnelConfig) {
+    Write-Step "Starting cloudflared named tunnel ($($script:NamedTunnelConfig.TunnelName))..."
+  } else {
+    Write-Step "Starting cloudflared quick tunnel..."
+  }
   Start-TunnelProcess
 
   $tunnelWaitSeconds = 90
   $startupTunnelReady = $false
   $script:StartupPublicHealthWaitDone = $false
   $script:StartupTunnelRecoveryAttempted = $false
-  Write-Host "Waiting for tunnel URL (max ${tunnelWaitSeconds}s)..."
+  if ($script:NamedTunnelConfig) {
+    Write-Host "Applying stable public URL: $($script:NamedTunnelConfig.PublicBridgeUrl)"
+  } else {
+    Write-Host "Waiting for tunnel URL (max ${tunnelWaitSeconds}s)..."
+  }
   for ($tick = 0; $tick -lt ($tunnelWaitSeconds * 2); $tick++) {
     if ($script:ShuttingDown) {
       break
@@ -982,7 +1025,11 @@ try {
   if (-not $startupTunnelReady) {
     Read-TunnelLogNewLines
     if (-not $script:TunnelUrlApplied) {
-      Write-Fail "No trycloudflare URL detected within ${tunnelWaitSeconds}s. Check tunnel log: $($script:TunnelLogPath)"
+      if ($script:NamedTunnelConfig) {
+        Write-Fail "Named tunnel did not apply publicBridgeUrl within ${tunnelWaitSeconds}s. Check tunnel log: $($script:TunnelLogPath)"
+      } else {
+        Write-Fail "No trycloudflare URL detected within ${tunnelWaitSeconds}s. Check tunnel log: $($script:TunnelLogPath)"
+      }
       exit 1
     }
     $failedUrl = Get-TokenFilePublicUrl

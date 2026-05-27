@@ -10,6 +10,8 @@ import type {
   LocalHistoryContentResponse,
   LocalHistoryListResponse,
   LocalTokenDirectoryUpdateResponse,
+  LocalCloudflareTunnelResponse,
+  CloudflareTunnelConfig,
   LocalTokenFileResponse,
   ModelsResponse,
   RecentChatSessionResponse,
@@ -326,6 +328,39 @@ export async function fetchLocalTokenFile(bridgeUrl: string, token?: string): Pr
     throw new Error(await readErrorDetail(response, `读取 token 文件失败 (${response.status})`));
   }
   return response.json() as Promise<LocalTokenFileResponse>;
+}
+
+
+/** 读取本机 Cloudflare 命名隧道配置 */
+export async function fetchCloudflareTunnelConfig(
+  bridgeUrl: string,
+  token?: string,
+): Promise<LocalCloudflareTunnelResponse> {
+  const response = await fetch(`${bridgeUrl}/local/cloudflare-tunnel`, {
+    headers: buildAuthHeaders(token),
+  });
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, `Cloudflare tunnel config unavailable (${response.status})`));
+  }
+  return response.json() as Promise<LocalCloudflareTunnelResponse>;
+}
+
+
+/** 保存本机 Cloudflare 命名隧道配置（写入 ~/.chattingcursor/cloudflare-tunnel.json） */
+export async function saveCloudflareTunnelConfig(
+  bridgeUrl: string,
+  config: CloudflareTunnelConfig,
+  token?: string,
+): Promise<LocalCloudflareTunnelResponse> {
+  const response = await fetch(`${bridgeUrl}/local/cloudflare-tunnel`, {
+    method: "POST",
+    headers: buildAuthHeaders(token, { "Content-Type": "application/json" }),
+    body: JSON.stringify(config),
+  });
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, `Failed to save Cloudflare tunnel config (${response.status})`));
+  }
+  return response.json() as Promise<LocalCloudflareTunnelResponse>;
 }
 
 

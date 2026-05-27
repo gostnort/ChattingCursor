@@ -1,13 +1,21 @@
 import type { FastifyInstance } from "fastify";
 import { listCursorModels, probeCursorCli } from "@chatting-cursor/cli-client";
 import {
+  cloudflareTunnelConfigSchema,
   localPublicBridgeUrlUpdateRequestSchema,
   localTokenDirectoryUpdateRequestSchema,
 } from "@chatting-cursor/shared";
 import { loadConfig } from "../config.js";
 import { isLocalRequest } from "../middleware/auth.js";
+import {
+  isNamedCloudflareTunnelConfigured,
+  readCloudflareTunnelConfig,
+  resolveNamedTunnelPublicBridgeUrl,
+  saveCloudflareTunnelConfig,
+} from "../services/cloudflare-tunnel-config.js";
 import { historyStore } from "../services/history-store.js";
 import { tokenRotationService } from "../services/token-rotation.js";
+import { getCloudflareTunnelConfigPath } from "../paths.js";
 
 
 /** 注册本地配置与历史浏览路由 */
@@ -91,6 +99,35 @@ export async function registerLocalRoutes(app: FastifyInstance): Promise<void> {
       tokenDate: record.date,
       tokenFilePath: tokenRotationService.getFilePath(),
       publicBridgeUrl: tokenRotationService.getPublicBridgeUrl(),
+    });
+  });
+
+
+  app.get("/local/cloudflare-tunnel", async (_request, reply) => {
+    const config = await readCloudflareTunnelConfig();
+    return reply.send({
+      ...config,
+      configPath: getCloudflareTunnelConfigPath(),
+      namedTunnelEnabled: isNamedCloudflareTunnelConfigured(),
+      publicBridgeUrl: resolveNamedTunnelPublicBridgeUrl() ?? undefined,
+    });
+  });
+
+
+  app.post("/local/cloudflare-tunnel", async (request, reply) => {
+    const parsed = cloudflareTunnelConfigSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.status(400).send({
+        error: "invalid_request",
+        message: parsed.error.message,
+      });
+    }
+    const saved = await saveCloudflareTunnelConfig(parsed.data);
+    return reply.send({
+      ...saved,
+      configPath: getCloudflareTunnelConfigPath(),
+      namedTunnelEnabled: isNamedCloudflareTunnelConfigured(),
+      publicBridgeUrl: resolveNamedTunnelPublicBridgeUrl() ?? undefined,
     });
   });
 

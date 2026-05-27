@@ -293,6 +293,27 @@ export const localRegenerateTokenResponseSchema = z.object({
 export type LocalRegenerateTokenResponse = z.infer<typeof localRegenerateTokenResponseSchema>;
 
 
+/** GET /local/cloudflare-tunnel 与 POST 请求/响应体 */
+export const cloudflareTunnelConfigSchema = z.object({
+  tunnelName: z.string().optional(),
+  accountId: z.string().optional(),
+  publicHostname: z.string().optional(),
+  credentialsFilePath: z.string().optional(),
+  tunnelToken: z.string().optional(),
+});
+
+export type CloudflareTunnelConfig = z.infer<typeof cloudflareTunnelConfigSchema>;
+
+
+export const localCloudflareTunnelResponseSchema = cloudflareTunnelConfigSchema.extend({
+  configPath: z.string().min(1),
+  namedTunnelEnabled: z.boolean(),
+  publicBridgeUrl: z.string().optional(),
+});
+
+export type LocalCloudflareTunnelResponse = z.infer<typeof localCloudflareTunnelResponseSchema>;
+
+
 /** GET /local/history 会话摘要 */
 export const historySessionSummarySchema = z.object({
   file: z.string().min(1),
