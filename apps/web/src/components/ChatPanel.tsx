@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent,
+  type TouchEvent,
+} from "react";
 import type { ChatMessage, ModelInfo } from "@chatting-cursor/shared";
 import {
   analyzeChatImage,
@@ -16,7 +24,7 @@ import { isLocalWebOrigin } from "../environment";
 import { useSpeech } from "../hooks/useSpeech";
 import { playNotificationSound } from "../utils/notificationSound";
 import {
-  clampSelectionToFocusedBubble,
+  clampSelectionToBubble,
   isEditableFocusedTarget,
   selectElementText,
 } from "../utils/selectBubbleText";
@@ -305,20 +313,62 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
       if (!focusedMessageId) {
         return;
       }
-      clampSelectionToFocusedBubble(focusedMessageId);
+      clampSelectionToBubble(focusedMessageId);
     };
     document.addEventListener("selectionchange", handleSelectionChange);
     return () => document.removeEventListener("selectionchange", handleSelectionChange);
   }, [focusedMessageId]);
 
 
-  const handleMessagesPointerDown = (event: PointerEvent<HTMLDivElement>): void => {
-    const row = (event.target as HTMLElement).closest<HTMLElement>("[data-message-id]");
+  const messagesRef = useRef<HTMLDivElement | null>(null);
+
+
+  useEffect(() => {
+    const messagesEl = messagesRef.current;
+    if (!messagesEl) {
+      return;
+    }
+    const handleSelectStart = (event: Event): void => {
+      if (isEditableFocusedTarget(event.target)) {
+        return;
+      }
+      const target = event.target;
+      if (!(target instanceof Node)) {
+        event.preventDefault();
+        return;
+      }
+      const element = target instanceof HTMLElement ? target : target.parentElement;
+      if (element?.closest(".bubble-text")) {
+        return;
+      }
+      event.preventDefault();
+    };
+    messagesEl.addEventListener("selectstart", handleSelectStart);
+    return () => messagesEl.removeEventListener("selectstart", handleSelectStart);
+  }, []);
+
+
+  const focusMessageFromEventTarget = (target: EventTarget | null): void => {
+    if (!(target instanceof HTMLElement)) {
+      setFocusedMessageId(null);
+      return;
+    }
+    const row = target.closest<HTMLElement>("[data-message-id]");
     if (row?.dataset.messageId) {
       setFocusedMessageId(row.dataset.messageId);
       return;
     }
     setFocusedMessageId(null);
+  };
+
+
+  const handleMessagesPointerDown = (event: PointerEvent<HTMLDivElement>): void => {
+    focusMessageFromEventTarget(event.target);
+  };
+
+
+  const handleMessagesTouchStart = (event: TouchEvent<HTMLDivElement>): void => {
+    focusMessageFromEventTarget(event.target);
   };
 
 
@@ -638,7 +688,12 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
             当前 Bridge URL 不是本机地址。请先在“本地 → 配置”里输入当天口令，再开始聊天。
           </p>
         )}
-        <div className="messages" onPointerDown={handleMessagesPointerDown}>
+        <div
+          ref={messagesRef}
+          className="messages"
+          onPointerDown={handleMessagesPointerDown}
+          onTouchStart={handleMessagesTouchStart}
+        >
           {messages.map((message) => (
             <MessageBubble
               key={message.id}

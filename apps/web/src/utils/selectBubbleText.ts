@@ -30,34 +30,46 @@ export function selectElementText(element: HTMLElement): void {
 }
 
 
-/** 判断节点是否落在指定气泡正文内 */
-function isNodeInsideBubbleText(node: Node | null, bubbleText: HTMLElement): boolean {
+/** 从选区端点向上查找所在气泡正文 */
+function findBubbleTextFromNode(node: Node | null): HTMLElement | null {
   if (!node) {
-    return false;
+    return null;
   }
-  const element = node.nodeType === Node.TEXT_NODE ? node.parentElement : node as HTMLElement;
-  return Boolean(element?.closest(".bubble-text") === bubbleText);
+  const element = node.nodeType === Node.TEXT_NODE ? node.parentElement : (node as HTMLElement);
+  return element?.closest<HTMLElement>(".bubble-text") ?? null;
 }
 
 
-/** 将选区限制在已聚焦消息的气泡正文内（移动端长按全选等） */
-export function clampSelectionToFocusedBubble(focusedMessageId: string): void {
+/** 选区是否完全落在指定气泡正文内 */
+function isRangeFullyInside(element: HTMLElement, range: Range): boolean {
+  return element.contains(range.startContainer) && element.contains(range.endContainer);
+}
+
+
+/** 将选区限制在气泡正文内（移动端长按全选等） */
+export function clampSelectionToBubble(focusedMessageId: string | null): void {
   if (isEditableFocusedTarget(document.activeElement)) {
-    return;
-  }
-  const bubbleText = document.querySelector<HTMLElement>(
-    `[data-message-id="${focusedMessageId}"] .bubble-text`,
-  );
-  if (!bubbleText) {
     return;
   }
   const selection = window.getSelection();
   if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
     return;
   }
-  const anchorInside = isNodeInsideBubbleText(selection.anchorNode, bubbleText);
-  const focusInside = isNodeInsideBubbleText(selection.focusNode, bubbleText);
-  if (anchorInside && focusInside) {
+  const range = selection.getRangeAt(0);
+  let bubbleText: HTMLElement | null = null;
+  if (focusedMessageId) {
+    bubbleText = document.querySelector<HTMLElement>(
+      `[data-message-id="${focusedMessageId}"] .bubble-text`,
+    );
+  }
+  if (!bubbleText) {
+    bubbleText =
+      findBubbleTextFromNode(selection.anchorNode) ?? findBubbleTextFromNode(selection.focusNode);
+  }
+  if (!bubbleText) {
+    return;
+  }
+  if (isRangeFullyInside(bubbleText, range)) {
     return;
   }
   selectElementText(bubbleText);

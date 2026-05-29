@@ -1,7 +1,9 @@
 import { useCallback, useRef, useState } from "react";
 
 
-const TTS_CHUNK_LIMIT = 2000;
+const TTS_CHUNK_BYTES = 1000;
+const TTS_NEXT_CHUNK_DELAY_MS = 50;
+const textEncoder = new TextEncoder();
 
 
 /** 朗读前去掉 Markdown 符号，避免 TTS 读出星号等 */
@@ -13,7 +15,7 @@ function sanitizeTextForTts(text: string): string {
 interface TtsPlayState {
   key: string;
   fullText: string;
-  charOffset: number;
+  byteOffset: number;
 }
 
 
@@ -23,24 +25,31 @@ interface TtsChunk {
 }
 
 
-/** 在 maxLen 内于最后一个换行处切分，避免截断段落 */
-function sliceTtsChunk(fullText: string, startOffset: number, maxLen = TTS_CHUNK_LIMIT): TtsChunk | null {
-  const remaining = fullText.slice(startOffset);
-  if (!remaining) {
+/** 按 UTF-8 字节上限切分，保证不在多字节字符中间截断 */
+function sliceTtsChunkByBytes(fullText: string, startByteOffset: number, maxBytes = TTS_CHUNK_BYTES): TtsChunk | null {
+  const bytes = textEncoder.encode(fullText);
+  if (startByteOffset >= bytes.length) {
     return null;
   }
-  if (remaining.length <= maxLen) {
-    return { text: remaining, nextOffset: fullText.length };
+  let end = Math.min(startByteOffset + maxBytes, bytes.length);
+  while (end > startByteOffset) {
+    try {
+      const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(startByteOffset, end));
+      return { text, nextOffset: end };
+    } catch {
+      end -= 1;
+    }
   }
-  const window = remaining.slice(0, maxLen);
-  const lastNewline = window.lastIndexOf("\n");
-  const splitAt = lastNewline > 0 ? lastNewline + 1 : maxLen;
-  const chunk = remaining.slice(0, splitAt);
-  return { text: chunk, nextOffset: startOffset + chunk.length };
+  return null;
 }
 
 
-/** 浏览器朗读：长文本分段顺序播放，停止后可从当前位置续播 */
+function fullTextByteLength(fullText: string): number {
+  return textEncoder.encode(fullText).length;
+}
+
+
+/** 浏览器朗读：按字节分段，上一段 onend 后再播下一段 */
 export function useSpeech() {
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const playStateRef = useRef<TtsPlayState | null>(null);
@@ -65,12 +74,25 @@ export function useSpeech() {
     if (!state || state.key !== key || typeof window === "undefined" || !window.speechSynthesis) {
       return;
     }
-    const chunk = sliceTtsChunk(state.fullText, state.charOffset);
-    if (!chunk?.text.trim()) {
+    const chunk = sliceTtsChunkByBytes(state.fullText, state.byteOffset);
+    if (!chunk) {
       playStateRef.current = null;
       resumeOffsetRef.current = 0;
       utteranceRef.current = null;
       setSpeakingKey(null);
+      return;
+    }
+    if (!chunk.text.trim()) {
+      state.byteOffset = chunk.nextOffset;
+      resumeOffsetRef.current = chunk.nextOffset;
+      if (state.byteOffset >= fullTextByteLength(state.fullText)) {
+        playStateRef.current = null;
+        resumeOffsetRef.current = 0;
+        utteranceRef.current = null;
+        setSpeakingKey(null);
+        return;
+      }
+      speakChunk(key, lang);
       return;
     }
     stoppedByUserRef.current = false;
@@ -81,23 +103,26 @@ export function useSpeech() {
       if (!active || active.key !== key || event.charIndex === undefined) {
         return;
       }
-      resumeOffsetRef.current = active.charOffset + event.charIndex;
+      const spokenPrefix = chunk.text.slice(0, event.charIndex);
+      resumeOffsetRef.current = active.byteOffset + textEncoder.encode(spokenPrefix).length;
     };
     utterance.onend = () => {
       const active = playStateRef.current;
       if (!active || active.key !== key || stoppedByUserRef.current) {
         return;
       }
-      active.charOffset = chunk.nextOffset;
+      active.byteOffset = chunk.nextOffset;
       resumeOffsetRef.current = chunk.nextOffset;
-      if (active.charOffset >= active.fullText.length) {
+      if (active.byteOffset >= fullTextByteLength(active.fullText)) {
         playStateRef.current = null;
         resumeOffsetRef.current = 0;
         utteranceRef.current = null;
         setSpeakingKey((current) => (current === key ? null : current));
         return;
       }
-      speakChunk(key, lang);
+      window.setTimeout(() => {
+        speakChunk(key, lang);
+      }, TTS_NEXT_CHUNK_DELAY_MS);
     };
     utterance.onerror = () => {
       if (stoppedByUserRef.current) {
@@ -129,7 +154,7 @@ export function useSpeech() {
     playStateRef.current = {
       key,
       fullText: ttsText,
-      charOffset: resumeFromSameMessage,
+      byteOffset: resumeFromSameMessage,
     };
     resumeOffsetRef.current = resumeFromSameMessage;
     setSpeakingKey(key);

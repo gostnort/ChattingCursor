@@ -23,6 +23,7 @@ import {
   formatWebSearchReply,
   hasWebSearchIntent,
 } from "../services/web-search-intent.js";
+import { wrapCursorCliPrompt } from "../services/cli-conversation-guard.js";
 import { historyStore } from "../services/history-store.js";
 import { runStore } from "../services/run-store.js";
 import { sessionStore } from "../services/session-store.js";
@@ -103,7 +104,7 @@ function scheduleCursorCliRun(options: {
   const { runId, sessionId, prompt, model, modelLabel, workspace } = options;
   void runCursorCli({
     runId,
-    prompt,
+    prompt: wrapCursorCliPrompt(prompt),
     model,
     workspace,
     onEvent: (event) => {

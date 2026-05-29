@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { v4 as uuidv4 } from "uuid";
 import { Agent, CursorAgentError } from "@cursor/sdk";
 import { formatPathForCli, mergeAssistantStreamText, probeCursorCli, runCursorCli } from "@chatting-cursor/cli-client";
+import { wrapCursorCliPrompt } from "./cli-conversation-guard.js";
 import { buildImageAnalysisPrompt } from "./image-analysis-prompt.js";
 import type { SessionMessage } from "./session-store.js";
 
@@ -107,11 +108,12 @@ async function analyzeWithCli(
   const viaWsl = cli.command === "wsl";
   const imageCliPath = formatPathForCli(absolutePath, viaWsl);
   const prompt = buildImageAnalysisPrompt(messages, imageCliPath, fileName);
+  const userContext = messages.filter((m) => m.role === "user").map((m) => m.content).join("\n");
   const runId = uuidv4();
   let assistantText = "";
   await runCursorCli({
     runId,
-    prompt,
+    prompt: wrapCursorCliPrompt(`${userContext}\n\n${prompt}`),
     model,
     workspace,
     onEvent: (event) => {
