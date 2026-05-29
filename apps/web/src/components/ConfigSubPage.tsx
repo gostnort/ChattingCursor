@@ -16,7 +16,8 @@ import { GITHUB_PAGES_URL, isGitHubPages, isLocalWebOrigin } from "../environmen
 import { MAX_TEXT_SIZE_PX, MIN_TEXT_SIZE_PX } from "../textSizeSettings";
 import {
   fetchAuthStatus,
-  fetchCloudflareTunnelConfig,
+  fetchCloudflareTunnelConfig,
+
   fetchHistoryContent,
   fetchHistoryList,
   fetchLocalConfig,
@@ -99,7 +100,8 @@ export function ConfigSubPage({
 }: ConfigSubPageProps) {
   const onGitHubPages = isGitHubPages();
   const [authStatus, setAuthStatus] = useState<AuthStatusResponse | null>(null);
-  const [localConfig, setLocalConfig] = useState<LocalConfigResponse | null>(null);
+  const [localConfig, setLocalConfig] = useState<LocalConfigResponse | null>(null);
+
   const [sessions, setSessions] = useState<HistorySessionSummary[]>([]);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [historyContent, setHistoryContent] = useState("");
@@ -182,7 +184,8 @@ export function ConfigSubPage({
         }
         setAuthStatus(auth);
         if (!isLocalBridgeUrl(normalizedBridgeUrl)) {
-          setLocalConfig(null);
+          setLocalConfig(null);
+
           setSessions([]);
           setSelectedFile(null);
           setHistoryContent("");
@@ -200,7 +203,8 @@ export function ConfigSubPage({
         }
         setLocalConfig(config);
         setTokenDirectoryInput(config.tokenFilePath.replace(new RegExp(`[\\\\/]${config.tokenFilePath.split(/[\\\\/]/).pop() ?? ""}$`), ""));
-        setSessions(history.sessions);
+        setSessions(history.sessions);
+
         if (tunnelConfig) {
           const merged: CloudflareTunnelLocalSettings = {
             tunnelName: tunnelConfig.tunnelName?.trim() ?? "",

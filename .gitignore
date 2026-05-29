@@ -16,6 +16,6 @@ Thumbs.db
 coverage/
 .turbo/
 
-# main 分支不提�?crewAI 参考代码；with-crewai 分支已移除此规则
+# main 分支不提�?crewAI 参考代码；with-crewai 分支已移除此规则
 crewAI/
 configs/crews/
