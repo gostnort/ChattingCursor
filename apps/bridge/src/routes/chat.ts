@@ -7,6 +7,12 @@ import {
   chatAnalyzeImageRequestSchema,
   chatSendRequestSchema,
 } from "@chatting-cursor/shared";
+import {
+  buildLocalLlmMessages,
+  completeLocalLlmChat,
+  imageFileToDataUrl,
+  isLocalLlmModel,
+} from "../services/local-llm-client.js";
 import { analyzeUploadedImage, buildImageForwardPrompt } from "../services/image-analysis-service.js";
 import { readStoredImage, saveUploadedImage } from "../services/image-store.js";
 import { loadConfig, resolveCorsOrigin } from "../config.js";
@@ -27,6 +33,7 @@ import { wrapCursorCliPrompt } from "../services/cli-conversation-guard.js";
 import { historyStore } from "../services/history-store.js";
 import { runStore } from "../services/run-store.js";
 import { sessionStore } from "../services/session-store.js";
+import { listInstalledLocalLlmModels } from "../services/local-llm-store.js";
 
 
 /** 构建 SSE 响应头（hijack 后需手动写入 CORS） */
@@ -56,21 +63,14 @@ const TERMINAL_EVENT_TYPES = new Set<RunEvent["type"]>([
 ]);
 
 
-/** 完成一次不调用 cursor-agent 的直连回复 run */
-function finishDirectReplyRun(
+/** 写入直连回复的 result 与 run_finished（run_started 须由调用方先发） */
+function emitDirectReplyResult(
   runId: string,
   sessionId: string,
-  prompt: string,
   replyText: string,
-  source: "history_search" | "chrome_web_search",
+  source: "history_search" | "chrome_web_search" | "offline_gemma4",
   modelLabel?: string,
 ): void {
-  runStore.appendEvent(runId, {
-    runId,
-    type: "run_started",
-    timestamp: new Date().toISOString(),
-    data: { source, prompt },
-  });
   runStore.appendEvent(runId, {
     runId,
     type: "result",
@@ -89,6 +89,77 @@ function finishDirectReplyRun(
     timestamp: new Date().toISOString(),
     data: { exitCode: 0, source },
   });
+}
+
+
+/** 完成一次不调用 cursor-agent 的直连回复 run */
+function finishDirectReplyRun(
+  runId: string,
+  sessionId: string,
+  prompt: string,
+  replyText: string,
+  source: "history_search" | "chrome_web_search" | "offline_gemma4",
+  modelLabel?: string,
+): void {
+  runStore.appendEvent(runId, {
+    runId,
+    type: "run_started",
+    timestamp: new Date().toISOString(),
+    data: { source, prompt },
+  });
+  emitDirectReplyResult(runId, sessionId, replyText, source, modelLabel);
+}
+
+
+/** 启动本地 LLM 离线推理（OpenAI 兼容 API，不走 CLI） */
+function scheduleLocalLlmRun(options: {
+  runId: string;
+  sessionId: string;
+  prompt: string;
+  modelId: string;
+  modelLabel?: string;
+  imageDataUrl?: string;
+}): void {
+  const { runId, sessionId, prompt, modelId, modelLabel, imageDataUrl } = options;
+  const config = loadConfig();
+  const bridgeOrigin = `http://${config.host}:${config.port}`;
+  const startedAt = new Date().toISOString();
+  runStore.appendEvent(runId, {
+    runId,
+    type: "run_started",
+    timestamp: startedAt,
+    data: { source: "offline_local_llm", prompt, modelId },
+  });
+  runStore.appendEvent(runId, {
+    runId,
+    type: "thinking",
+    timestamp: startedAt,
+    data: { source: "offline_local_llm", status: "loading" },
+  });
+  void (async () => {
+    try {
+      const session = sessionStore.getOrCreate(sessionId);
+      const messages = await buildLocalLlmMessages({
+        prompt,
+        history: session.messages,
+        imageDataUrl,
+        bridgeOrigin,
+        modelId,
+      });
+      const replyText = await completeLocalLlmChat(modelId, messages);
+      emitDirectReplyResult(runId, sessionId, replyText, "offline_gemma4", modelLabel);
+      await historyStore.appendTurn(sessionId, prompt, replyText, session.createdAt);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      emitDirectReplyResult(
+        runId,
+        sessionId,
+        `本地模型推理失败：${message}`,
+        "offline_gemma4",
+        modelLabel,
+      );
+    }
+  })();
 }
 
 
@@ -180,7 +251,25 @@ export async function registerChatRoutes(app: FastifyInstance): Promise<void> {
 
   app.get("/models", async (_request, reply) => {
     const result = await listCursorModels();
-    return reply.send(result);
+    const cursorModels = result.models.map((item) => ({
+      ...item,
+      kind: "cursor" as const,
+    }));
+    const installed = await listInstalledLocalLlmModels();
+    const localModels = installed
+      .filter((item) => item.weightsReady)
+      .map((item) => ({
+        id: item.id,
+        label: `${item.author}/${item.modelSlug}`,
+        kind: "offline" as const,
+      }));
+    const separator = localModels.length > 0
+      ? [{ id: "__separator__", label: "── 在线模型 ──", kind: "separator" as const }]
+      : [];
+    return reply.send({
+      models: [...localModels, ...separator, ...cursorModels],
+      source: result.source,
+    });
   });
 
 
@@ -231,7 +320,10 @@ export async function registerChatRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(400).send({ error: "invalid_request", details: parsed.error.flatten() });
     }
     const { prompt, model, modelLabel, workspace } = parsed.data;
-    const needsCursorCli = !hasHistorySearchIntent(prompt) && !hasWebSearchIntent(prompt);
+    const useLocalLlm = isLocalLlmModel(model);
+    const needsCursorCli = !useLocalLlm
+      && !hasHistorySearchIntent(prompt)
+      && !hasWebSearchIntent(prompt);
     if (needsCursorCli) {
       const cli = await probeCursorCli();
       if (!cli.available) {
@@ -305,6 +397,16 @@ export async function registerChatRoutes(app: FastifyInstance): Promise<void> {
       });
       return reply.send({ runId, sessionId: session.sessionId });
     }
+    if (useLocalLlm && model) {
+      scheduleLocalLlmRun({
+        runId,
+        sessionId: session.sessionId,
+        prompt,
+        modelId: model,
+        modelLabel,
+      });
+      return reply.send({ runId, sessionId: session.sessionId });
+    }
     scheduleCursorCliRun({
       runId,
       sessionId: session.sessionId,
@@ -365,18 +467,61 @@ export async function registerChatRoutes(app: FastifyInstance): Promise<void> {
     if (!parsed.success) {
       return reply.status(400).send({ error: "invalid_request", details: parsed.error.flatten() });
     }
-    const cli = await probeCursorCli();
-    if (!cli.available) {
-      return reply.status(503).send({
-        error: "cli_unavailable",
-        message: cli.message ?? "Cursor Agent CLI is not available",
-      });
-    }
     const { sessionId, imageId, fileName, model, modelLabel, workspace, userIntent } = parsed.data;
+    const useLocalLlm = isLocalLlmModel(model);
+    if (!useLocalLlm) {
+      const cli = await probeCursorCli();
+      if (!cli.available) {
+        return reply.status(503).send({
+          error: "cli_unavailable",
+          message: cli.message ?? "Cursor Agent CLI is not available",
+        });
+      }
+    }
     const session = sessionStore.getOrCreate(sessionId);
     const stored = await readStoredImage(sessionId, imageId);
     if (!stored) {
       return reply.status(404).send({ error: "image_not_found" });
+    }
+    const runId = uuidv4();
+    runStore.create(runId);
+    const startedAt = new Date().toISOString();
+    const imageUrl = `/chat/uploads/${sessionId}/${imageId}`;
+    sessionStore.setModel(session.sessionId, model);
+    if (useLocalLlm && model) {
+      const userPrompt = userIntent?.trim()
+        || "请描述这张图片中的内容，并回答用户可能关心的问题。";
+      const displayContent = userIntent?.trim()
+        ? `${userIntent.trim()}\n\n[图片]`
+        : "[图片]";
+      sessionStore.appendMessage(session.sessionId, {
+        role: "user",
+        content: displayContent,
+        timestamp: startedAt,
+        imageUrl,
+      });
+      let analysisText = "";
+      try {
+        const imageDataUrl = await imageFileToDataUrl(stored.absolutePath, stored.mimeType);
+        scheduleLocalLlmRun({
+          runId,
+          sessionId: session.sessionId,
+          prompt: userPrompt,
+          modelId: model,
+          modelLabel,
+          imageDataUrl,
+        });
+        analysisText = "（由本地模型多模态理解图片）";
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return reply.status(502).send({ error: "analysis_failed", message });
+      }
+      return reply.send({
+        runId,
+        sessionId: session.sessionId,
+        imageId,
+        analysisText,
+      });
     }
     let analysisText: string;
     try {
@@ -398,15 +543,11 @@ export async function registerChatRoutes(app: FastifyInstance): Promise<void> {
       session.messages,
       userIntent,
     );
-    const runId = uuidv4();
-    runStore.create(runId);
-    const startedAt = new Date().toISOString();
-    sessionStore.setModel(session.sessionId, model);
     sessionStore.appendMessage(session.sessionId, {
       role: "user",
       content: forwardPrompt,
       timestamp: startedAt,
-      imageUrl: `/chat/uploads/${sessionId}/${imageId}`,
+      imageUrl,
     });
     scheduleCursorCliRun({
       runId,

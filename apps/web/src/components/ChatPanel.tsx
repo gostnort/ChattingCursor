@@ -8,6 +8,7 @@ import {
   type TouchEvent,
 } from "react";
 import type { ChatMessage, ModelInfo } from "@chatting-cursor/shared";
+import { isOfflineModelId } from "@chatting-cursor/shared";
 import {
   analyzeChatImage,
   createChatSession,
@@ -17,8 +18,20 @@ import {
   sendChatMessage,
   subscribeRunEvents,
   uploadChatImage,
+  fetchOfflineModelStatus,
+  warmupOfflineModel,
 } from "../api/bridge";
-import { clearChatState, loadChatState, saveChatState } from "../chatPersistence";
+import {
+  clearChatState,
+  clearOfflineModelContext,
+  loadOfflineModelContext,
+  loadOnlineChatSnapshot,
+  MODEL_STORAGE_KEY,
+  resolveInitialChatState,
+  saveChatState,
+  saveOfflineModelContext,
+} from "../chatPersistence";
+import { OFFLINE_RESET_NOTICE, resolveModelOnReconnect } from "../modelReconnect";
 import { isLocalBridgeUrl, isLocalWebWithRemoteBridge } from "../bridgeSettings";
 import { isLocalWebOrigin } from "../environment";
 import { useSpeech } from "../hooks/useSpeech";
@@ -38,9 +51,6 @@ interface ChatPanelProps {
   bridgeUrl: string;
   bridgeToken: string;
 }
-
-
-const MODEL_STORAGE_KEY = "selectedModel";
 
 
 function shortenModelLabel(label: string): string {
@@ -93,15 +103,21 @@ function compressModelOptions(source: ModelInfo[]): {
   models: ModelInfo[];
   aliases: Map<string, string>;
 } {
+  const offline = source.filter((model) => model.kind === "offline");
+  const separators = source.filter((model) => model.kind === "separator");
+  const online = source.filter((model) => model.kind !== "offline" && model.kind !== "separator");
   const groups = new Map<string, ModelInfo[]>();
-  for (const model of source) {
+  const compressedOnline: ModelInfo[] = [];
+  const aliases = new Map<string, string>();
+  for (const model of offline) {
+    aliases.set(model.id, model.id);
+  }
+  for (const model of online) {
     const key = extractModelGroupKey(model.label);
     const group = groups.get(key) ?? [];
     group.push(model);
     groups.set(key, group);
   }
-  const compressed: ModelInfo[] = [];
-  const aliases = new Map<string, string>();
   for (const group of groups.values()) {
     const representative = [...group].sort((left, right) => {
       const leftBase = normalizeModelBase(left.label);
@@ -112,7 +128,7 @@ function compressModelOptions(source: ModelInfo[]): {
       continue;
     }
     const hasDefault = group.some((item) => item.isDefault);
-    compressed.push({
+    compressedOnline.push({
       ...representative,
       isDefault: hasDefault || representative.isDefault,
     });
@@ -120,7 +136,7 @@ function compressModelOptions(source: ModelInfo[]): {
       aliases.set(item.id, representative.id);
     }
   }
-  compressed.sort((left, right) => {
+  compressedOnline.sort((left, right) => {
     if (left.isDefault && !right.isDefault) {
       return -1;
     }
@@ -129,23 +145,29 @@ function compressModelOptions(source: ModelInfo[]): {
     }
     return normalizeModelBase(left.label).localeCompare(normalizeModelBase(right.label));
   });
-  return { models: compressed, aliases };
+  offline.sort((left, right) => left.label.localeCompare(right.label));
+  const models = [...offline, ...separators, ...compressedOnline];
+  return { models, aliases };
 }
 
 
 /** 最小聊天面板 */
 export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
-  const restoredState = loadChatState();
-  const [messages, setMessages] = useState<ChatMessage[]>(() => restoredState?.messages ?? []);
+  const initialChatState = resolveInitialChatState();
+  const [messages, setMessages] = useState<ChatMessage[]>(() => initialChatState.messages);
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [connectionError, setConnectionError] = useState<string | null>(null);
-  const [selectedModel, setSelectedModel] = useState(
-    () => restoredState?.selectedModel ?? localStorage.getItem(MODEL_STORAGE_KEY) ?? "",
-  );
-  const [sessionId, setSessionId] = useState<string | null>(() => restoredState?.sessionId ?? null);
+  const [modelSwitchNotice, setModelSwitchNotice] = useState<string | null>(null);
+  const [offlineLoadPhase, setOfflineLoadPhase] = useState<"idle" | "waiting" | "loading" | "ready" | "error">("idle");
+  const [offlineLoadMessage, setOfflineLoadMessage] = useState<string | null>(null);
+  const offlineWarmupGenerationRef = useRef(0);
+  const bridgeConnectionRef = useRef<{ url: string; token: string } | null>(null);
+  const chatSnapshotRef = useRef({ messages: initialChatState.messages, sessionId: initialChatState.sessionId });
+  const [selectedModel, setSelectedModel] = useState(() => initialChatState.selectedModel);
+  const [sessionId, setSessionId] = useState<string | null>(() => initialChatState.sessionId);
   const [focusedMessageId, setFocusedMessageId] = useState<string | null>(null);
   const [isImageAnalyzing, setIsImageAnalyzing] = useState(false);
   const assistantBufferRef = useRef("");
@@ -158,6 +180,60 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const { toggleSpeak, speakingKey } = useSpeech();
   const compressedModels = useMemo(() => compressModelOptions(models), [models]);
+
+
+  useEffect(() => {
+    chatSnapshotRef.current = { messages, sessionId };
+  }, [messages, sessionId]);
+
+
+  const applyChatSnapshot = useCallback((snapshot: { messages: ChatMessage[]; sessionId: string | null }): void => {
+    sseCloseRef.current?.();
+    sseCloseRef.current = null;
+    sendQueueRef.current = [];
+    runInFlightRef.current = false;
+    assistantBufferRef.current = "";
+    stderrBufferRef.current = "";
+    setMessages(snapshot.messages);
+    setSessionId(snapshot.sessionId);
+    setIsSending(false);
+    setIsThinking(false);
+    setFocusedMessageId(null);
+  }, []);
+
+
+  const restoreOnlineChatFromStorage = useCallback((): void => {
+    const onlineSnapshot = loadOnlineChatSnapshot();
+    if (onlineSnapshot) {
+      applyChatSnapshot(onlineSnapshot);
+      return;
+    }
+    applyChatSnapshot({ messages: [], sessionId: null });
+  }, [applyChatSnapshot]);
+
+
+  const persistOfflineModelContext = useCallback((modelId: string): void => {
+    if (!isOfflineModelId(modelId)) {
+      return;
+    }
+    const snapshot = chatSnapshotRef.current;
+    if (snapshot.messages.length === 0 && !snapshot.sessionId) {
+      return;
+    }
+    saveOfflineModelContext(modelId, snapshot);
+  }, []);
+
+
+  const startFreshChatSession = useCallback(async (): Promise<void> => {
+    applyChatSnapshot({ messages: [], sessionId: null });
+    try {
+      const result = await createChatSession(bridgeUrl, bridgeToken);
+      setSessionId(result.sessionId);
+      setConnectionError(null);
+    } catch {
+      setSessionId(null);
+    }
+  }, [applyChatSnapshot, bridgeToken, bridgeUrl]);
 
 
   const resizeComposer = useCallback((): void => {
@@ -188,14 +264,17 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
         }
         setConnectionError(null);
         setModels(result.models);
-        const stored = localStorage.getItem(MODEL_STORAGE_KEY);
-        const defaultModel = result.models.find((item) => item.isDefault)?.id ?? result.models[0]?.id ?? "";
+        const stored = localStorage.getItem(MODEL_STORAGE_KEY) ?? "";
         const aliasMap = compressModelOptions(result.models).aliases;
-        if (stored && result.models.some((item) => item.id === stored)) {
-          setSelectedModel(aliasMap.get(stored) ?? stored);
-        } else if (defaultModel) {
-          setSelectedModel(aliasMap.get(defaultModel) ?? defaultModel);
+        const { modelId, resetFromOffline } = resolveModelOnReconnect(stored, result.models, aliasMap);
+        if (resetFromOffline) {
+          if (isOfflineModelId(stored)) {
+            persistOfflineModelContext(stored);
+          }
+          restoreOnlineChatFromStorage();
+          setModelSwitchNotice(OFFLINE_RESET_NOTICE);
         }
+        setSelectedModel(modelId);
       } catch (error) {
         if (!cancelled) {
           const message = error instanceof Error ? error.message : String(error);
@@ -207,7 +286,7 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
     return () => {
       cancelled = true;
     };
-  }, [bridgeToken, bridgeUrl]);
+  }, [bridgeToken, bridgeUrl, persistOfflineModelContext, restoreOnlineChatFromStorage]);
 
 
   useEffect(() => {
@@ -223,10 +302,38 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
       try {
         const recent = await fetchRecentChatSession(bridgeUrl, bridgeToken);
         if (!cancelled && recent) {
+          if (recent.model && isOfflineModelId(recent.model)) {
+            saveOfflineModelContext(recent.model, {
+              messages: recent.messages,
+              sessionId: recent.sessionId,
+            });
+            restoreOnlineChatFromStorage();
+            if (models.length > 0) {
+              const { modelId, resetFromOffline } = resolveModelOnReconnect(
+                recent.model,
+                models,
+                compressedModels.aliases,
+              );
+              setSelectedModel(modelId);
+              if (resetFromOffline) {
+                setModelSwitchNotice(OFFLINE_RESET_NOTICE);
+              }
+            }
+            setConnectionError(null);
+            return;
+          }
           setSessionId(recent.sessionId);
           setMessages(recent.messages);
-          if (recent.model) {
-            setSelectedModel(compressedModels.aliases.get(recent.model) ?? recent.model);
+          if (recent.model && models.length > 0) {
+            const { modelId, resetFromOffline } = resolveModelOnReconnect(
+              recent.model,
+              models,
+              compressedModels.aliases,
+            );
+            setSelectedModel(modelId);
+            if (resetFromOffline) {
+              setModelSwitchNotice(OFFLINE_RESET_NOTICE);
+            }
           }
           setConnectionError(null);
           return;
@@ -248,15 +355,145 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
       cancelled = true;
       sseCloseRef.current?.();
     };
-  }, [bridgeToken, bridgeUrl, compressedModels.aliases, sessionId]);
+  }, [bridgeToken, bridgeUrl, compressedModels.aliases, models, persistOfflineModelContext, restoreOnlineChatFromStorage, sessionId]);
 
 
   useEffect(() => {
-    saveChatState({ messages, sessionId, selectedModel });
+    const prev = bridgeConnectionRef.current;
+    bridgeConnectionRef.current = { url: bridgeUrl, token: bridgeToken };
+    if (!prev || (prev.url === bridgeUrl && prev.token === bridgeToken) || models.length === 0) {
+      return;
+    }
+    if (!isOfflineModelId(selectedModel)) {
+      return;
+    }
+    persistOfflineModelContext(selectedModel);
+    restoreOnlineChatFromStorage();
+    const { modelId, resetFromOffline } = resolveModelOnReconnect(
+      selectedModel,
+      models,
+      compressedModels.aliases,
+    );
+    setSelectedModel(modelId);
+    if (resetFromOffline) {
+      setModelSwitchNotice(OFFLINE_RESET_NOTICE);
+    }
+  }, [bridgeToken, bridgeUrl, compressedModels.aliases, models, persistOfflineModelContext, restoreOnlineChatFromStorage, selectedModel]);
+
+
+  useEffect(() => {
+    if (!modelSwitchNotice) {
+      return;
+    }
+    const timer = window.setTimeout(() => setModelSwitchNotice(null), 4000);
+    return () => window.clearTimeout(timer);
+  }, [modelSwitchNotice]);
+
+
+  useEffect(() => {
+    if (isOfflineModelId(selectedModel)) {
+      saveOfflineModelContext(selectedModel, { messages, sessionId });
+    } else if (selectedModel) {
+      saveChatState({ messages, sessionId, selectedModel });
+    }
     if (selectedModel) {
       localStorage.setItem(MODEL_STORAGE_KEY, selectedModel);
     }
   }, [messages, sessionId, selectedModel]);
+
+
+  useEffect(() => {
+    if (!isOfflineModelId(selectedModel)) {
+      setOfflineLoadPhase("idle");
+      setOfflineLoadMessage(null);
+      return;
+    }
+    if (!bridgeUrl) {
+      return;
+    }
+    const generation = offlineWarmupGenerationRef.current + 1;
+    offlineWarmupGenerationRef.current = generation;
+    setOfflineLoadPhase("waiting");
+    setOfflineLoadMessage("1 秒后将开始加载本地模型…");
+    let pollTimer: number | undefined;
+    const delayTimer = window.setTimeout(() => {
+      if (offlineWarmupGenerationRef.current !== generation) {
+        return;
+      }
+      setOfflineLoadPhase("loading");
+      setOfflineLoadMessage("正在加载本地模型，请稍候…");
+      pollTimer = window.setInterval(() => {
+        if (offlineWarmupGenerationRef.current !== generation) {
+          return;
+        }
+        void fetchOfflineModelStatus(bridgeUrl, selectedModel, bridgeToken)
+          .then((status) => {
+            if (offlineWarmupGenerationRef.current !== generation) {
+              return;
+            }
+            if (status.ready) {
+              setOfflineLoadPhase("ready");
+              setOfflineLoadMessage("加载完成");
+              return;
+            }
+            if (status.error || status.loadState === "error") {
+              setOfflineLoadPhase("error");
+              setOfflineLoadMessage(status.error ?? status.message ?? "本地模型加载失败");
+              return;
+            }
+            if (status.message) {
+              setOfflineLoadMessage(status.message);
+            }
+          })
+          .catch(() => {
+            // 轮询失败时保留当前提示，等待 warmup 返回
+          });
+      }, 2500);
+      void warmupOfflineModel(bridgeUrl, selectedModel, bridgeToken)
+        .then((result) => {
+          if (offlineWarmupGenerationRef.current !== generation) {
+            return;
+          }
+          if (result.ready) {
+            setOfflineLoadPhase("ready");
+            setOfflineLoadMessage(
+              result.loadState === "ready"
+                ? "加载完成"
+                : (result.message ?? "推理服务已就绪；发送消息时将加载模型"),
+            );
+            return;
+          }
+          if (result.loadState === "loading") {
+            setOfflineLoadPhase("loading");
+            if (result.message) {
+              setOfflineLoadMessage(result.message);
+            }
+            return;
+          }
+          setOfflineLoadPhase("error");
+          setOfflineLoadMessage(result.error ?? result.message ?? "本地模型未就绪");
+        })
+        .catch((error: unknown) => {
+          if (offlineWarmupGenerationRef.current !== generation) {
+            return;
+          }
+          const message = error instanceof Error ? error.message : String(error);
+          setOfflineLoadPhase("error");
+          setOfflineLoadMessage(message);
+        })
+        .finally(() => {
+          if (pollTimer !== undefined) {
+            window.clearInterval(pollTimer);
+          }
+        });
+    }, 1000);
+    return () => {
+      window.clearTimeout(delayTimer);
+      if (pollTimer !== undefined) {
+        window.clearInterval(pollTimer);
+      }
+    };
+  }, [bridgeToken, bridgeUrl, selectedModel]);
 
 
   useEffect(() => {
@@ -373,8 +610,28 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
 
 
   const handleModelChange = (value: string): void => {
+    const previous = selectedModel;
+    if (isOfflineModelId(previous)) {
+      persistOfflineModelContext(previous);
+    }
     setSelectedModel(value);
     localStorage.setItem(MODEL_STORAGE_KEY, value);
+    if (isOfflineModelId(value)) {
+      const snapshot = loadOfflineModelContext(value);
+      if (snapshot) {
+        applyChatSnapshot(snapshot);
+        setModelSwitchNotice("已恢复该离线模型的上次对话。");
+        return;
+      }
+      void startFreshChatSession();
+      return;
+    }
+    const onlineSnapshot = loadOnlineChatSnapshot();
+    if (onlineSnapshot) {
+      applyChatSnapshot(onlineSnapshot);
+      return;
+    }
+    void startFreshChatSession();
   };
 
 
@@ -420,7 +677,11 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
 
   const handleNewChat = async (): Promise<void> => {
     resetChatState();
-    clearChatState();
+    if (isOfflineModelId(selectedModel)) {
+      clearOfflineModelContext(selectedModel);
+    } else {
+      clearChatState();
+    }
     try {
       const result = await createChatSession(bridgeUrl, bridgeToken);
       setSessionId(result.sessionId);
@@ -558,6 +819,10 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
       appendAssistantError("Only JPEG and PNG images are supported.");
       return;
     }
+    if (isOfflineModelId(selectedModel) && offlineLoadPhase !== "ready") {
+      appendAssistantError(offlineLoadMessage ?? "本地模型尚未加载完成，请稍候。");
+      return;
+    }
     if (runInFlightRef.current || isImageAnalyzing) {
       appendAssistantError("Wait for the current run to finish before attaching an image.");
       return;
@@ -619,9 +884,17 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
   };
 
 
+  const offlineModelSelected = isOfflineModelId(selectedModel);
+  const offlineModelReady = !offlineModelSelected || offlineLoadPhase === "ready";
+
+
   const handleSend = async (): Promise<void> => {
     const prompt = input.trim();
     if (!prompt) {
+      return;
+    }
+    if (offlineModelSelected && !offlineModelReady) {
+      appendAssistantError(offlineLoadMessage ?? "本地模型尚未加载完成，请稍候或检查「本地 → 本地模型」中的权重与 Python 依赖。");
       return;
     }
     setInput("");
@@ -663,9 +936,13 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
                 <option value="">加载中…</option>
               ) : (
                 compressedModels.models.map((model) => (
-                  <option key={model.id} value={model.id}>
-                    {model.label}{model.isDefault ? " (默认)" : ""}
-                  </option>
+                  model.kind === "separator" ? (
+                    <option key={model.id} value="" disabled>{model.label}</option>
+                  ) : (
+                    <option key={model.id} value={model.id}>
+                      {model.label}{model.isDefault ? " (默认)" : ""}
+                    </option>
+                  )
                 ))
               )}
             </select>
@@ -674,6 +951,17 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
             新对话
           </button>
         </div>
+        {modelSwitchNotice && (
+          <p className="config-save-toast" role="status">{modelSwitchNotice}</p>
+        )}
+        {offlineModelSelected && offlineLoadMessage && (
+          <p
+            className={offlineLoadPhase === "error" ? "config-error" : "config-save-toast"}
+            role="status"
+          >
+            {offlineLoadMessage}
+          </p>
+        )}
         {connectionError && (
           <p className="config-error">
             {isLocalWebWithRemoteBridge(bridgeUrl)
@@ -736,9 +1024,9 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
             type="button"
             className="composer-send"
             onClick={() => void handleSend()}
-            disabled={!input.trim()}
+            disabled={!input.trim() || !offlineModelReady || isSending}
           >
-            {isSending ? "运行中…" : "发送"}
+            {isSending ? "运行中…" : offlineModelSelected && offlineLoadPhase === "loading" ? "模型加载中…" : "发送"}
           </button>
         </div>
       </section>

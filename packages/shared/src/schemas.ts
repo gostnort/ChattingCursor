@@ -170,6 +170,8 @@ export const modelInfoSchema = z.object({
   id: z.string().min(1),
   label: z.string().min(1),
   isDefault: z.boolean().optional(),
+  /** cursor=走 agent-cli；offline=本地独立 LLM；separator=下拉分隔线 */
+  kind: z.enum(["cursor", "offline", "separator"]).optional(),
 });
 
 export type ModelInfo = z.infer<typeof modelInfoSchema>;
@@ -182,6 +184,30 @@ export const modelsResponseSchema = z.object({
 });
 
 export type ModelsResponse = z.infer<typeof modelsResponseSchema>;
+
+
+/** POST /offline/warmup 请求体 */
+export const offlineWarmupRequestSchema = z.object({
+  modelId: z.string().min(1),
+});
+
+export type OfflineWarmupRequest = z.infer<typeof offlineWarmupRequestSchema>;
+
+
+/** POST /offline/warmup 响应体 */
+export const offlineWarmupResponseSchema = z.object({
+  modelId: z.string().min(1),
+  runtime: z.string().min(1),
+  ready: z.boolean(),
+  spawning: z.boolean(),
+  running: z.boolean(),
+  weights: z.enum(["ready", "missing", "incomplete"]).optional(),
+  loadState: z.enum(["down", "idle", "loading", "ready", "error"]).optional(),
+  error: z.string().optional(),
+  message: z.string().optional(),
+});
+
+export type OfflineWarmupResponse = z.infer<typeof offlineWarmupResponseSchema>;
 
 
 /** GET /history/search 匹配片段 */
@@ -224,6 +250,17 @@ export const localConfigResponseSchema = z.object({
     message: z.string().optional(),
     fallbackFromNative: z.boolean().optional(),
   }),
+  gemma4: z
+    .object({
+      managed: z.boolean(),
+      baseUrl: z.string(),
+      weights: z.enum(["ready", "missing", "incomplete"]),
+      modelDir: z.string(),
+      running: z.boolean(),
+      spawning: z.boolean(),
+      message: z.string().optional(),
+    })
+    .optional(),
   timestamp: z.string().datetime(),
 });
 
@@ -411,3 +448,66 @@ export const crewRunResponseSchema = z.object({
 });
 
 export type CrewRunResponse = z.infer<typeof crewRunResponseSchema>;
+
+
+/** 知识库 wiki 节点 */
+export const knowledgeNodeSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  parentId: z.string().nullable(),
+  hasContent: z.boolean().optional(),
+});
+
+export type KnowledgeNode = z.infer<typeof knowledgeNodeSchema>;
+
+
+/** GET /knowledge/tree 响应体 */
+export const knowledgeTreeResponseSchema = z.object({
+  knowledgeDir: z.string().min(1),
+  nodes: z.array(knowledgeNodeSchema),
+  rootId: z.string().min(1),
+});
+
+export type KnowledgeTreeResponse = z.infer<typeof knowledgeTreeResponseSchema>;
+
+
+/** POST /knowledge/nodes 请求体 */
+export const knowledgeCreateNodeRequestSchema = z.object({
+  parentId: z.string().min(1),
+  name: z.string().min(1).max(120),
+});
+
+export type KnowledgeCreateNodeRequest = z.infer<typeof knowledgeCreateNodeRequestSchema>;
+
+
+/** POST /knowledge/nodes 响应体 */
+export const knowledgeCreateNodeResponseSchema = z.object({
+  node: knowledgeNodeSchema,
+});
+
+export type KnowledgeCreateNodeResponse = z.infer<typeof knowledgeCreateNodeResponseSchema>;
+
+
+/** POST /knowledge/nodes/:id/content 响应体 */
+export const knowledgeUploadContentResponseSchema = z.object({
+  nodeId: z.string().min(1),
+  bytes: z.number().int().nonnegative(),
+});
+
+export type KnowledgeUploadContentResponse = z.infer<typeof knowledgeUploadContentResponseSchema>;
+
+
+/** PATCH /knowledge/nodes/:id 请求体 */
+export const knowledgeRenameNodeRequestSchema = z.object({
+  name: z.string().min(1).max(120),
+});
+
+export type KnowledgeRenameNodeRequest = z.infer<typeof knowledgeRenameNodeRequestSchema>;
+
+
+/** PATCH /knowledge/nodes/:id 响应体 */
+export const knowledgeRenameNodeResponseSchema = z.object({
+  node: knowledgeNodeSchema,
+});
+
+export type KnowledgeRenameNodeResponse = z.infer<typeof knowledgeRenameNodeResponseSchema>;

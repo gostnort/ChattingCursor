@@ -1,0 +1,10 @@
+# local_llm 本地推理（llama.cpp GGUF sidecar）
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+llama-cpp-python>=0.3.0
+huggingface-hub>=0.26.0
+
+# Windows CUDA（可选，需匹配本机 CUDA 版本）：
+#   pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124
+# Linux CUDA 示例：
+#   CMAKE_ARGS="-DLLAMA_CUDA=on" pip install llama-cpp-python --force-reinstall --no-cache-dir

@@ -13,6 +13,11 @@ import {
   setWebPort,
 } from "../bridgeSettings";
 import { GITHUB_PAGES_URL, isGitHubPages, isLocalWebOrigin } from "../environment";
+import {
+  defaultChattingCursorHomeHint,
+  defaultCloudflareTunnelConfigHint,
+  defaultCloudflaredCredentialsHint,
+} from "../platformPaths";
 import { MAX_TEXT_SIZE_PX, MIN_TEXT_SIZE_PX } from "../textSizeSettings";
 import {
   fetchAuthStatus,
@@ -32,8 +37,6 @@ import {
   type CloudflareTunnelLocalSettings,
 } from "../cloudflareTunnelSettings";
 import { parseTodayTokenFromContent } from "../tokenFile";
-
-
 interface ConfigSubPageProps {
   assistantBubbleColors: AssistantBubbleColors;
   userBubbleBackground: string;
@@ -47,6 +50,7 @@ interface ConfigSubPageProps {
   onBridgeUrlChange: (url: string) => void;
   onTextSizeChange: (size: number) => void;
   onOpenCli: () => void;
+  onOpenKnowledge: () => void;
 }
 
 
@@ -97,6 +101,7 @@ export function ConfigSubPage({
   onBridgeUrlChange,
   onTextSizeChange,
   onOpenCli,
+  onOpenKnowledge,
 }: ConfigSubPageProps) {
   const onGitHubPages = isGitHubPages();
   const [authStatus, setAuthStatus] = useState<AuthStatusResponse | null>(null);
@@ -504,6 +509,33 @@ export function ConfigSubPage({
         )}
       </section>
 
+      {canUseLocalApi && (
+        <section className="config-section">
+          <h2>知识库</h2>
+          <p className="config-hint">
+            树形 wiki 在独立子页管理，便于浏览较长目录与批量维护 .md 文件。
+          </p>
+          <button type="button" className="btn-secondary config-link" onClick={onOpenKnowledge}>
+            打开知识库
+          </button>
+        </section>
+      )}
+
+      {canUseLocalApi && (
+        <section className="config-section">
+          <h2>本地 LLM</h2>
+          <p className="config-hint">
+            在「本地模型」页从 Hugging Face 安装 GGUF，并在聊天页选择 <code>author/model</code> 使用。
+          </p>
+          {localConfig?.gemma4 && (
+            <p className="config-hint">
+              Sidecar：{localConfig.gemma4.running ? "运行中" : localConfig.gemma4.spawning ? "启动中…" : "未运行"}
+              {localConfig.gemma4.message ? ` — ${localConfig.gemma4.message}` : ""}
+            </p>
+          )}
+        </section>
+      )}
+
       <section className="config-section">
         <h2>文字大小</h2>
         <label className="config-field" htmlFor="text-size-slider">
@@ -635,8 +667,8 @@ export function ConfigSubPage({
           <h2>Cloudflare tunnel (optional — named tunnel)</h2>
           <p className="config-hint">
             Stored locally in your browser and on this PC at{" "}
-            <code>{cloudflareConfigPath || "%USERPROFILE%\\.chattingcursor\\cloudflare-tunnel.json"}</code>.
-            Leave blank to keep the default quick tunnel (<code>trycloudflare.com</code>) from run.bat.
+            <code>{cloudflareConfigPath || defaultCloudflareTunnelConfigHint()}</code>.
+            Leave blank to keep the default quick tunnel (<code>trycloudflare.com</code>) from run.bat / run.sh.
           </p>
           <div className="config-grid config-grid-form">
             <label className="config-field" htmlFor="cf-tunnel-name">
@@ -682,7 +714,7 @@ export function ConfigSubPage({
                 type="text"
                 value={cloudflareTunnel.credentialsFilePath}
                 onChange={(event) => setCloudflareTunnel({ ...cloudflareTunnel, credentialsFilePath: event.target.value })}
-                placeholder="%USERPROFILE%\\.cloudflared\\&lt;tunnel-id&gt;.json"
+                placeholder={defaultCloudflaredCredentialsHint()}
                 spellCheck={false}
               />
               <span className="config-hint">From cloudflared tunnel create; usually referenced in config.yml.</span>
@@ -739,7 +771,7 @@ export function ConfigSubPage({
             type="text"
             value={tokenDirectoryInput}
             onChange={(event) => setTokenDirectoryInput(event.target.value)}
-            placeholder="默认 %USERPROFILE%\\.chattingcursor，或云盘同步目录"
+            placeholder={`默认 ${defaultChattingCursorHomeHint()}，或云盘同步目录`}
           />
         </label>
         <div className="config-actions token-directory-actions">
@@ -752,7 +784,7 @@ export function ConfigSubPage({
           </button>
         </div>
         <p className="config-hint">
-          默认与历史记录同在 <code>%USERPROFILE%\.chattingcursor</code>；远程访问时可改为云盘目录并点「使用这个路径」持久化。Bridge 会写入固定文件名 <code>{tokenFileName}</code>。
+          默认与历史记录同在 <code>{defaultChattingCursorHomeHint()}</code>；远程访问时可改为云盘目录并点「使用这个路径」持久化。Bridge 会写入固定文件名 <code>{tokenFileName}</code>。
         </p>
       </section>
 

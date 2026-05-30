@@ -7,6 +7,11 @@ import { inspectChromeEndpoint } from "./services/chrome-google-search.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerChatRoutes } from "./routes/chat.js";
 import { registerLocalRoutes } from "./routes/local.js";
+import { registerKnowledgeRoutes } from "./routes/knowledge.js";
+import { registerOfflineRoutes } from "./routes/offline.js";
+import { registerLocalLlmRoutes } from "./routes/local-llm.js";
+import { maybeWarmLocalLlmOnBridgeStart, stopManagedLocalLlm, getLocalLlmHealthStatus } from "./services/local-llm-lifecycle.js";
+import { runLocalLlmStartupMaintenance } from "./services/local-llm-store.js";
 import { tokenRotationService } from "./services/token-rotation.js";
 
 
@@ -27,14 +32,17 @@ async function main(): Promise<void> {
     },
   });
   app.get("/health", async () => {
-    const [cli, chrome] = await Promise.all([
+    const [cli, chrome, localLlm] = await Promise.all([
       probeCursorCli(),
       inspectChromeEndpoint(),
+      getLocalLlmHealthStatus(),
     ]);
     return {
       status: "ok",
       cli,
       chrome,
+      localLlm,
+      gemma4: localLlm,
       webSearchAvailable: chrome.available,
       publicBridgeUrl: tokenRotationService.getPublicBridgeUrl(),
       timestamp: new Date().toISOString(),
@@ -43,8 +51,20 @@ async function main(): Promise<void> {
   await registerAuthRoutes(app);
   await registerChatRoutes(app);
   await registerLocalRoutes(app);
+  await registerKnowledgeRoutes(app);
+  await registerOfflineRoutes(app);
+  await registerLocalLlmRoutes(app);
   await app.listen({ host: config.host, port: config.port });
   app.log.info(`Bridge 运行于 http://${config.host}:${config.port}`);
+  void runLocalLlmStartupMaintenance();
+  void maybeWarmLocalLlmOnBridgeStart();
+  const shutdown = async (): Promise<void> => {
+    await stopManagedLocalLlm();
+    await app.close();
+    process.exit(0);
+  };
+  process.once("SIGINT", () => void shutdown());
+  process.once("SIGTERM", () => void shutdown());
 }
 
 

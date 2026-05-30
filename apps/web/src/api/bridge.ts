@@ -17,6 +17,11 @@ import type {
   ModelsResponse,
   RecentChatSessionResponse,
   RunEvent,
+  KnowledgeTreeResponse,
+  KnowledgeCreateNodeResponse,
+  KnowledgeUploadContentResponse,
+  KnowledgeRenameNodeResponse,
+  OfflineWarmupResponse,
 } from "@chatting-cursor/shared";
 
 
@@ -39,6 +44,7 @@ export interface BridgeHealthResponse {
   };
   webSearchAvailable?: boolean;
   publicBridgeUrl?: string;
+  gemma4?: LocalConfigResponse["gemma4"];
   timestamp: string;
 }
 
@@ -151,6 +157,54 @@ export async function fetchLatestRun(bridgeUrl: string, token?: string): Promise
     throw new Error(await readErrorDetail(response, `获取最新运行失败 (${response.status})`));
   }
   return response.json() as Promise<LatestRunResponse>;
+}
+
+
+/** 预热本地离线模型（选择模型后主动加载 sidecar） */
+export async function warmupOfflineModel(
+  bridgeUrl: string,
+  modelId: string,
+  token?: string,
+): Promise<OfflineWarmupResponse> {
+  const response = await fetch(`${bridgeUrl}/offline/warmup`, {
+    method: "POST",
+    headers: buildAuthHeaders(token, { "Content-Type": "application/json" }),
+    body: JSON.stringify({ modelId }),
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    let parsed: Partial<OfflineWarmupResponse & { message?: string }> = {};
+    try {
+      parsed = JSON.parse(body) as Partial<OfflineWarmupResponse & { message?: string }>;
+    } catch {
+      // 非 JSON 响应
+    }
+    const error = new Error(
+      parsed.message ?? (body || `离线模型预热失败 (${response.status})`),
+    ) as Error & { snapshot?: OfflineWarmupResponse };
+    if (parsed.modelId) {
+      error.snapshot = parsed as OfflineWarmupResponse;
+    }
+    throw error;
+  }
+  return response.json() as Promise<OfflineWarmupResponse>;
+}
+
+
+/** 查询本地离线模型是否已就绪（不拉起进程） */
+export async function fetchOfflineModelStatus(
+  bridgeUrl: string,
+  modelId: string,
+  token?: string,
+): Promise<OfflineWarmupResponse> {
+  const params = new URLSearchParams({ modelId });
+  const response = await fetch(`${bridgeUrl}/offline/status?${params.toString()}`, {
+    headers: buildAuthHeaders(token),
+  });
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, `离线模型状态不可用 (${response.status})`));
+  }
+  return response.json() as Promise<OfflineWarmupResponse>;
 }
 
 
@@ -449,6 +503,279 @@ export async function fetchAuthStatus(bridgeUrl: string): Promise<AuthStatusResp
     throw new Error(await readErrorDetail(response, `认证状态不可用 (${response.status})`));
   }
   return response.json() as Promise<AuthStatusResponse>;
+}
+
+
+/** 获取知识库 wiki 树 */
+export async function fetchKnowledgeTree(bridgeUrl: string, token?: string): Promise<KnowledgeTreeResponse> {
+  const response = await fetch(`${bridgeUrl}/knowledge/tree`, {
+    headers: buildAuthHeaders(token),
+  });
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, `知识库不可用 (${response.status})`));
+  }
+  return response.json() as Promise<KnowledgeTreeResponse>;
+}
+
+
+/** 创建知识库子节点 */
+export async function createKnowledgeNode(
+  bridgeUrl: string,
+  parentId: string,
+  name: string,
+  token?: string,
+): Promise<KnowledgeCreateNodeResponse> {
+  const response = await fetch(`${bridgeUrl}/knowledge/nodes`, {
+    method: "POST",
+    headers: buildAuthHeaders(token, { "Content-Type": "application/json" }),
+    body: JSON.stringify({ parentId, name }),
+  });
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, `创建节点失败 (${response.status})`));
+  }
+  return response.json() as Promise<KnowledgeCreateNodeResponse>;
+}
+
+
+/** 上传节点 markdown */
+export async function uploadKnowledgeMarkdown(
+  bridgeUrl: string,
+  nodeId: string,
+  file: File,
+  token?: string,
+): Promise<KnowledgeUploadContentResponse> {
+  const form = new FormData();
+  form.append("file", file);
+  const response = await fetch(`${bridgeUrl}/knowledge/nodes/${encodeURIComponent(nodeId)}/content`, {
+    method: "POST",
+    headers: buildAuthHeaders(token),
+    body: form,
+  });
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, `上传失败 (${response.status})`));
+  }
+  return response.json() as Promise<KnowledgeUploadContentResponse>;
+}
+
+
+/** 重命名知识库节点 */
+export async function renameKnowledgeNode(
+  bridgeUrl: string,
+  nodeId: string,
+  name: string,
+  token?: string,
+): Promise<KnowledgeRenameNodeResponse> {
+  const response = await fetch(`${bridgeUrl}/knowledge/nodes/${encodeURIComponent(nodeId)}`, {
+    method: "PATCH",
+    headers: buildAuthHeaders(token, { "Content-Type": "application/json" }),
+    body: JSON.stringify({ name }),
+  });
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, `重命名失败 (${response.status})`));
+  }
+  return response.json() as Promise<KnowledgeRenameNodeResponse>;
+}
+
+
+/** 删除知识库节点 */
+export async function deleteKnowledgeNode(
+  bridgeUrl: string,
+  nodeId: string,
+  token?: string,
+): Promise<{ ok: boolean; nodeId: string }> {
+  const response = await fetch(`${bridgeUrl}/knowledge/nodes/${encodeURIComponent(nodeId)}`, {
+    method: "DELETE",
+    headers: buildAuthHeaders(token),
+  });
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, `删除失败 (${response.status})`));
+  }
+  return response.json() as Promise<{ ok: boolean; nodeId: string }>;
+}
+
+
+export type GgufGroupOption = {
+  groupKey: string;
+  displayLabel: string;
+  folderPrefix: string;
+  filenames: string[];
+};
+
+
+export type HfModelSummary = {
+  repoId: string;
+  displayName: string;
+};
+
+
+export type InstalledLocalModel = {
+  id: string;
+  author: string;
+  modelSlug: string;
+  label: string;
+  displayName: string;
+  defaultPrompt: string;
+  weightsReady: boolean;
+  repoId: string;
+  ggufGroupKey: string;
+  filenames: string[];
+};
+
+
+export type LocalLlmInstallStatus = {
+  jobId: string;
+  state: "running" | "done" | "error";
+  progress: string;
+  phase?: "queued" | "resolving" | "downloading" | "finalizing" | "done" | "error";
+  totalBytes?: number | null;
+  downloadedBytes?: number;
+  percent?: number | null;
+  error?: string;
+  model?: InstalledLocalModel;
+};
+
+
+/** 获取 local-llm 作者列表 */
+export async function fetchLocalLlmAuthors(bridgeUrl: string): Promise<{ authors: string[] }> {
+  const response = await fetch(`${bridgeUrl}/local-llm/authors`);
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, `获取作者列表失败 (${response.status})`));
+  }
+  return response.json() as Promise<{ authors: string[] }>;
+}
+
+
+/** 添加 HF 作者 */
+export async function addLocalLlmAuthor(bridgeUrl: string, author: string): Promise<{ authors: string[] }> {
+  const response = await fetch(`${bridgeUrl}/local-llm/authors`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ author }),
+  });
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, `添加作者失败 (${response.status})`));
+  }
+  return response.json() as Promise<{ authors: string[] }>;
+}
+
+
+/** 列出作者的 HF GGUF 仓库 */
+export async function fetchLocalLlmHfModels(
+  bridgeUrl: string,
+  author: string,
+): Promise<{ author: string; models: HfModelSummary[] }> {
+  const params = new URLSearchParams({ author });
+  const response = await fetch(`${bridgeUrl}/local-llm/hf/models?${params.toString()}`);
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, `获取 HF 模型失败 (${response.status})`));
+  }
+  return response.json() as Promise<{ author: string; models: HfModelSummary[] }>;
+}
+
+
+/** 列出仓库内 GGUF 分组 */
+export async function fetchLocalLlmHfFiles(
+  bridgeUrl: string,
+  repoId: string,
+): Promise<{ repoId: string; groups: GgufGroupOption[] }> {
+  const params = new URLSearchParams({ repo_id: repoId });
+  const response = await fetch(`${bridgeUrl}/local-llm/hf/files?${params.toString()}`);
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, `获取 GGUF 文件失败 (${response.status})`));
+  }
+  return response.json() as Promise<{ repoId: string; groups: GgufGroupOption[] }>;
+}
+
+
+/** 开始安装本地模型（需指定 ggufGroupKey + filenames） */
+export async function installLocalLlmModel(
+  bridgeUrl: string,
+  body: {
+    author: string;
+    repoId: string;
+    ggufGroupKey?: string;
+    filenames?: string[];
+    displayName?: string;
+    defaultPrompt?: string;
+  },
+): Promise<{ jobId: string }> {
+  const response = await fetch(`${bridgeUrl}/local-llm/install`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, `安装失败 (${response.status})`));
+  }
+  return response.json() as Promise<{ jobId: string }>;
+}
+
+
+/** 查询安装进度 */
+export async function fetchLocalLlmInstallStatus(
+  bridgeUrl: string,
+  jobId: string,
+): Promise<LocalLlmInstallStatus> {
+  const response = await fetch(`${bridgeUrl}/local-llm/install/${encodeURIComponent(jobId)}`);
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, `安装状态不可用 (${response.status})`));
+  }
+  return response.json() as Promise<LocalLlmInstallStatus>;
+}
+
+
+/** 已安装模型列表 */
+export async function fetchLocalLlmInstalled(bridgeUrl: string): Promise<{ models: InstalledLocalModel[] }> {
+  const response = await fetch(`${bridgeUrl}/local-llm/installed`);
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, `获取已安装模型失败 (${response.status})`));
+  }
+  return response.json() as Promise<{ models: InstalledLocalModel[] }>;
+}
+
+
+function localLlmModelIdToRoutePath(modelId: string): string {
+  return modelId
+    .split("/")
+    .map((segment) => encodeURIComponent(segment.trim()))
+    .filter(Boolean)
+    .join("/");
+}
+
+
+/** 删除已安装模型 */
+export async function deleteLocalLlmModel(
+  bridgeUrl: string,
+  modelId: string,
+): Promise<{ ok: boolean; unloaded?: boolean; deleted?: boolean }> {
+  const url = `${bridgeUrl}/local-llm/installed/${localLlmModelIdToRoutePath(modelId)}`;
+  const response = await fetch(url, {
+    method: "DELETE",
+  });
+  if (!response.ok) {
+    const detail = await readErrorDetail(response, `删除模型失败 (${response.status})`);
+    console.error("[deleteLocalLlmModel]", { url, modelId, status: response.status, detail });
+    throw new Error(detail);
+  }
+  return response.json() as Promise<{ ok: boolean; unloaded?: boolean; deleted?: boolean }>;
+}
+
+
+/** 更新 defaultPrompt */
+export async function patchLocalLlmDefaultPrompt(
+  bridgeUrl: string,
+  modelId: string,
+  defaultPrompt: string,
+): Promise<{ model: InstalledLocalModel }> {
+  const response = await fetch(`${bridgeUrl}/local-llm/installed/${localLlmModelIdToRoutePath(modelId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ defaultPrompt }),
+  });
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, `保存提示词失败 (${response.status})`));
+  }
+  return response.json() as Promise<{ model: InstalledLocalModel }>;
 }
 
 

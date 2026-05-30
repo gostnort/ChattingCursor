@@ -13,7 +13,7 @@ export function loadConfig(): BridgeConfig {
   const host = process.env.BRIDGE_HOST ?? "127.0.0.1";
   const port = Number(process.env.BRIDGE_PORT ?? 4321);
   const corsRaw = process.env.BRIDGE_CORS_ORIGINS
-    ?? "http://127.0.0.1:43210,http://localhost:43210,http://127.0.0.1:5173,http://localhost:5173,https://*.github.io";
+    ?? "http://127.0.0.1:*,http://localhost:*,https://*.github.io";
   return {
     host,
     port,

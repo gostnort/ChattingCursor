@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-/** Chrome 远程调试默认地址（Windows 本机） */
+/** Chrome 远程调试默认地址（本机 loopback；WSL 下可能改写到 Windows 主机） */
 export const DEFAULT_CHROME_DEBUG_ENDPOINT = "http://127.0.0.1:9222";
 
 
@@ -14,7 +14,7 @@ export function resolveChromeEndpoint(): string {
 }
 
 
-/** Bridge（run.bat / Windows Node）联网搜索用：固定本机 9222，不做 WSL 主机改写 */
+/** Bridge（run.bat / run.sh）联网搜索用：固定本机 9222，不做 WSL 主机改写 */
 export function resolveBridgeChromeEndpoint(): string {
   const fromEnv = process.env.CHROME_DEBUG_ENDPOINT?.trim();
   if (fromEnv && fromEnv.length > 0) {

@@ -1,0 +1,15 @@
+{
+  "rootId": "root",
+  "nodes": {
+    "root": {
+      "id": "root",
+      "name": "根",
+      "parentId": null
+    },
+    "56e4bd07-9e38-45e8-b8e5-0b965bd76b6a": {
+      "id": "56e4bd07-9e38-45e8-b8e5-0b965bd76b6a",
+      "name": "新建节点1",
+      "parentId": "root"
+    }
+  }
+}

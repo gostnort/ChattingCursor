@@ -50,7 +50,7 @@ if (-not (Test-CloudflaredInstalled)) {
   Write-Host ""
   Write-Host "Install finished, but cloudflared is not on PATH in this shell."
   Write-Host "Open a new PowerShell window, then run: cloudflared --version"
-  exit 0
+  exit 10
 }
 
 Write-Host ""

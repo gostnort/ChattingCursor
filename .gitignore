@@ -15,6 +15,21 @@ Thumbs.db
 *.tsbuildinfo
 coverage/
 .turbo/
+__pycache__/
+*/__pycache__/
+# Gemma4 本地权重（勿提交 GitHub；可保留 .gitkeep）
+Gemma4/llm_source/**
+!Gemma4/llm_source/.gitkeep
+Gemma4/offload/
+*/content/**
+
+# local_llm 仅跟踪 server/ 推理代码；权重、registry、安装任务等勿提交
+local_llm/**
+!local_llm/server/
+!local_llm/server/**
+
+# 仓库内 Bridge 运行时数据（安装任务等）
+.chattingcursor/
 
 # main 分支不提�?crewAI 参考代码；with-crewai 分支已移除此规则
 crewAI/

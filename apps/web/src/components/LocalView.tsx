@@ -1,7 +1,11 @@
+import { useMemo } from "react";
 import type { AssistantBubbleColors } from "../assistantBubbleSettings";
+import { normalizeBridgeUrl } from "../bridgeSettings";
 import type { LocalSub } from "../routing";
 import { CliOutputSubPage } from "./CliOutputSubPage";
 import { ConfigSubPage } from "./ConfigSubPage";
+import { KnowledgeWikiPage } from "./KnowledgeWikiPage";
+import { LocalModelsSubPage } from "./LocalModelsSubPage";
 
 
 interface LocalViewProps {
@@ -21,7 +25,7 @@ interface LocalViewProps {
 }
 
 
-/** 本地模式根视图（仅含配置 / CLI 输出子导航） */
+/** 本地模式根视图（配置 / 知识库 / CLI 输出子导航） */
 export function LocalView({
   localSub,
   assistantBubbleColors,
@@ -37,6 +41,7 @@ export function LocalView({
   onTextSizeChange,
   onLocalSubChange,
 }: LocalViewProps) {
+  const normalizedBridgeUrl = useMemo(() => normalizeBridgeUrl(bridgeUrl), [bridgeUrl]);
   return (
     <section id="local-view" className="app-view local-view" aria-label="本地">
       <nav className="local-sub-nav" aria-label="本地子页">
@@ -50,6 +55,22 @@ export function LocalView({
         </button>
         <button
           type="button"
+          className={localSub === "knowledge" ? "local-sub-active" : ""}
+          aria-current={localSub === "knowledge" ? "page" : undefined}
+          onClick={() => onLocalSubChange("knowledge")}
+        >
+          知识库
+        </button>
+        <button
+          type="button"
+          className={localSub === "models" ? "local-sub-active" : ""}
+          aria-current={localSub === "models" ? "page" : undefined}
+          onClick={() => onLocalSubChange("models")}
+        >
+          本地模型
+        </button>
+        <button
+          type="button"
           className={localSub === "cli" ? "local-sub-active" : ""}
           aria-current={localSub === "cli" ? "page" : undefined}
           onClick={() => onLocalSubChange("cli")}
@@ -57,13 +78,13 @@ export function LocalView({
           CLI输出
         </button>
       </nav>
-      <main className="local-sub-main">
-        {localSub === "config" ? (
+      <main className={`local-sub-main${localSub === "knowledge" ? " local-sub-main-knowledge" : ""}`}>
+        {localSub === "config" && (
           <div id="local-config" className="local-sub-panel config-page">
             <ConfigSubPage
               assistantBubbleColors={assistantBubbleColors}
               userBubbleBackground={userBubbleBackground}
-              bridgeUrl={bridgeUrl}
+              bridgeUrl={normalizedBridgeUrl}
               bridgeToken={bridgeToken}
               textSizePx={textSizePx}
               onAssistantBubbleColorsChange={onAssistantBubbleColorsChange}
@@ -73,11 +94,19 @@ export function LocalView({
               onBridgeUrlChange={onBridgeUrlChange}
               onTextSizeChange={onTextSizeChange}
               onOpenCli={() => onLocalSubChange("cli")}
+              onOpenKnowledge={() => onLocalSubChange("knowledge")}
             />
           </div>
-        ) : (
+        )}
+        {localSub === "knowledge" && (
+          <KnowledgeWikiPage bridgeUrl={normalizedBridgeUrl} bridgeToken={bridgeToken} />
+        )}
+        {localSub === "models" && (
+          <LocalModelsSubPage bridgeUrl={normalizedBridgeUrl} />
+        )}
+        {localSub === "cli" && (
           <div id="local-cli" className="local-sub-panel cli-page">
-            <CliOutputSubPage bridgeUrl={bridgeUrl} bridgeToken={bridgeToken} />
+            <CliOutputSubPage bridgeUrl={normalizedBridgeUrl} bridgeToken={bridgeToken} />
           </div>
         )}
       </main>

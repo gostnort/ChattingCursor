@@ -213,6 +213,18 @@ function buildWebSearchMetaFooter(meta: WebSearchReplyMeta, zh: boolean): string
 }
 
 
+/** 按 OS 返回 Chrome 远程调试启动示例 */
+function chromeRemoteDebugExample(): string {
+  if (process.platform === "win32") {
+    return '  "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --remote-debugging-port=9222';
+  }
+  if (process.platform === "darwin") {
+    return "  /Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome --remote-debugging-port=9222";
+  }
+  return "  google-chrome --remote-debugging-port=9222";
+}
+
+
 /** 将联网搜索综合结果格式化为 assistant 回复（仅综合回答，不含原始摘录） */
 export function formatWebSearchReply(
   userIntent: string,
@@ -231,8 +243,8 @@ export function formatWebSearchReply(
         : `Web search failed in Chrome (${result.meta.endpoint}).`,
       result.message ?? (zh ? "请确认 Chrome 已启用远程调试端口 9222。" : "Ensure Chrome remote debugging on port 9222."),
       "",
-      zh ? "启动示例（Windows）：" : "Example (Windows):",
-      '  "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --remote-debugging-port=9222',
+      zh ? "启动示例：" : "Example:",
+      chromeRemoteDebugExample(),
     ].join("\n");
   }
   const heading = zh ? "## 回答" : "## Answer";

@@ -16,6 +16,7 @@ import {
 import { historyStore } from "../services/history-store.js";
 import { tokenRotationService } from "../services/token-rotation.js";
 import { getCloudflareTunnelConfigPath } from "../paths.js";
+import { getGemma4HealthStatus } from "../services/gemma4-lifecycle.js";
 
 
 /** 注册本地配置与历史浏览路由 */
@@ -35,8 +36,11 @@ export async function registerLocalRoutes(app: FastifyInstance): Promise<void> {
 
   app.get("/local/config", async (_request, reply) => {
     const config = loadConfig();
-    const cli = await probeCursorCli();
-    const models = await listCursorModels();
+    const [cli, models, gemma4] = await Promise.all([
+      probeCursorCli(),
+      listCursorModels(),
+      getGemma4HealthStatus(),
+    ]);
     const defaultModel = models.models.find((item) => item.isDefault)?.id ?? models.models[0]?.id ?? "";
     return reply.send({
       bridgeUrl: `http://${config.host}:${config.port}`,
@@ -51,6 +55,7 @@ export async function registerLocalRoutes(app: FastifyInstance): Promise<void> {
       defaultModel,
       modelsSource: models.source,
       cli,
+      gemma4,
       timestamp: new Date().toISOString(),
     });
   });

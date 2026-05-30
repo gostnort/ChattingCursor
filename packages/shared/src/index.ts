@@ -34,7 +34,29 @@ export type {
   CrewStatusResponse,
   CrewRunRequest,
   CrewRunResponse,
+  KnowledgeNode,
+  KnowledgeTreeResponse,
+  KnowledgeCreateNodeRequest,
+  KnowledgeCreateNodeResponse,
+  KnowledgeUploadContentResponse,
+  KnowledgeRenameNodeRequest,
+  KnowledgeRenameNodeResponse,
+  OfflineWarmupRequest,
+  OfflineWarmupResponse,
 } from "./schemas.js";
+
+export {
+  LOCAL_LLM_MODEL_ID_PREFIX,
+  GEMMA4_OFFLINE_MODEL_ID,
+  OFFLINE_MODEL_IDS,
+  OFFLINE_MODEL_OPTIONS,
+  isLocalLlmModelId,
+  isOfflineModelId,
+  resolveOfflineRuntimeId,
+} from "./offline-models.js";
+export type { OfflineModelId, OfflineRuntimeId } from "./offline-models.js";
+
+export { compareAlphaDescNumeric, sortAlphaDescNumeric } from "./alpha-desc-numeric-sort.js";
 
 export {
   agentSpecSchema,
@@ -73,4 +95,13 @@ export {
   crewStatusResponseSchema,
   crewRunRequestSchema,
   crewRunResponseSchema,
+  knowledgeNodeSchema,
+  knowledgeTreeResponseSchema,
+  knowledgeCreateNodeRequestSchema,
+  knowledgeCreateNodeResponseSchema,
+  knowledgeUploadContentResponseSchema,
+  knowledgeRenameNodeRequestSchema,
+  knowledgeRenameNodeResponseSchema,
+  offlineWarmupRequestSchema,
+  offlineWarmupResponseSchema,
 } from "./schemas.js";

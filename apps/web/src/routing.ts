@@ -3,7 +3,7 @@ export type AppMode = "chat" | "local";
 
 
 /** 本地模式子页 */
-export type LocalSub = "config" | "cli";
+export type LocalSub = "config" | "cli" | "knowledge" | "models";
 
 
 export interface AppRoute {
@@ -28,7 +28,7 @@ export function parseRoute(pathname: string, hash: string): AppRoute {
   if (normalized.endsWith("/terminal")) {
     return { mode: "local", localSub: "cli" };
   }
-  const hashMatch = hash.match(/^#?\/?local\/(config|cli)\/?$/i);
+  const hashMatch = hash.match(/^#?\/?local\/(config|cli|knowledge|models)\/?$/i);
   if (hashMatch) {
     return { mode: "local", localSub: hashMatch[1] as LocalSub };
   }
@@ -37,6 +37,12 @@ export function parseRoute(pathname: string, hash: string): AppRoute {
   }
   if (/\/local\/cli\/?$/i.test(normalized)) {
     return { mode: "local", localSub: "cli" };
+  }
+  if (/\/local\/knowledge\/?$/i.test(normalized)) {
+    return { mode: "local", localSub: "knowledge" };
+  }
+  if (/\/local\/models\/?$/i.test(normalized)) {
+    return { mode: "local", localSub: "models" };
   }
   return { mode: "chat", localSub: "config" };
 }
@@ -56,7 +62,7 @@ export function buildPath(route: AppRoute): string {
 export function normalizeLocation(route: AppRoute): void {
   const path = window.location.pathname.replace(/\/+$/, "") || "/";
   const isLegacy = path.endsWith("/config") || path.endsWith("/terminal");
-  const hasHashRoute = /^#?\/?local\/(config|cli)/i.test(window.location.hash);
+  const hasHashRoute = /^#?\/?local\/(config|cli|knowledge|models)/i.test(window.location.hash);
   if (isLegacy || hasHashRoute) {
     window.history.replaceState(null, "", buildPath(route) + window.location.search);
   }
