@@ -96,7 +96,7 @@ echo ""
 echo "安装完成。"
 echo "local_llm optional: run ./local_llm/server/install.sh for inference deps (install GGUF weights in Web Local Models)"
 echo "下一步: ./run.sh"
-echo "手机远程: 默认 token 在 ~/.chattingcursor/chattingcursor-token.txt；可放进云盘或于配置页改路径。"
+echo "手机远程: 默认 token 在 ~/.chattingcursor/chattingcursor-token.txt；云盘请用本机路径（如 ~/OneDrive/...），勿用 onedrive: 远程前缀（脚本会自动转换）。"
 echo ""
 
 if [[ "${NEEDS_RESTART}" -eq 1 ]]; then

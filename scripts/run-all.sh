@@ -40,6 +40,7 @@ TUNNEL_LOG="${TMP_BASE}/chattingcursor-cloudflared.log"
 BRIDGE_LOG="${TMP_BASE}/chattingcursor-bridge.log"
 BRIDGE_ERR_LOG="${TMP_BASE}/chattingcursor-bridge.err.log"
 TOKEN_SYNC_DIR="$(resolve_token_sync_dir "${TOKEN_SYNC_DIR_OVERRIDE}")"
+export CHATTINGCURSOR_TOKEN_SYNC_DIR="${TOKEN_SYNC_DIR}"
 TOKEN_FILE="${TOKEN_SYNC_DIR}/chattingcursor-token.txt"
 TUNNEL_URL_PATTERN='https://[a-z0-9-]+\.trycloudflare\.com'
 TUNNEL_URL_HTTP_PATTERN='http://[a-z0-9-]+\.trycloudflare\.com'
@@ -205,6 +206,94 @@ token_file_public_url() {
 }
 
 
+bridge_token_file_path_from_api() {
+  local response
+  if ! response="$(curl -fsS --max-time 10 "http://127.0.0.1:${BRIDGE_PORT}/local/config" 2>/dev/null)"; then
+    return 1
+  fi
+  if ! command -v python3 >/dev/null 2>&1; then
+    return 1
+  fi
+  python3 -c 'import json,sys
+try:
+    data=json.loads(sys.stdin.read())
+    path=(data.get("tokenFilePath") or "").strip()
+    if path:
+        print(path)
+except Exception:
+    pass' <<< "${response}"
+}
+
+
+paths_same_token_sync_dir() {
+  local left="$1"
+  local right="$2"
+  local norm_left norm_right
+  [[ -n "${left}" && -n "${right}" ]] || return 1
+  if command -v realpath >/dev/null 2>&1; then
+    norm_left="$(realpath -m "${left}" 2>/dev/null || echo "${left}")"
+    norm_right="$(realpath -m "${right}" 2>/dev/null || echo "${right}")"
+  else
+    norm_left="${left%/}"
+    norm_right="${right%/}"
+  fi
+  [[ "${norm_left}" == "${norm_right}" ]]
+}
+
+
+invoke_bridge_token_directory() {
+  local directory="$1"
+  local payload response
+  if ! command -v python3 >/dev/null 2>&1; then
+    log_fail "需要 python3 以同步 Bridge token 目录"
+    return 1
+  fi
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"directory": sys.argv[1]}))' "${directory}")"
+  if response="$(curl -fsS --max-time 30 -X POST "http://127.0.0.1:${BRIDGE_PORT}/local/token-directory" \
+    -H "Content-Type: application/json; charset=utf-8" \
+    -d "${payload}" 2>&1)"; then
+    log_ok "Bridge token 目录已对齐: ${directory}"
+    return 0
+  fi
+  log_fail "Bridge token-directory API 失败: ${response}"
+  return 1
+}
+
+
+ensure_bridge_token_sync_dir() {
+  local bridge_file bridge_dir
+  bridge_file="$(bridge_token_file_path_from_api || true)"
+  if [[ -z "${bridge_file}" ]]; then
+    return 0
+  fi
+  bridge_dir="$(dirname "${bridge_file}")"
+  if paths_same_token_sync_dir "${TOKEN_SYNC_DIR}" "${bridge_dir}"; then
+    return 0
+  fi
+  log_step "Bridge token 目录 (${bridge_dir}) 与启动脚本 (${TOKEN_SYNC_DIR}) 不一致，正在对齐..."
+  if invoke_bridge_token_directory "${TOKEN_SYNC_DIR}"; then
+    bridge_file="$(bridge_token_file_path_from_api || true)"
+    bridge_dir="$(dirname "${bridge_file}")"
+    if paths_same_token_sync_dir "${TOKEN_SYNC_DIR}" "${bridge_dir}"; then
+      return 0
+    fi
+  fi
+  if [[ "${BRIDGE_OWNED}" -eq 1 ]] && [[ -n "${BRIDGE_PID}" ]] && kill -0 "${BRIDGE_PID}" 2>/dev/null; then
+    log_step "对齐失败，重启本脚本启动的 Bridge..."
+    kill "${BRIDGE_PID}" 2>/dev/null || true
+    sleep 1
+    BRIDGE_PID=""
+    BRIDGE_OWNED=0
+    start_bridge
+    wait_bridge_ready || return 1
+    invoke_bridge_token_directory "${TOKEN_SYNC_DIR}" || return 1
+    return 0
+  fi
+  log_fail "Bridge 正由其他进程托管且 token 目录不一致。请先 ./shutdown.sh 再 ./run.sh"
+  return 1
+}
+
+
 is_localhost_public_url() {
   local url="$1"
   [[ "${url}" =~ ^https?://127\.0\.0\.1 ]] || [[ "${url}" =~ ^https?://localhost([:/]|$) ]]
@@ -247,7 +336,6 @@ wait_public_bridge_communication() {
 
 
 start_bridge() {
-  export CHATTINGCURSOR_TOKEN_SYNC_DIR="${TOKEN_SYNC_DIR}"
   export BRIDGE_PUBLIC_URL="http://127.0.0.1:${BRIDGE_PORT}"
   export BRIDGE_PORT="${BRIDGE_PORT}"
   : >"${BRIDGE_LOG}"
@@ -361,6 +449,22 @@ set_public_bridge_url() {
     log_fail "Bridge API 写入 publicBridgeUrl 失败: ${response}"
     return 1
   fi
+  if command -v python3 >/dev/null 2>&1; then
+    local bridge_token_path bridge_dir
+    bridge_token_path="$(python3 -c 'import json,sys
+try:
+    data=json.loads(sys.argv[1])
+    print((data.get("tokenFilePath") or "").strip())
+except Exception:
+    pass' "${response}")"
+    if [[ -n "${bridge_token_path}" ]]; then
+      bridge_dir="$(dirname "${bridge_token_path}")"
+      if ! paths_same_token_sync_dir "${TOKEN_SYNC_DIR}" "${bridge_dir}"; then
+        log_fail "Bridge 写入路径 (${bridge_token_path}) 与预期 (${TOKEN_FILE}) 不一致"
+        return 1
+      fi
+    fi
+  fi
   log_ok "Bridge 已轮换 token 并设置 publicBridgeUrl（见 token 文件）"
   if ! test_token_file_has_expected_public_url; then
     if [[ -n "${NAMED_PUBLIC_URL}" ]]; then
@@ -406,7 +510,7 @@ invoke_tunnel_line() {
   fi
   DETECTED_TUNNEL_URL="${url}"
   log_ok "检测到 cloudflared 隧道 URL: ${url}"
-  set_public_bridge_url "${url}" 0 || true
+  set_public_bridge_url "${url}" 0
 }
 
 
@@ -556,6 +660,7 @@ if ! bridge_healthy; then
   wait_bridge_ready || exit 1
 fi
 log_ok "Bridge 本地健康: http://127.0.0.1:${BRIDGE_PORT}/health"
+ensure_bridge_token_sync_dir || exit 1
 restore_service_pids_after_bridge_token_write
 
 if [[ "${WITH_WEB}" -eq 1 ]]; then
@@ -595,7 +700,7 @@ for ((tick = 0; tick < tunnel_wait_seconds * 2; tick++)); do
   sleep 0.5
   read_tunnel_log_new_lines
   if [[ -n "${DETECTED_TUNNEL_URL}" && "${TUNNEL_URL_APPLIED}" -eq 0 ]]; then
-    set_public_bridge_url "${DETECTED_TUNNEL_URL}" 0 || true
+    set_public_bridge_url "${DETECTED_TUNNEL_URL}" 0
   fi
   if [[ "${TUNNEL_URL_APPLIED}" -eq 1 ]]; then
     public_url="$(token_file_public_url || true)"

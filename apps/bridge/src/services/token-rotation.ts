@@ -6,7 +6,11 @@ import {
   getDefaultTokenSyncDir,
   getLegacyTokenSyncDir,
 } from "../paths.js";
-import { resolveTokenSyncDirectory, saveTokenSyncDirectory } from "./user-config.js";
+import {
+  normalizeTokenSyncDirectory,
+  resolveTokenSyncDirectory,
+  saveTokenSyncDirectory,
+} from "./user-config.js";
 
 
 export interface DailyTokenRecord {
@@ -300,7 +304,9 @@ export class TokenRotationService {
 
 
   constructor(options: { directory?: string; fileName?: string; publicBridgeUrl: string }) {
-    this.directory = options.directory?.trim() || resolveTokenSyncDirectory();
+    this.directory = options.directory?.trim()
+      ? normalizeTokenSyncDirectory(options.directory.trim())
+      : resolveTokenSyncDirectory();
     this.fileName = options.fileName?.trim() || "chattingcursor-token.txt";
     this.publicBridgeUrl = options.publicBridgeUrl;
   }
@@ -312,10 +318,7 @@ export class TokenRotationService {
 
 
   async setDirectory(directory: string): Promise<void> {
-    const normalized = directory.trim();
-    if (!normalized) {
-      throw new Error("Sync directory cannot be empty");
-    }
+    const normalized = normalizeTokenSyncDirectory(directory);
     this.directory = normalized;
     this.cachedRecord = null;
     await mkdir(this.directory, { recursive: true });

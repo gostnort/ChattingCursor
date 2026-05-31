@@ -29,7 +29,9 @@ init_cursor_cli_mode
 TMP_BASE="$(chattingcursor_temp_dir)"
 LOG_PATH="${TMP_BASE}/chattingcursor-run-all.log"
 ERR_PATH="${TMP_BASE}/chattingcursor-run-all.err.log"
-TOKEN_FILE="$(resolve_token_sync_dir "")/chattingcursor-token.txt"
+TOKEN_SYNC_DIR="$(resolve_token_sync_dir "")"
+export CHATTINGCURSOR_TOKEN_SYNC_DIR="${TOKEN_SYNC_DIR}"
+TOKEN_FILE="${TOKEN_SYNC_DIR}/chattingcursor-token.txt"
 TUNNEL_URL_PATTERN='https://[a-z0-9-]+\.trycloudflare\.com'
 NAMED_PUBLIC_URL=""
 if named_lines="$(read_named_tunnel_public_url 2>/dev/null)"; then
@@ -98,7 +100,7 @@ print_startup_log_tail() {
 STARTUP_WAIT_SECONDS=330
 deadline=$((SECONDS + STARTUP_WAIT_SECONDS))
 
-nohup bash "${SCRIPT_DIR}/run-all.sh" "${RUN_ARGS[@]}" >"${LOG_PATH}" 2>"${ERR_PATH}" &
+CHATTINGCURSOR_TOKEN_SYNC_DIR="${TOKEN_SYNC_DIR}" nohup bash "${SCRIPT_DIR}/run-all.sh" "${RUN_ARGS[@]}" >"${LOG_PATH}" 2>"${ERR_PATH}" &
 PROC_PID=$!
 echo "ChattingCursor 已在后台启动 (PID ${PROC_PID})..."
 echo "日志: ${LOG_PATH}"
