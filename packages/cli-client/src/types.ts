@@ -1,3 +1,4 @@
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import type { RunEvent } from "@chatting-cursor/shared";
 
 /** Cursor CLI 调用选项 */
@@ -12,6 +13,8 @@ export interface CursorCliRunOptions {
   argsPrefix?: string[];
   timeoutMs?: number;
   onEvent?: (event: RunEvent) => void;
+  /** spawn 后回调，供 Bridge 注册停止（SIGTERM） */
+  onChild?: (child: ChildProcessWithoutNullStreams) => void;
 }
 
 

@@ -103,7 +103,10 @@ def check_gpu() -> tuple[bool, str]:
     if gpu_name and vram_gb is not None:
         gpu_msg = f"GPU: {gpu_name}（{format_gb(vram_gb)}）"
         if llama_msg == "llama-cpp-python 已安装":
-            gpu_msg += "；CUDA wheel 可选，设置 LOCAL_LLM_N_GPU_LAYERS=-1"
+            if vram_gb <= 14:
+                gpu_msg += "；26B 等大模型建议 LOCAL_LLM_N_GPU_LAYERS=35（混合模式：GPU 层 + CPU 内存）"
+            else:
+                gpu_msg += "；可设 LOCAL_LLM_N_GPU_LAYERS=-1 尽量全 GPU"
     else:
         gpu_msg = "未检测到 NVIDIA GPU（nvidia-smi 不可用或无独显）"
     return True, f"{llama_msg}；{gpu_msg}"

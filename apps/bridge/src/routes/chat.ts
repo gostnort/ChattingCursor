@@ -3,8 +3,10 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { v4 as uuidv4 } from "uuid";
 import { listCursorModels, mergeAssistantStreamText, probeCursorCli, runCursorCli } from "@chatting-cursor/cli-client";
 import type { RunEvent } from "@chatting-cursor/shared";
+import { formatLocalLlmError } from "@chatting-cursor/shared";
 import {
   chatAnalyzeImageRequestSchema,
+  chatCancelRequestSchema,
   chatSendRequestSchema,
 } from "@chatting-cursor/shared";
 import {
@@ -13,6 +15,7 @@ import {
   imageFileToDataUrl,
   isLocalLlmModel,
 } from "../services/local-llm-client.js";
+import { probeLocalLlmLoadState } from "../services/local-llm-lifecycle.js";
 import { analyzeUploadedImage, buildImageForwardPrompt } from "../services/image-analysis-service.js";
 import { readStoredImage, saveUploadedImage } from "../services/image-store.js";
 import { loadConfig, resolveCorsOrigin } from "../config.js";
@@ -34,6 +37,11 @@ import { historyStore } from "../services/history-store.js";
 import { runStore } from "../services/run-store.js";
 import { sessionStore } from "../services/session-store.js";
 import { listInstalledLocalLlmModels } from "../services/local-llm-store.js";
+import {
+  cancelActiveRun,
+  registerActiveRun,
+  unregisterActiveRun,
+} from "../services/active-run-registry.js";
 
 
 /** 构建 SSE 响应头（hijack 后需手动写入 CORS） */
@@ -136,6 +144,44 @@ function scheduleLocalLlmRun(options: {
     timestamp: startedAt,
     data: { source: "offline_local_llm", status: "loading" },
   });
+  const loadPollTimer = setInterval(() => {
+    void probeLocalLlmLoadState().then((probe) => {
+      if (probe.state === "error") {
+        const formatted = formatLocalLlmError(probe.detail ?? "本地模型加载失败");
+        runStore.appendEvent(runId, {
+          runId,
+          type: "error",
+          timestamp: new Date().toISOString(),
+          text: formatted,
+          data: { source: "offline_local_llm", status: "error" },
+        });
+        return;
+      }
+      if (probe.state !== "loading" && probe.state !== "idle") {
+        return;
+      }
+      const detail = probe.detail
+        ?? (probe.healthDetail?.loadElapsedSec
+          ? `已等待 ${probe.healthDetail.loadElapsedSec} 秒`
+          : undefined);
+      runStore.appendEvent(runId, {
+        runId,
+        type: "thinking",
+        timestamp: new Date().toISOString(),
+        data: {
+          source: "offline_local_llm",
+          status: probe.state,
+          detail,
+          mode: probe.healthDetail?.mode,
+          ggufGb: probe.healthDetail?.ggufGb,
+        },
+      });
+    }).catch(() => undefined);
+  }, 2500);
+  const abortController = new AbortController();
+  registerActiveRun(runId, () => {
+    abortController.abort();
+  });
   void (async () => {
     try {
       const session = sessionStore.getOrCreate(sessionId);
@@ -146,18 +192,39 @@ function scheduleLocalLlmRun(options: {
         bridgeOrigin,
         modelId,
       });
-      const replyText = await completeLocalLlmChat(modelId, messages);
+      const replyText = await completeLocalLlmChat(modelId, messages, abortController.signal);
       emitDirectReplyResult(runId, sessionId, replyText, "offline_gemma4", modelLabel);
       await historyStore.appendTurn(sessionId, prompt, replyText, session.createdAt);
     } catch (error: unknown) {
+      if (abortController.signal.aborted) {
+        finishCancelledRun({
+          runId,
+          sessionId,
+          prompt,
+          modelLabel,
+          source: "offline_gemma4",
+        });
+        return;
+      }
       const message = error instanceof Error ? error.message : String(error);
+      const formatted = formatLocalLlmError(message);
+      runStore.appendEvent(runId, {
+        runId,
+        type: "error",
+        timestamp: new Date().toISOString(),
+        text: formatted,
+        data: { source: "offline_local_llm" },
+      });
       emitDirectReplyResult(
         runId,
         sessionId,
-        `本地模型推理失败：${message}`,
+        formatted.startsWith("本地模型") ? formatted : `本地模型推理失败：${formatted}`,
         "offline_gemma4",
         modelLabel,
       );
+    } finally {
+      clearInterval(loadPollTimer);
+      unregisterActiveRun(runId);
     }
   })();
 }
@@ -181,7 +248,13 @@ function scheduleCursorCliRun(options: {
     onEvent: (event) => {
       runStore.appendEvent(runId, event);
     },
+    onChild: (child) => {
+      registerActiveRun(runId, () => {
+        child.kill("SIGTERM");
+      });
+    },
   }).then(async () => {
+    unregisterActiveRun(runId);
     const run = runStore.get(runId);
     if (!run) {
       return;
@@ -197,6 +270,7 @@ function scheduleCursorCliRun(options: {
       await historyStore.appendTurn(sessionId, prompt, assistantText, sessionStore.getOrCreate(sessionId).createdAt);
     }
   }).catch((error: unknown) => {
+    unregisterActiveRun(runId);
     const message = error instanceof Error ? error.message : String(error);
     runStore.appendEvent(runId, {
       runId,
@@ -210,6 +284,34 @@ function scheduleCursorCliRun(options: {
       timestamp: new Date().toISOString(),
       data: { exitCode: 1 },
     });
+  });
+}
+
+
+/** 用户停止 run：保留已流式输出的 assistant 片段并结束 run */
+function finishCancelledRun(options: {
+  runId: string;
+  sessionId: string;
+  prompt: string;
+  modelLabel?: string;
+  source: "history_search" | "chrome_web_search" | "offline_gemma4";
+}): void {
+  const { runId, sessionId, prompt, modelLabel, source } = options;
+  const run = runStore.get(runId);
+  if (!run || run.status === "finished" || run.status === "error") {
+    return;
+  }
+  const partial = extractAssistantText(run.events);
+  if (partial) {
+    emitDirectReplyResult(runId, sessionId, partial, source, modelLabel);
+    void historyStore.appendTurn(sessionId, prompt, partial, sessionStore.getOrCreate(sessionId).createdAt);
+    return;
+  }
+  runStore.appendEvent(runId, {
+    runId,
+    type: "run_finished",
+    timestamp: new Date().toISOString(),
+    data: { exitCode: null, cancelled: true, source },
   });
 }
 
@@ -314,6 +416,24 @@ export async function registerChatRoutes(app: FastifyInstance): Promise<void> {
   });
 
 
+  app.post("/chat/cancel", async (request, reply) => {
+    const parsed = chatCancelRequestSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.status(400).send({ error: "invalid_request", details: parsed.error.flatten() });
+    }
+    const { runId } = parsed.data;
+    const run = runStore.get(runId);
+    if (!run) {
+      return reply.status(404).send({ error: "run_not_found" });
+    }
+    if (run.status === "finished" || run.status === "error") {
+      return reply.send({ cancelled: false, status: run.status });
+    }
+    const cancelled = cancelActiveRun(runId);
+    return reply.send({ cancelled, status: run.status });
+  });
+
+
   app.post("/chat/send", async (request, reply) => {
     const parsed = chatSendRequestSchema.safeParse(request.body);
     if (!parsed.success) {
@@ -345,10 +465,36 @@ export async function registerChatRoutes(app: FastifyInstance): Promise<void> {
     });
     if (hasHistorySearchIntent(prompt)) {
       const query = extractSearchKeywords(prompt);
+      let skipResult = false;
+      registerActiveRun(runId, () => {
+        skipResult = true;
+      });
       void historyStore.search(query).then((hits) => {
+        unregisterActiveRun(runId);
+        if (skipResult) {
+          finishCancelledRun({
+            runId,
+            sessionId: session.sessionId,
+            prompt,
+            modelLabel,
+            source: "history_search",
+          });
+          return;
+        }
         const replyText = formatHistorySearchReply(query, hits);
         finishDirectReplyRun(runId, session.sessionId, prompt, replyText, "history_search", modelLabel);
       }).catch((error: unknown) => {
+        unregisterActiveRun(runId);
+        if (skipResult) {
+          finishCancelledRun({
+            runId,
+            sessionId: session.sessionId,
+            prompt,
+            modelLabel,
+            source: "history_search",
+          });
+          return;
+        }
         const message = error instanceof Error ? error.message : String(error);
         finishDirectReplyRun(
           runId,
@@ -368,7 +514,22 @@ export async function registerChatRoutes(app: FastifyInstance): Promise<void> {
         { query, userIntent: userIntent || undefined, endpoint: "http://127.0.0.1:9222", path: "chrome-google-search" },
         "Windows CDP search (Bridge → Chrome 9222, not WSL MCP)",
       );
+      let skipWebResult = false;
+      registerActiveRun(runId, () => {
+        skipWebResult = true;
+      });
       void openGoogleSearchInChrome(query, { userIntent: userIntent || undefined }).then((result) => {
+        unregisterActiveRun(runId);
+        if (skipWebResult) {
+          finishCancelledRun({
+            runId,
+            sessionId: session.sessionId,
+            prompt,
+            modelLabel,
+            source: "chrome_web_search",
+          });
+          return;
+        }
         request.log.info(
           {
             query,
@@ -385,6 +546,17 @@ export async function registerChatRoutes(app: FastifyInstance): Promise<void> {
         const replyText = formatWebSearchReply(userIntent || query, result);
         finishDirectReplyRun(runId, session.sessionId, prompt, replyText, "chrome_web_search", modelLabel);
       }).catch((error: unknown) => {
+        unregisterActiveRun(runId);
+        if (skipWebResult) {
+          finishCancelledRun({
+            runId,
+            sessionId: session.sessionId,
+            prompt,
+            modelLabel,
+            source: "chrome_web_search",
+          });
+          return;
+        }
         const message = error instanceof Error ? error.message : String(error);
         finishDirectReplyRun(
           runId,

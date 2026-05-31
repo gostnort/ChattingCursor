@@ -3,6 +3,7 @@ import type {
   AuthVerifyResponse,
   ChatNewSessionResponse,
   ChatSendResponse,
+  ChatCancelResponse,
   ChatImageUploadResponse,
   ChatAnalyzeImageResponse,
   HistorySearchResponse,
@@ -229,6 +230,24 @@ export async function sendChatMessage(
     throw new Error(`发送失败 (${response.status}): ${detail}`);
   }
   return response.json() as Promise<ChatSendResponse>;
+}
+
+
+/** 停止正在进行的 chat run */
+export async function cancelChatRun(
+  bridgeUrl: string,
+  runId: string,
+  token?: string,
+): Promise<ChatCancelResponse> {
+  const response = await fetch(`${bridgeUrl}/chat/cancel`, {
+    method: "POST",
+    headers: buildAuthHeaders(token, { "Content-Type": "application/json" }),
+    body: JSON.stringify({ runId }),
+  });
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, `停止失败 (${response.status})`));
+  }
+  return response.json() as Promise<ChatCancelResponse>;
 }
 
 

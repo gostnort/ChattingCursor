@@ -7,6 +7,8 @@ export type {
   RunEventType,
   ChatSendRequest,
   ChatSendResponse,
+  ChatCancelRequest,
+  ChatCancelResponse,
   ChatImageUploadResponse,
   ChatAnalyzeImageRequest,
   ChatAnalyzeImageResponse,
@@ -56,6 +58,13 @@ export {
 } from "./offline-models.js";
 export type { OfflineModelId, OfflineRuntimeId } from "./offline-models.js";
 
+export {
+  classifyLocalLlmError,
+  formatLocalLlmError,
+  formatOfflineLoadStatus,
+} from "./local-llm-errors.js";
+export type { LocalLlmErrorKind } from "./local-llm-errors.js";
+
 export { compareAlphaDescNumeric, sortAlphaDescNumeric } from "./alpha-desc-numeric-sort.js";
 
 export {
@@ -68,6 +77,8 @@ export {
   runEventTypeSchema,
   chatSendRequestSchema,
   chatSendResponseSchema,
+  chatCancelRequestSchema,
+  chatCancelResponseSchema,
   chatImageUploadResponseSchema,
   chatAnalyzeImageRequestSchema,
   chatAnalyzeImageResponseSchema,

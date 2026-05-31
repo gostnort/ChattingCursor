@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { offlineWarmupRequestSchema } from "@chatting-cursor/shared";
+import { formatLocalLlmError, offlineWarmupRequestSchema } from "@chatting-cursor/shared";
 import { requireRemoteToken } from "../middleware/auth.js";
 import { ensureOfflineModelReady, getOfflineModelSnapshot } from "../services/offline-runtime.js";
 
@@ -41,11 +41,12 @@ export async function registerOfflineRoutes(app: FastifyInstance): Promise<void>
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       const snapshot = await getOfflineModelSnapshot(parsed.data.modelId);
+      const formatted = formatLocalLlmError(message);
       return reply.status(503).send({
-        error: "offline_warmup_failed",
-        message,
         ...snapshot,
         ready: false,
+        message: formatted,
+        error: formatLocalLlmError(snapshot.error ?? message),
       });
     }
   });

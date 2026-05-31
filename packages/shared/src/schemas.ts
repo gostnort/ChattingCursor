@@ -99,6 +99,23 @@ export const chatSendResponseSchema = z.object({
 export type ChatSendResponse = z.infer<typeof chatSendResponseSchema>;
 
 
+/** POST /chat/cancel 请求体 */
+export const chatCancelRequestSchema = z.object({
+  runId: z.string().min(1),
+});
+
+export type ChatCancelRequest = z.infer<typeof chatCancelRequestSchema>;
+
+
+/** POST /chat/cancel 响应体 */
+export const chatCancelResponseSchema = z.object({
+  cancelled: z.boolean(),
+  status: z.string().optional(),
+});
+
+export type ChatCancelResponse = z.infer<typeof chatCancelResponseSchema>;
+
+
 /** POST /chat/upload-image 响应体 */
 export const chatImageUploadResponseSchema = z.object({
   imageId: z.string().min(1),

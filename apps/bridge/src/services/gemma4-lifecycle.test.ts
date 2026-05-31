@@ -10,10 +10,13 @@ import {
   ensureLocalLlmSidecarStarted,
   inspectLocalLlmWeights,
   isLocalLlmManaged,
+  preflightLocalLlmModel,
+  probeLocalLlmLoadState,
   resolveLocalLlmApiBaseUrl,
   resolveLocalLlmServerLaunch,
   setLocalLlmSpawnRunnerForTests,
   stopManagedLocalLlm,
+  triggerLocalLlmModelLoad,
 } from "./local-llm-lifecycle.js";
 import { getLocalLlmServerScriptPath } from "../paths.js";
 import { buildLocalLlmModelId } from "./local-llm-store.js";
@@ -150,7 +153,7 @@ test("ensureLocalLlmSidecarStarted 在托管模式下拉起子进程", async (t)
 });
 
 
-test("ensureLocalLlmReady 在 idle 后等待 ready", async (t) => {
+test("ensureLocalLlmReady 在 idle 后触发 /load 并等待 ready", async (t) => {
   await stopManagedLocalLlm();
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "cc-local-llm-ready-"));
   const previousDir = process.env.CHATTINGCURSOR_LOCAL_LLM_DIR;
@@ -161,6 +164,7 @@ test("ensureLocalLlmReady 在 idle 后等待 ready", async (t) => {
   const originalFetch = globalThis.fetch;
   let spawnCount = 0;
   let healthChecks = 0;
+  let loadPosts = 0;
   let spawnedArgs: string[] = [];
   t.after(async () => {
     globalThis.fetch = originalFetch;
@@ -191,22 +195,133 @@ test("ensureLocalLlmReady 在 idle 后等待 ready", async (t) => {
     };
     return child;
   });
-  globalThis.fetch = async (input) => {
+  globalThis.fetch = async (input, init) => {
     const url = String(input);
+    if (url.includes("/v1/load") && init?.method === "POST") {
+      loadPosts += 1;
+      return new Response(JSON.stringify({ status: "loading" }), { status: 200 });
+    }
     if (url.includes("/v1/health")) {
       healthChecks += 1;
       if (spawnCount < 1) {
         throw new Error("connection refused");
       }
-      if (healthChecks < 5) {
-        return new Response(JSON.stringify({ status: "idle" }), { status: 200 });
+      if (loadPosts < 1) {
+        return new Response(JSON.stringify({ status: "idle", gguf_gb: "8.1", mode: "gpu" }), { status: 200 });
       }
-      return new Response(JSON.stringify({ status: "ready" }), { status: 200 });
+      if (healthChecks < 6) {
+        return new Response(JSON.stringify({
+          status: "loading",
+          mode: "mixed",
+          n_gpu_layers: "35",
+          load_elapsed_sec: "2",
+        }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ status: "ready", mode: "mixed" }), { status: 200 });
     }
-    return originalFetch(input);
+    return originalFetch(input, init);
   };
   await ensureLocalLlmReady(modelId);
   assert.ok(spawnCount >= 1);
+  assert.equal(loadPosts, 1);
   assert.ok(healthChecks >= 4);
   assert.ok(spawnedArgs.some((arg) => arg.includes("llm_server.py")));
+});
+
+
+test("preflightLocalLlmModel 识别 GGUF 体积", async (t) => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "cc-local-llm-pf-"));
+  const previousDir = process.env.CHATTINGCURSOR_LOCAL_LLM_DIR;
+  t.after(async () => {
+    process.env.CHATTINGCURSOR_LOCAL_LLM_DIR = previousDir ?? "";
+    await import("node:fs/promises").then((fs) => fs.rm(tempDir, { recursive: true, force: true }));
+  });
+  process.env.CHATTINGCURSOR_LOCAL_LLM_DIR = tempDir;
+  const modelId = await seedInstalledModel(tempDir);
+  const result = await preflightLocalLlmModel(modelId);
+  assert.equal(result.ggufGb, 0);
+  assert.equal(result.mixedMode, false);
+});
+
+
+test("ensureLocalLlmReady 在 sidecar 报错时抛出中文错误", async (t) => {
+  await stopManagedLocalLlm();
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "cc-local-llm-err-"));
+  const previousDir = process.env.CHATTINGCURSOR_LOCAL_LLM_DIR;
+  const previousManaged = process.env.LOCAL_LLM_MANAGED;
+  const previousPort = process.env.LOCAL_LLM_PORT;
+  const previousTimeout = process.env.LOCAL_LLM_STARTUP_TIMEOUT_MS;
+  const previousSidecarTimeout = process.env.LOCAL_LLM_SIDECAR_TIMEOUT_MS;
+  const originalFetch = globalThis.fetch;
+  t.after(async () => {
+    globalThis.fetch = originalFetch;
+    setLocalLlmSpawnRunnerForTests(null);
+    await stopManagedLocalLlm();
+    process.env.CHATTINGCURSOR_LOCAL_LLM_DIR = previousDir ?? "";
+    process.env.LOCAL_LLM_MANAGED = previousManaged ?? "";
+    process.env.LOCAL_LLM_PORT = previousPort ?? "";
+    process.env.LOCAL_LLM_STARTUP_TIMEOUT_MS = previousTimeout ?? "";
+    process.env.LOCAL_LLM_SIDECAR_TIMEOUT_MS = previousSidecarTimeout ?? "";
+    await import("node:fs/promises").then((fs) => fs.rm(tempDir, { recursive: true, force: true }));
+  });
+  process.env.CHATTINGCURSOR_LOCAL_LLM_DIR = tempDir;
+  process.env.LOCAL_LLM_MANAGED = "1";
+  process.env.LOCAL_LLM_PORT = "18081";
+  process.env.LOCAL_LLM_STARTUP_TIMEOUT_MS = "4000";
+  process.env.LOCAL_LLM_SIDECAR_TIMEOUT_MS = "4000";
+  const modelId = await seedInstalledModel(tempDir);
+  setLocalLlmSpawnRunnerForTests(() => {
+    const child = new EventEmitter() as import("node:child_process").ChildProcess;
+    Object.defineProperty(child, "exitCode", { value: null, writable: true });
+    child.kill = () => {
+      Object.defineProperty(child, "exitCode", { value: 0, writable: true });
+      child.emit("exit", 0, null);
+      return true;
+    };
+    return child;
+  });
+  globalThis.fetch = async (input, init) => {
+    const url = String(input);
+    if (url.includes("/v1/load") && init?.method === "POST") {
+      return new Response(JSON.stringify({ status: "error", detail: "未在 /weights 找到 *.gguf 权重" }), { status: 200 });
+    }
+    if (url.includes("/v1/health")) {
+      return new Response(JSON.stringify({
+        status: "error",
+        detail: "未在 /weights 找到 *.gguf 权重",
+      }), { status: 200 });
+    }
+    return originalFetch(input, init);
+  };
+  await assert.rejects(
+    () => ensureLocalLlmReady(modelId),
+    (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /权重|gguf/i);
+      return true;
+    },
+  );
+});
+
+
+test("triggerLocalLlmModelLoad 在 ready 时 no-op", async (t) => {
+  const originalFetch = globalThis.fetch;
+  let loadPosts = 0;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  globalThis.fetch = async (input, init) => {
+    const url = String(input);
+    if (url.includes("/v1/health")) {
+      return new Response(JSON.stringify({ status: "ready" }), { status: 200 });
+    }
+    if (url.includes("/v1/load")) {
+      loadPosts += 1;
+    }
+    return originalFetch(input, init);
+  };
+  await triggerLocalLlmModelLoad("http://127.0.0.1:4322/v1");
+  assert.equal(loadPosts, 0);
+  const probe = await probeLocalLlmLoadState("http://127.0.0.1:4322/v1");
+  assert.equal(probe.state, "ready");
 });

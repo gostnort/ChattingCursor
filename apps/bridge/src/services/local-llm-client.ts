@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { isOfflineModelId } from "@chatting-cursor/shared";
+import { formatLocalLlmError, isOfflineModelId } from "@chatting-cursor/shared";
 import { ensureLocalLlmReady, resolveLocalLlmApiBaseUrl } from "./local-llm-lifecycle.js";
 import { findInstalledLocalLlmModel, resolveHfToken } from "./local-llm-store.js";
 import { buildKnowledgeContext } from "./knowledge-store.js";
@@ -159,8 +159,17 @@ function extractChatCompletionText(payload: {
 }
 
 
-async function completeLocalLlmChatLocal(modelId: string, messages: OpenAiMessage[]): Promise<string> {
-  await ensureLocalLlmReady(modelId);
+async function completeLocalLlmChatLocal(
+  modelId: string,
+  messages: OpenAiMessage[],
+  signal?: AbortSignal,
+): Promise<string> {
+  try {
+    await ensureLocalLlmReady(modelId);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(formatLocalLlmError(message));
+  }
   const baseUrl = resolveLocalLlmApiBaseUrl();
   const apiKey = process.env.LOCAL_LLM_API_KEY?.trim() || process.env.GEMMA4_API_KEY?.trim() || "";
   const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -170,6 +179,10 @@ async function completeLocalLlmChatLocal(modelId: string, messages: OpenAiMessag
   const chatTimeoutMs = Number(
     process.env.LOCAL_LLM_CHAT_TIMEOUT_MS ?? process.env.GEMMA4_CHAT_TIMEOUT_MS ?? 600_000,
   );
+  const timeoutSignal = AbortSignal.timeout(chatTimeoutMs);
+  const combinedSignal = signal
+    ? AbortSignal.any([signal, timeoutSignal])
+    : timeoutSignal;
   const response = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
     headers,
@@ -178,11 +191,11 @@ async function completeLocalLlmChatLocal(modelId: string, messages: OpenAiMessag
       messages,
       max_tokens: Number(process.env.LOCAL_LLM_MAX_TOKENS ?? process.env.GEMMA4_MAX_TOKENS ?? 2048),
     }),
-    signal: AbortSignal.timeout(chatTimeoutMs),
+    signal: combinedSignal,
   });
   if (!response.ok) {
     const body = await response.text();
-    throw new Error(`本地 LLM API ${response.status}: ${body.slice(0, 500)}`);
+    throw new Error(formatLocalLlmError(`本地 LLM API ${response.status}: ${body.slice(0, 500)}`));
   }
   const payload = await response.json() as {
     choices?: Array<{ message?: { content?: string | Array<{ text?: string }> } }>;
@@ -248,13 +261,20 @@ export const completeGemma4ChatViaHfInference = async (messages: OpenAiMessage[]
 
 
 /** 调用本地 LLM（默认 sidecar；可选 HF Inference 或失败回退） */
-export async function completeLocalLlmChat(modelId: string, messages: OpenAiMessage[]): Promise<string> {
+export async function completeLocalLlmChat(
+  modelId: string,
+  messages: OpenAiMessage[],
+  signal?: AbortSignal,
+): Promise<string> {
   if (isLocalLlmHfInferenceEnabled()) {
     return completeLocalLlmChatViaHfInference(modelId, messages);
   }
   try {
-    return await completeLocalLlmChatLocal(modelId, messages);
+    return await completeLocalLlmChatLocal(modelId, messages, signal);
   } catch (localError) {
+    if (signal?.aborted) {
+      throw localError;
+    }
     if (!isLocalLlmHfInferenceFallbackEnabled() || !resolveHfToken()) {
       throw localError;
     }

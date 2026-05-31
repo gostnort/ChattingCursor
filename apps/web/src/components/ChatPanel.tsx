@@ -8,13 +8,14 @@ import {
   type TouchEvent,
 } from "react";
 import type { ChatMessage, ModelInfo } from "@chatting-cursor/shared";
-import { isOfflineModelId } from "@chatting-cursor/shared";
+import { formatLocalLlmError, formatOfflineLoadStatus, isOfflineModelId } from "@chatting-cursor/shared";
 import {
   analyzeChatImage,
   createChatSession,
   fetchRecentChatSession,
   fetchModels,
   mergeAssistantStreamText,
+  cancelChatRun,
   sendChatMessage,
   subscribeRunEvents,
   uploadChatImage,
@@ -45,6 +46,7 @@ import { MessageBubble } from "./MessageBubble";
 
 
 const LATEST_RUN_ID_KEY = "latestRunId";
+const OFFLINE_LOAD_TIMEOUT_MS = 600_000;
 
 
 interface ChatPanelProps {
@@ -174,6 +176,7 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
   const stderrBufferRef = useRef("");
   const currentAssistantLabelRef = useRef("Agent");
   const sseCloseRef = useRef<(() => void) | null>(null);
+  const currentRunIdRef = useRef<string | null>(null);
   const sendQueueRef = useRef<string[]>([]);
   const runInFlightRef = useRef(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -190,6 +193,7 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
   const applyChatSnapshot = useCallback((snapshot: { messages: ChatMessage[]; sessionId: string | null }): void => {
     sseCloseRef.current?.();
     sseCloseRef.current = null;
+    currentRunIdRef.current = null;
     sendQueueRef.current = [];
     runInFlightRef.current = false;
     assistantBufferRef.current = "";
@@ -416,12 +420,21 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
     setOfflineLoadPhase("waiting");
     setOfflineLoadMessage("1 秒后将开始加载本地模型…");
     let pollTimer: number | undefined;
+    let loadTimeoutTimer: number | undefined;
+    let pollFailures = 0;
     const delayTimer = window.setTimeout(() => {
       if (offlineWarmupGenerationRef.current !== generation) {
         return;
       }
       setOfflineLoadPhase("loading");
       setOfflineLoadMessage("正在加载本地模型，请稍候…");
+      loadTimeoutTimer = window.setTimeout(() => {
+        if (offlineWarmupGenerationRef.current !== generation) {
+          return;
+        }
+        setOfflineLoadPhase("error");
+        setOfflineLoadMessage(formatLocalLlmError("模型加载超时（超过 600 秒）"));
+      }, OFFLINE_LOAD_TIMEOUT_MS);
       pollTimer = window.setInterval(() => {
         if (offlineWarmupGenerationRef.current !== generation) {
           return;
@@ -438,15 +451,25 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
             }
             if (status.error || status.loadState === "error") {
               setOfflineLoadPhase("error");
-              setOfflineLoadMessage(status.error ?? status.message ?? "本地模型加载失败");
+              setOfflineLoadMessage(formatLocalLlmError(status.error ?? status.message ?? "本地模型加载失败"));
               return;
             }
+            if (status.weights === "missing" || status.weights === "incomplete") {
+              setOfflineLoadPhase("error");
+              setOfflineLoadMessage(formatLocalLlmError("本地模型权重不完整或未安装"));
+              return;
+            }
+            pollFailures = 0;
             if (status.message) {
               setOfflineLoadMessage(status.message);
             }
           })
           .catch(() => {
-            // 轮询失败时保留当前提示，等待 warmup 返回
+            pollFailures += 1;
+            if (pollFailures >= 4 && offlineWarmupGenerationRef.current === generation) {
+              setOfflineLoadPhase("error");
+              setOfflineLoadMessage(formatLocalLlmError("无法连接 Bridge 查询本地模型状态，请确认 Bridge 已启动"));
+            }
           });
       }, 2500);
       void warmupOfflineModel(bridgeUrl, selectedModel, bridgeToken)
@@ -471,7 +494,7 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
             return;
           }
           setOfflineLoadPhase("error");
-          setOfflineLoadMessage(result.error ?? result.message ?? "本地模型未就绪");
+          setOfflineLoadMessage(formatLocalLlmError(result.error ?? result.message ?? "本地模型未就绪"));
         })
         .catch((error: unknown) => {
           if (offlineWarmupGenerationRef.current !== generation) {
@@ -479,11 +502,14 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
           }
           const message = error instanceof Error ? error.message : String(error);
           setOfflineLoadPhase("error");
-          setOfflineLoadMessage(message);
+          setOfflineLoadMessage(formatLocalLlmError(message));
         })
         .finally(() => {
           if (pollTimer !== undefined) {
             window.clearInterval(pollTimer);
+          }
+          if (loadTimeoutTimer !== undefined) {
+            window.clearTimeout(loadTimeoutTimer);
           }
         });
     }, 1000);
@@ -491,6 +517,9 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
       window.clearTimeout(delayTimer);
       if (pollTimer !== undefined) {
         window.clearInterval(pollTimer);
+      }
+      if (loadTimeoutTimer !== undefined) {
+        window.clearTimeout(loadTimeoutTimer);
       }
     };
   }, [bridgeToken, bridgeUrl, selectedModel]);
@@ -638,6 +667,7 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
   const resetChatState = (): void => {
     sseCloseRef.current?.();
     sseCloseRef.current = null;
+    currentRunIdRef.current = null;
     sendQueueRef.current = [];
     runInFlightRef.current = false;
     assistantBufferRef.current = "";
@@ -702,9 +732,35 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
   const handleStreamEvent = (event: { type: string; text?: string; data?: Record<string, unknown> }): void => {
     if (event.type === "thinking") {
       setIsThinking(true);
+      if (offlineModelSelected && event.data?.source === "offline_local_llm") {
+        const status = typeof event.data.status === "string" ? event.data.status : "";
+        const detail = typeof event.data.detail === "string" ? event.data.detail : "";
+        if (status === "loading" || status === "idle") {
+          const parts = [detail || "正在加载本地模型…"];
+          if (typeof event.data.mode === "string" && event.data.mode === "mixed") {
+            parts.push("混合模式（GPU + CPU 内存）");
+          }
+          if (typeof event.data.ggufGb === "number") {
+            parts.push(`GGUF 约 ${event.data.ggufGb.toFixed(1)} GB`);
+          }
+          setOfflineLoadPhase("loading");
+          setOfflineLoadMessage(parts.join("；"));
+        }
+      }
       return;
     }
-    if ((event.type === "stderr" || event.type === "error") && event.text) {
+    if (event.type === "error" && event.text) {
+      setIsThinking(false);
+      const formatted = formatLocalLlmError(event.text);
+      stderrBufferRef.current = formatted;
+      if (offlineModelSelected) {
+        setOfflineLoadPhase("error");
+        setOfflineLoadMessage(formatted);
+        setModelSwitchNotice(formatted);
+      }
+      return;
+    }
+    if (event.type === "stderr" && event.text) {
       setIsThinking(false);
       stderrBufferRef.current = `${stderrBufferRef.current}${event.text}`.trim();
       return;
@@ -732,6 +788,18 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
     if (event.type === "result" && event.text) {
       setIsThinking(false);
       assistantBufferRef.current = event.text;
+      const isFailure = /失败|错误|不足|未找到|未运行|超时|OOM|sidecar/i.test(event.text);
+      if (isFailure) {
+        const formatted = formatLocalLlmError(event.text);
+        setModelSwitchNotice(formatted);
+        if (offlineModelSelected) {
+          setOfflineLoadPhase("error");
+          setOfflineLoadMessage(formatted);
+        }
+      } else if (offlineModelSelected) {
+        setOfflineLoadPhase("ready");
+        setOfflineLoadMessage("加载完成");
+      }
       setMessages((prev) => {
         const last = prev[prev.length - 1];
         if (last?.role === "assistant") {
@@ -754,26 +822,54 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
     }
     if (event.type === "run_finished") {
       sseCloseRef.current = null;
+      currentRunIdRef.current = null;
       const exitCode = typeof event.data?.exitCode === "number" ? event.data.exitCode : null;
+      const cancelled = event.data?.cancelled === true;
       if (!assistantBufferRef.current && stderrBufferRef.current) {
-        appendAssistantError(`CLI 运行失败：${stderrBufferRef.current}`);
+        appendAssistantError(formatLocalLlmError(stderrBufferRef.current));
       } else if (!assistantBufferRef.current && exitCode !== null && exitCode !== 0) {
         appendAssistantError(`CLI 运行失败（exit=${exitCode}）。`);
       }
       stderrBufferRef.current = "";
-      playNotificationSound();
+      if (!cancelled) {
+        playNotificationSound();
+      }
       drainSendQueue();
     }
   };
 
 
+  const handleStopRun = async (): Promise<void> => {
+    const runId = currentRunIdRef.current;
+    sseCloseRef.current?.();
+    sseCloseRef.current = null;
+    sendQueueRef.current = [];
+    if (runId) {
+      try {
+        await cancelChatRun(bridgeUrl, runId, bridgeToken);
+      } catch {
+        // 本地已关闭 SSE；Bridge 可能已结束 run
+      }
+      currentRunIdRef.current = null;
+    }
+    assistantBufferRef.current = "";
+    stderrBufferRef.current = "";
+    runInFlightRef.current = false;
+    setIsSending(false);
+    setIsThinking(false);
+  };
+
+
   const subscribeToRun = (runId: string, activeSessionId: string): void => {
+    currentRunIdRef.current = runId;
     setSessionId(activeSessionId);
     setConnectionError(null);
     localStorage.setItem(LATEST_RUN_ID_KEY, runId);
     sseCloseRef.current = subscribeRunEvents(bridgeUrl, runId, handleStreamEvent, (error) => {
-      appendAssistantError(`Stream connection failed: ${error.message}`);
-      setConnectionError(error.message);
+      const formatted = formatLocalLlmError(error.message);
+      appendAssistantError(`流式连接失败：${formatted}`);
+      setConnectionError(formatted);
+      setModelSwitchNotice(formatted);
       sseCloseRef.current = null;
       drainSendQueue();
     }, bridgeToken);
@@ -798,16 +894,22 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
       subscribeToRun(runId, activeSessionId);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      const formatted = formatLocalLlmError(message);
       setMessages((prev) => [
         ...prev,
         {
           id: crypto.randomUUID(),
           role: "assistant",
-          content: `Send failed: ${message}`,
+          content: `发送失败：${formatted}`,
           createdAt: new Date().toISOString(),
         },
       ]);
-      setConnectionError(message);
+      setConnectionError(formatted);
+      setModelSwitchNotice(formatted);
+      if (offlineModelSelected) {
+        setOfflineLoadPhase("error");
+        setOfflineLoadMessage(formatted);
+      }
       drainSendQueue();
     }
   };
@@ -888,13 +990,35 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
   const offlineModelReady = !offlineModelSelected || offlineLoadPhase === "ready";
 
 
+  const handleComposerAction = (): void => {
+    if (isSending) {
+      void handleStopRun();
+      return;
+    }
+    void handleSend();
+  };
+
+
   const handleSend = async (): Promise<void> => {
     const prompt = input.trim();
     if (!prompt) {
       return;
     }
+    if (runInFlightRef.current) {
+      return;
+    }
+    if (offlineModelSelected && offlineLoadPhase === "error") {
+      const blocked = formatOfflineLoadStatus({
+        phase: "error",
+        error: offlineLoadMessage,
+      }) ?? "本地模型未就绪，无法发送。";
+      appendAssistantError(blocked);
+      setModelSwitchNotice(blocked);
+      return;
+    }
     if (offlineModelSelected && !offlineModelReady) {
-      appendAssistantError(offlineLoadMessage ?? "本地模型尚未加载完成，请稍候或检查「本地 → 本地模型」中的权重与 Python 依赖。");
+      const waiting = offlineLoadMessage ?? "本地模型尚未加载完成，请稍候或检查「本地 → 本地模型」中的权重与 Python 依赖。";
+      appendAssistantError(waiting);
       return;
     }
     setInput("");
@@ -905,15 +1029,20 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
       createdAt: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, userMessage]);
-    if (runInFlightRef.current) {
-      sendQueueRef.current.push(prompt);
-      return;
-    }
     await startRun(prompt);
   };
 
 
-  const showTypingIndicator = isSending && (
+  const offlineStatusLine = offlineModelSelected
+    ? formatOfflineLoadStatus({
+      phase: offlineLoadPhase,
+      message: offlineLoadMessage,
+      error: offlineLoadPhase === "error" ? offlineLoadMessage : undefined,
+    })
+    : null;
+
+
+  const showTypingIndicator = isSending && isThinking && (
     isThinking
     || messages.length === 0
     || messages[messages.length - 1]?.role !== "assistant"
@@ -954,12 +1083,18 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
         {modelSwitchNotice && (
           <p className="config-save-toast" role="status">{modelSwitchNotice}</p>
         )}
-        {offlineModelSelected && offlineLoadMessage && (
+        {offlineModelSelected && offlineStatusLine && (
           <p
-            className={offlineLoadPhase === "error" ? "config-error" : "config-save-toast"}
+            className={
+              offlineLoadPhase === "error"
+                ? "config-error"
+                : offlineLoadPhase === "ready"
+                  ? "config-save-toast"
+                  : "config-save-status-dirty"
+            }
             role="status"
           >
-            {offlineLoadMessage}
+            {offlineStatusLine}
           </p>
         )}
         {connectionError && (
@@ -1022,11 +1157,12 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
           />
           <button
             type="button"
-            className="composer-send"
-            onClick={() => void handleSend()}
-            disabled={!input.trim() || !offlineModelReady || isSending}
+            className={isSending ? "composer-send send-stop" : "composer-send"}
+            onClick={handleComposerAction}
+            disabled={(!offlineModelReady && offlineLoadPhase !== "loading") || offlineLoadPhase === "error" || (!isSending && !input.trim())}
+            aria-label={isSending ? "停止生成" : "发送消息"}
           >
-            {isSending ? "运行中…" : offlineModelSelected && offlineLoadPhase === "loading" ? "模型加载中…" : "发送"}
+            {isSending ? "停止" : offlineModelSelected && offlineLoadPhase === "loading" ? "模型加载中…" : "发送"}
           </button>
         </div>
       </section>

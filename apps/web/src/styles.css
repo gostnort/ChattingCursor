@@ -1584,6 +1584,24 @@ body {
 
 
 
+.composer-send.send-stop {
+
+  background: #e54d4d;
+
+  color: #fff;
+
+}
+
+
+
+.composer-send.send-stop:hover:not(:disabled) {
+
+  background: #d43f3f;
+
+}
+
+
+
 .config-sub-page,
 
 .cli-sub-page {

@@ -501,6 +501,7 @@ export async function runCursorCli(options: CursorCliRunOptions): Promise<Cursor
       env: process.env,
       shell: process.platform === "win32" && resolved.command !== "wsl",
     });
+    options.onChild?.(child);
     let timedOut = false;
     const timer = setTimeout(() => {
       timedOut = true;

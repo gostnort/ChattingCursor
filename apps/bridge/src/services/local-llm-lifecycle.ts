@@ -1,8 +1,9 @@
-import { readdir } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { spawn, spawnSync, type ChildProcess, type SpawnOptions } from "node:child_process";
 import process from "node:process";
 import path from "node:path";
+import { formatLocalLlmError } from "@chatting-cursor/shared";
 import { getLocalLlmServerScriptPath, getRepoRootDir } from "../paths.js";
 import { findInstalledLocalLlmModel, inspectModelWeightsReady } from "./local-llm-store.js";
 
@@ -11,6 +12,14 @@ export type LocalLlmWeightsStatus = "ready" | "missing" | "incomplete";
 
 
 export type LocalLlmLoadState = "down" | "idle" | "loading" | "ready" | "error";
+
+
+export type LocalLlmHealthDetail = {
+  ggufGb?: number;
+  nGpuLayers?: number;
+  mode?: "gpu" | "mixed" | "cpu" | "unknown";
+  loadElapsedSec?: number;
+};
 
 
 export type LocalLlmHealthStatus = {
@@ -24,6 +33,7 @@ export type LocalLlmHealthStatus = {
   loadState: LocalLlmLoadState;
   loadError?: string;
   message?: string;
+  detail?: LocalLlmHealthDetail;
 };
 
 
@@ -139,10 +149,59 @@ export async function inspectGemma4Weights(modelDir?: string): Promise<LocalLlmW
 }
 
 
+type SidecarHealthBody = {
+  status?: string;
+  detail?: string;
+  gguf_gb?: string;
+  n_gpu_layers?: string;
+  mode?: string;
+  load_elapsed_sec?: string;
+};
+
+
+function parseSidecarHealthBody(body: SidecarHealthBody): {
+  state: LocalLlmLoadState;
+  detail?: string;
+  healthDetail?: LocalLlmHealthDetail;
+} {
+  const ggufGb = body.gguf_gb ? Number(body.gguf_gb) : undefined;
+  const nGpuLayers = body.n_gpu_layers ? Number(body.n_gpu_layers) : undefined;
+  const loadElapsedSec = body.load_elapsed_sec ? Number(body.load_elapsed_sec) : undefined;
+  const mode = body.mode === "gpu" || body.mode === "mixed" || body.mode === "cpu"
+    ? body.mode
+    : undefined;
+  const healthDetail: LocalLlmHealthDetail | undefined = (
+    ggufGb !== undefined || nGpuLayers !== undefined || mode || loadElapsedSec !== undefined
+  ) ? {
+    ggufGb: Number.isFinite(ggufGb) ? ggufGb : undefined,
+    nGpuLayers: Number.isFinite(nGpuLayers) ? nGpuLayers : undefined,
+    mode,
+    loadElapsedSec: Number.isFinite(loadElapsedSec) ? loadElapsedSec : undefined,
+  } : undefined;
+  if (body.status === "ready") {
+    return { state: "ready", healthDetail };
+  }
+  if (body.status === "idle") {
+    return { state: "idle", detail: body.detail?.trim(), healthDetail };
+  }
+  if (body.status === "error") {
+    return {
+      state: "error",
+      detail: body.detail?.trim() || "本地模型加载失败",
+      healthDetail,
+    };
+  }
+  if (body.status === "loading") {
+    return { state: "loading", detail: body.detail?.trim(), healthDetail };
+  }
+  return { state: "down" };
+}
+
+
 /** 探测 sidecar 加载阶段 */
 export async function probeLocalLlmLoadState(
   baseUrl = resolveLocalLlmApiBaseUrl(),
-): Promise<{ state: LocalLlmLoadState; detail?: string }> {
+): Promise<{ state: LocalLlmLoadState; detail?: string; healthDetail?: LocalLlmHealthDetail }> {
   const root = baseUrl.replace(/\/$/, "");
   try {
     const response = await fetch(`${root}/health`, {
@@ -152,20 +211,8 @@ export async function probeLocalLlmLoadState(
     if (!response.ok) {
       return { state: "down" };
     }
-    const body = (await response.json()) as { status?: string; detail?: string };
-    if (body.status === "ready") {
-      return { state: "ready" };
-    }
-    if (body.status === "idle") {
-      return { state: "idle" };
-    }
-    if (body.status === "error") {
-      return { state: "error", detail: body.detail?.trim() || "本地模型加载失败" };
-    }
-    if (body.status === "loading") {
-      return { state: "loading" };
-    }
-    return { state: "down" };
+    const body = (await response.json()) as SidecarHealthBody;
+    return parseSidecarHealthBody(body);
   } catch {
     return { state: "down" };
   }
@@ -293,12 +340,19 @@ function resolveSidecarTimeoutMs(): number {
 
 
 function resolveModelLoadTimeoutMs(): number {
-  const raw = readEnv("LOCAL_LLM_STARTUP_TIMEOUT_MS", "GEMMA4_STARTUP_TIMEOUT_MS");
+  const raw = readEnv("LOCAL_LLM_LOAD_TIMEOUT_MS", "GEMMA4_LOAD_TIMEOUT_MS")
+    || readEnv("LOCAL_LLM_STARTUP_TIMEOUT_MS", "GEMMA4_STARTUP_TIMEOUT_MS");
   const parsed = Number(raw);
   if (Number.isFinite(parsed) && parsed > 0) {
     return parsed;
   }
   return 600_000;
+}
+
+
+function toLocalLlmError(error: unknown): Error {
+  const message = error instanceof Error ? error.message : String(error);
+  return new Error(formatLocalLlmError(message));
 }
 
 
@@ -331,30 +385,135 @@ async function waitForSidecarHttp(timeoutMs: number): Promise<void> {
     }
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
-  throw new Error(
-    `本地推理进程在 ${Math.round(timeoutMs / 1000)} 秒内未响应 /v1/health。可增大 LOCAL_LLM_SIDECAR_TIMEOUT_MS。`,
+  throw toLocalLlmError(
+    `本地推理 sidecar 在 ${Math.round(timeoutMs / 1000)} 秒内未响应 /v1/health（端口 4322）。可增大 LOCAL_LLM_SIDECAR_TIMEOUT_MS。`,
   );
+}
+
+
+function formatMixedModeHint(healthDetail?: LocalLlmHealthDetail): string {
+  if (healthDetail?.mode !== "mixed") {
+    return "";
+  }
+  const layers = healthDetail.nGpuLayers ?? 35;
+  return `混合模式：约 ${layers} 层在 GPU，其余在 CPU 内存。`;
+}
+
+
+function formatLoadingHint(probe: {
+  detail?: string;
+  healthDetail?: LocalLlmHealthDetail;
+}): string {
+  const parts: string[] = [];
+  if (probe.detail) {
+    parts.push(probe.detail);
+  }
+  const mixed = formatMixedModeHint(probe.healthDetail);
+  if (mixed) {
+    parts.push(mixed);
+  }
+  if (probe.healthDetail?.ggufGb) {
+    parts.push(`GGUF 约 ${probe.healthDetail.ggufGb.toFixed(1)} GB`);
+  }
+  if (probe.healthDetail?.loadElapsedSec) {
+    parts.push(`已等待 ${probe.healthDetail.loadElapsedSec} 秒`);
+  }
+  return parts.join("；") || "正在加载 GGUF 到内存/GPU…";
+}
+
+
+/** 启动前估算 GGUF 体积与显存是否匹配 */
+export async function preflightLocalLlmModel(modelId: string): Promise<{
+  ggufGb: number;
+  mixedMode: boolean;
+  warning?: string;
+}> {
+  const model = await findInstalledLocalLlmModel(modelId);
+  if (!model) {
+    throw new Error(`未找到已安装本地模型：${modelId}`);
+  }
+  const weights = await inspectLocalLlmWeights(model.dir, model.filenames);
+  if (weights !== "ready") {
+    throw new Error(`本地模型权重不完整（${model.dir}）。${README_HINT}`);
+  }
+  const primaryName = model.filenames[0];
+  if (!primaryName) {
+    const names = await readdir(model.dir);
+    const gguf = names.find((name) => name.toLowerCase().endsWith(".gguf"));
+    if (!gguf) {
+      throw new Error(`未在 ${model.dir} 找到 GGUF 文件`);
+    }
+    const fileStat = await stat(path.join(model.dir, gguf));
+    const ggufGb = fileStat.size / (1024 ** 3);
+    return { ggufGb, mixedMode: ggufGb > 11 };
+  }
+  const fileStat = await stat(path.join(model.dir, primaryName));
+  const ggufGb = fileStat.size / (1024 ** 3);
+  const nGpuLayersRaw = readEnv("LOCAL_LLM_N_GPU_LAYERS", "GEMMA4_N_GPU_LAYERS");
+  const nGpuLayers = nGpuLayersRaw ? Number(nGpuLayersRaw) : -1;
+  const mixedMode = nGpuLayers > 0 || (nGpuLayers === -1 && ggufGb > 11);
+  let warning: string | undefined;
+  if (ggufGb > 20) {
+    warning = (
+      `GGUF 约 ${ggufGb.toFixed(1)} GB，在 12 GB 显存显卡上建议使用 Q4_K_M（约 15 GB）`
+      + " 或 gemma-4-E4B；当前将尝试混合模式（GPU 层 + CPU 内存），首次加载可能需数分钟。"
+    );
+  } else if (mixedMode) {
+    warning = "将使用混合模式：部分 Transformer 层在 GPU，其余在 CPU 内存。";
+  }
+  return { ggufGb, mixedMode, warning };
+}
+
+
+/** 触发 sidecar 异步加载 GGUF（defer 模式下 health 为 idle 时必需） */
+export async function triggerLocalLlmModelLoad(
+  baseUrl = resolveLocalLlmApiBaseUrl(),
+): Promise<void> {
+  const root = baseUrl.replace(/\/$/, "");
+  const probe = await probeLocalLlmLoadState(baseUrl);
+  if (probe.state === "ready" || probe.state === "loading") {
+    return;
+  }
+  if (probe.state === "down") {
+    throw toLocalLlmError("推理 sidecar 未运行（端口 4322），无法加载模型");
+  }
+  const response = await fetch(`${root}/load`, {
+    method: "POST",
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!response.ok && response.status !== 503) {
+    const body = await response.text();
+    throw new Error(`触发模型加载失败 (${response.status}): ${body.slice(0, 300)}`);
+  }
 }
 
 
 async function waitForModelReady(timeoutMs: number): Promise<void> {
   const baseUrl = resolveLocalLlmApiBaseUrl();
   const deadline = Date.now() + timeoutMs;
+  let lastLoadingHint = "";
   while (Date.now() < deadline) {
     const probe = await probeLocalLlmLoadState(baseUrl);
     if (probe.state === "ready") {
       return;
     }
     if (probe.state === "error") {
-      throw new Error(probe.detail ?? "本地模型加载失败");
+      throw toLocalLlmError(probe.detail ?? "本地模型加载失败");
     }
+    if (probe.state === "idle") {
+      await triggerLocalLlmModelLoad(baseUrl);
+    }
+    lastLoadingHint = formatLoadingHint(probe);
     if (managedChild && managedChild.exitCode !== null) {
       throw formatSpawnExitError(managedChild.exitCode);
     }
     await new Promise((resolve) => setTimeout(resolve, 2000));
   }
-  throw new Error(
-    `本地模型在 ${Math.round(timeoutMs / 1000)} 秒内未加载完成。可增大 LOCAL_LLM_STARTUP_TIMEOUT_MS。`,
+  const suffix = lastLoadingHint ? ` ${lastLoadingHint}` : "";
+  throw toLocalLlmError(
+    `本地模型在 ${Math.round(timeoutMs / 1000)} 秒内未加载完成（加载超时）。`
+    + "若 GGUF 过大或显存不足，请改用 Q4_K_M 量化或设置 LOCAL_LLM_N_GPU_LAYERS=35。"
+    + ` 可增大 LOCAL_LLM_LOAD_TIMEOUT_MS。${suffix}`,
   );
 }
 
@@ -447,6 +606,14 @@ export async function ensureLocalLlmReady(modelId: string): Promise<void> {
     return;
   }
   await ensureLocalLlmSidecarStarted(modelId);
+  const preflight = await preflightLocalLlmModel(modelId);
+  if (preflight.warning) {
+    console.warn(`[local-llm] ${preflight.warning}`);
+  }
+  const probe = await probeLocalLlmLoadState(baseUrl);
+  if (probe.state === "idle") {
+    await triggerLocalLlmModelLoad(baseUrl);
+  }
   await waitForModelReady(resolveModelLoadTimeoutMs());
 }
 
@@ -568,18 +735,24 @@ export async function getLocalLlmHealthStatus(modelId?: string): Promise<LocalLl
   }
   const probe = await probeLocalLlmLoadState(baseUrl);
   const running = probe.state === "ready" && (!modelId || activeModelId === modelId);
-  const loadError = probe.state === "error" ? probe.detail : undefined;
+  const loadError = probe.state === "error"
+    ? formatLocalLlmError(probe.detail ?? "本地模型加载失败")
+    : undefined;
   let message: string | undefined;
+  const mixedHint = formatMixedModeHint(probe.healthDetail);
   if (loadError) {
     message = loadError;
   } else if (running) {
-    message = undefined;
+    message = mixedHint || undefined;
   } else if (weights !== "ready") {
     message = README_HINT;
   } else if (probe.state === "idle") {
-    message = "推理 sidecar 已就绪；发送首条消息时将加载模型权重。";
+    const sizeHint = probe.healthDetail?.ggufGb
+      ? `（GGUF 约 ${probe.healthDetail.ggufGb.toFixed(1)} GB）`
+      : "";
+    message = `推理 sidecar 已就绪；发送首条消息时将加载模型权重${sizeHint}。${mixedHint}`;
   } else if (probe.state === "loading" || spawnPromise !== null) {
-    message = "正在加载 GGUF 到内存/GPU，首次对话可能需数十秒…";
+    message = formatLoadingHint(probe);
   } else if (managed) {
     message = "推理服务未运行；选择本地模型后将自动预热 sidecar。";
   } else {
@@ -596,6 +769,7 @@ export async function getLocalLlmHealthStatus(modelId?: string): Promise<LocalLl
     loadState: probe.state,
     loadError,
     message,
+    detail: probe.healthDetail,
   };
 }
 
