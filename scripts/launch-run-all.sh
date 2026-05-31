@@ -60,15 +60,17 @@ print_startup_log_tail() {
   fi
 }
 
+# run-all 隧道健康检查最多 180s，Bridge/Web 就绪另需时间
+STARTUP_WAIT_SECONDS=330
+deadline=$((SECONDS + STARTUP_WAIT_SECONDS))
+
 nohup bash "${SCRIPT_DIR}/run-all.sh" "${RUN_ARGS[@]}" >"${LOG_PATH}" 2>"${ERR_PATH}" &
 PROC_PID=$!
 echo "ChattingCursor 已在后台启动 (PID ${PROC_PID})..."
 echo "日志: ${LOG_PATH}"
 echo "错误: ${ERR_PATH}"
 
-deadline=$((SECONDS + 150))
 startup_ok=0
-startup_fail=0
 require_web=0
 if [[ "${NO_WEB}" -eq 0 ]]; then
   require_web=1
@@ -78,15 +80,9 @@ while [[ "${SECONDS}" -lt "${deadline}" ]]; do
   if ! kill -0 "${PROC_PID}" 2>/dev/null; then
     break
   fi
-  if [[ -f "${LOG_PATH}" ]]; then
-    if grep -qE '\[FAIL\].*Port 4321|\[FAIL\]|exit 2' "${LOG_PATH}" 2>/dev/null; then
-      startup_fail=1
-      break
-    fi
-    if grep -q '启动完成' "${LOG_PATH}" 2>/dev/null; then
-      startup_ok=1
-      break
-    fi
+  if [[ -f "${LOG_PATH}" ]] && grep -q 'Startup flow complete' "${LOG_PATH}" 2>/dev/null; then
+    startup_ok=1
+    break
   fi
   sleep 0.5
 done
@@ -109,36 +105,21 @@ if ! kill -0 "${PROC_PID}" 2>/dev/null; then
   wait "${PROC_PID}" 2>/dev/null
   exit_code=$?
   set -e
-  if [[ "${startup_ok}" -eq 0 ]]; then
-    if [[ "${exit_code}" -eq 2 ]]; then
-      echo "[FAIL] 端口冲突 (exit 2)。日志: ${LOG_PATH}"
-      print_startup_log_tail
-      exit 2
-    fi
-    if [[ "${exit_code}" -ne 0 ]]; then
-      echo "[FAIL] 启动未成功 (exit ${exit_code})。日志: ${LOG_PATH}"
-      print_startup_log_tail
-      exit "${exit_code}"
-    fi
-    echo "[FAIL] 启动流程已结束但未就绪。日志: ${LOG_PATH}"
+  if [[ "${exit_code}" -eq 2 ]]; then
+    echo "[FAIL] 端口冲突 (exit 2)。日志: ${LOG_PATH}"
     print_startup_log_tail
-    exit 1
+    exit 2
   fi
-fi
-
-if [[ "${startup_fail}" -eq 1 ]]; then
-  echo "[FAIL] 启动未成功。日志: ${LOG_PATH}"
+  if [[ "${exit_code}" -ne 0 ]]; then
+    echo "[FAIL] 启动未成功 (exit ${exit_code})。日志: ${LOG_PATH}"
+    print_startup_log_tail
+    exit "${exit_code}"
+  fi
+  echo "[FAIL] 启动流程已结束但未就绪。日志: ${LOG_PATH}"
   print_startup_log_tail
-  exit 2
+  exit 1
 fi
 
-if kill -0 "${PROC_PID}" 2>/dev/null; then
-  echo "[OK] 后台启动器仍在运行 (PID ${PROC_PID})。"
-  echo "     在日志中等待「启动完成」: ${LOG_PATH}"
-  echo "     停止: ./shutdown.sh"
-  exit 0
-fi
-
-echo "[FAIL] 启动未成功。日志: ${LOG_PATH}"
+echo "[FAIL] 启动超时（${STARTUP_WAIT_SECONDS}s 内未检测到 Startup flow complete）。日志: ${LOG_PATH}"
 print_startup_log_tail
 exit 1

@@ -297,7 +297,7 @@ if [[ -n "${NAMED_PUBLIC_URL}" ]]; then
   log_step "启动 cloudflared 命名隧道..."
   start_tunnel "${CLOUDFLARED}"
   sleep 2
-  set_public_bridge_url "${NAMED_PUBLIC_URL}" || log_fail "写入 publicBridgeUrl 失败"
+  set_public_bridge_url "${NAMED_PUBLIC_URL}" || echo "[WARN] 写入 publicBridgeUrl 失败，将在隧道就绪后重试"
 else
   log_step "启动 cloudflared 快速隧道..."
   start_tunnel "${CLOUDFLARED}"
@@ -333,7 +333,7 @@ if [[ "${startup_ok}" -ne 1 ]]; then
   exit 1
 fi
 
-log_ok "启动完成。服务运行中（Ctrl+C 停止）。"
+log_ok "Startup flow complete. 启动完成。服务运行中（Ctrl+C 停止）。"
 while [[ "${SHUTTING_DOWN}" -eq 0 ]]; do
   if [[ "${BRIDGE_OWNED}" -eq 1 ]] && ! kill -0 "${BRIDGE_PID}" 2>/dev/null; then
     log_fail "Bridge 进程已退出"
