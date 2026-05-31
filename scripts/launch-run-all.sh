@@ -48,6 +48,18 @@ test_local_services_healthy() {
   [[ "${code}" =~ ^[2345] ]]
 }
 
+
+print_startup_log_tail() {
+  if [[ -f "${ERR_PATH}" ]]; then
+    echo "--- stderr (last 40 lines) ---"
+    tail -n 40 "${ERR_PATH}"
+  fi
+  if [[ -f "${LOG_PATH}" ]]; then
+    echo "--- stdout (last 40 lines) ---"
+    tail -n 40 "${LOG_PATH}"
+  fi
+}
+
 nohup bash "${SCRIPT_DIR}/run-all.sh" "${RUN_ARGS[@]}" >"${LOG_PATH}" 2>"${ERR_PATH}" &
 PROC_PID=$!
 echo "ChattingCursor 已在后台启动 (PID ${PROC_PID})..."
@@ -67,7 +79,7 @@ while [[ "${SECONDS}" -lt "${deadline}" ]]; do
     break
   fi
   if [[ -f "${LOG_PATH}" ]]; then
-    if grep -q '\[FAIL\].*Port 4321\|exit 2' "${LOG_PATH}" 2>/dev/null; then
+    if grep -qE '\[FAIL\].*Port 4321|\[FAIL\]|exit 2' "${LOG_PATH}" 2>/dev/null; then
       startup_fail=1
       break
     fi
@@ -93,24 +105,40 @@ if [[ "${startup_ok}" -eq 1 ]]; then
 fi
 
 if ! kill -0 "${PROC_PID}" 2>/dev/null; then
-  wait "${PROC_PID}" 2>/dev/null || true
+  set +e
+  wait "${PROC_PID}" 2>/dev/null
   exit_code=$?
-  if [[ "${exit_code}" -eq 2 ]]; then
-    echo "[FAIL] 端口冲突 (exit 2)。日志: ${LOG_PATH}"
-    exit 2
+  set -e
+  if [[ "${startup_ok}" -eq 0 ]]; then
+    if [[ "${exit_code}" -eq 2 ]]; then
+      echo "[FAIL] 端口冲突 (exit 2)。日志: ${LOG_PATH}"
+      print_startup_log_tail
+      exit 2
+    fi
+    if [[ "${exit_code}" -ne 0 ]]; then
+      echo "[FAIL] 启动未成功 (exit ${exit_code})。日志: ${LOG_PATH}"
+      print_startup_log_tail
+      exit "${exit_code}"
+    fi
+    echo "[FAIL] 启动流程已结束但未就绪。日志: ${LOG_PATH}"
+    print_startup_log_tail
+    exit 1
   fi
 fi
 
 if [[ "${startup_fail}" -eq 1 ]]; then
   echo "[FAIL] 启动未成功。日志: ${LOG_PATH}"
-  if [[ -f "${ERR_PATH}" ]]; then
-    echo "--- stderr (last 40 lines) ---"
-    tail -n 40 "${ERR_PATH}"
-  fi
+  print_startup_log_tail
   exit 2
 fi
 
-echo "[OK] 后台启动器仍在运行 (PID ${PROC_PID})。"
-echo "     在日志中等待「启动完成」: ${LOG_PATH}"
-echo "     停止: ./shutdown.sh"
-exit 0
+if kill -0 "${PROC_PID}" 2>/dev/null; then
+  echo "[OK] 后台启动器仍在运行 (PID ${PROC_PID})。"
+  echo "     在日志中等待「启动完成」: ${LOG_PATH}"
+  echo "     停止: ./shutdown.sh"
+  exit 0
+fi
+
+echo "[FAIL] 启动未成功。日志: ${LOG_PATH}"
+print_startup_log_tail
+exit 1

@@ -22,7 +22,7 @@ test_node_ready() {
   if ! command -v node >/dev/null 2>&1; then
     return 1
   fi
-  local majo
+  local major
   major="$(node -p "process.versions.node.split('.')[0]")"
   [[ "${major}" -ge 20 ]]
 }
