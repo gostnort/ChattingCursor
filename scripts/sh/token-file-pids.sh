@@ -129,7 +129,13 @@ merge_token_file_pid_section() {
     rm -f "${file_path}" "${tmp_auth}" "${tmp_out}" 2>/dev/null || true
     return 0
   fi
-  mkdir -p "$(dirname "${file_path}")"
+  local parent_dir
+  parent_dir="$(dirname "${file_path}")"
+  if [[ ! -d "${parent_dir}" ]]; then
+    echo "[WARN] token 文件父目录不存在，跳过 pid 写入: ${parent_dir}" >&2
+    rm -f "${tmp_auth}" "${tmp_out}"
+    return 1
+  fi
   write_token_file_content_with_retry "${file_path}" "${tmp_out}"
   rm -f "${tmp_auth}" "${tmp_out}"
 }

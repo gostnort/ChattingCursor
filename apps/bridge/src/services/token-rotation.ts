@@ -7,6 +7,8 @@ import {
   getLegacyTokenSyncDir,
 } from "../paths.js";
 import {
+  ensureTokenSyncDirectoryReady,
+  isUserSpecifiedTokenSyncDirectory,
   normalizeTokenSyncDirectory,
   resolveTokenSyncDirectory,
   saveTokenSyncDirectory,
@@ -301,14 +303,26 @@ export class TokenRotationService {
   private fileName: string;
   private publicBridgeUrl: string;
   private cachedRecord: DailyTokenRecord | null = null;
+  private userSpecifiedSyncDir: boolean;
 
 
   constructor(options: { directory?: string; fileName?: string; publicBridgeUrl: string }) {
-    this.directory = options.directory?.trim()
-      ? normalizeTokenSyncDirectory(options.directory.trim())
-      : resolveTokenSyncDirectory();
+    if (options.directory?.trim()) {
+      this.directory = normalizeTokenSyncDirectory(options.directory.trim());
+      this.userSpecifiedSyncDir = true;
+    } else {
+      this.directory = resolveTokenSyncDirectory();
+      this.userSpecifiedSyncDir = isUserSpecifiedTokenSyncDirectory();
+    }
     this.fileName = options.fileName?.trim() || "chattingcursor-token.txt";
     this.publicBridgeUrl = options.publicBridgeUrl;
+  }
+
+
+  private async ensureSyncDirectoryReady(): Promise<void> {
+    await ensureTokenSyncDirectoryReady(this.directory, {
+      userSpecified: this.userSpecifiedSyncDir,
+    });
   }
 
 
@@ -320,8 +334,9 @@ export class TokenRotationService {
   async setDirectory(directory: string): Promise<void> {
     const normalized = normalizeTokenSyncDirectory(directory);
     this.directory = normalized;
+    this.userSpecifiedSyncDir = true;
     this.cachedRecord = null;
-    await mkdir(this.directory, { recursive: true });
+    await this.ensureSyncDirectoryReady();
     await saveTokenSyncDirectory(normalized);
     await this.regenerateTodayToken();
   }
@@ -436,7 +451,7 @@ export class TokenRotationService {
   /** 每次隧道恢复或显式轮换：新 salt、新口令、previousDatetime、不写 generatedAt */
   private async rotateTokenForReconnect(publicBridgeUrl?: string): Promise<DailyTokenRecord> {
     this.cachedRecord = null;
-    await mkdir(this.directory, { recursive: true });
+    await this.ensureSyncDirectoryReady();
     const filePath = this.getFilePath();
     const existing = await readParsedTokenFile(filePath);
     const prior = effectiveDatetime(existing);
@@ -468,7 +483,7 @@ export class TokenRotationService {
       return this.cachedRecord;
     }
     const filePath = this.getFilePath();
-    await mkdir(this.directory, { recursive: true });
+    await this.ensureSyncDirectoryReady();
     await this.migrateLegacyTokenFileIfNeeded();
     try {
       const existing = await readFile(filePath, "utf8");

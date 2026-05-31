@@ -39,6 +39,7 @@ TMP_BASE="$(chattingcursor_temp_dir)"
 TUNNEL_LOG="${TMP_BASE}/chattingcursor-cloudflared.log"
 BRIDGE_LOG="${TMP_BASE}/chattingcursor-bridge.log"
 BRIDGE_ERR_LOG="${TMP_BASE}/chattingcursor-bridge.err.log"
+TOKEN_SYNC_DIR_SOURCE="$(resolve_token_sync_dir_source "${TOKEN_SYNC_DIR_OVERRIDE}")"
 TOKEN_SYNC_DIR="$(resolve_token_sync_dir "${TOKEN_SYNC_DIR_OVERRIDE}")"
 export CHATTINGCURSOR_TOKEN_SYNC_DIR="${TOKEN_SYNC_DIR}"
 TOKEN_FILE="${TOKEN_SYNC_DIR}/chattingcursor-token.txt"
@@ -62,7 +63,7 @@ STARTUP_TUNNEL_RECOVERY_ATTEMPTED=0
 
 declare -A SERVICE_PIDS=()
 
-mkdir -p "${TOKEN_SYNC_DIR}"
+ensure_token_sync_dir_ready "${TOKEN_SYNC_DIR}" "${TOKEN_SYNC_DIR_SOURCE}" || exit 1
 
 
 read_named_tunnel_config() {

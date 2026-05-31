@@ -29,7 +29,9 @@ init_cursor_cli_mode
 TMP_BASE="$(chattingcursor_temp_dir)"
 LOG_PATH="${TMP_BASE}/chattingcursor-run-all.log"
 ERR_PATH="${TMP_BASE}/chattingcursor-run-all.err.log"
+TOKEN_SYNC_DIR_SOURCE="$(resolve_token_sync_dir_source "")"
 TOKEN_SYNC_DIR="$(resolve_token_sync_dir "")"
+ensure_token_sync_dir_ready "${TOKEN_SYNC_DIR}" "${TOKEN_SYNC_DIR_SOURCE}" || exit 1
 export CHATTINGCURSOR_TOKEN_SYNC_DIR="${TOKEN_SYNC_DIR}"
 TOKEN_FILE="${TOKEN_SYNC_DIR}/chattingcursor-token.txt"
 TUNNEL_URL_PATTERN='https://[a-z0-9-]+\.trycloudflare\.com'
