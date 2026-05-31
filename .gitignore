@@ -17,6 +17,7 @@ coverage/
 .turbo/
 __pycache__/
 */__pycache__/
+*.py[cod]
 # Gemma4 本地权重（勿提交 GitHub；可保留 .gitkeep）
 Gemma4/llm_source/**
 !Gemma4/llm_source/.gitkeep
@@ -27,6 +28,8 @@ Gemma4/offload/
 local_llm/**
 !local_llm/server/
 !local_llm/server/**
+local_llm/server/__pycache__/
+local_llm/server/**/*.py[cod]
 
 # 仓库内 Bridge 运行时数据（安装任务等）
 .chattingcursor/

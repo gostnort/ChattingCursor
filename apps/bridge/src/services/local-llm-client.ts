@@ -183,16 +183,22 @@ async function completeLocalLlmChatLocal(
   const combinedSignal = signal
     ? AbortSignal.any([signal, timeoutSignal])
     : timeoutSignal;
-  const response = await fetch(`${baseUrl}/chat/completions`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({
-      model: modelId,
-      messages,
-      max_tokens: Number(process.env.LOCAL_LLM_MAX_TOKENS ?? process.env.GEMMA4_MAX_TOKENS ?? 2048),
-    }),
-    signal: combinedSignal,
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}/chat/completions`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        model: modelId,
+        messages,
+        max_tokens: Number(process.env.LOCAL_LLM_MAX_TOKENS ?? process.env.GEMMA4_MAX_TOKENS ?? 2048),
+      }),
+      signal: combinedSignal,
+    });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(formatLocalLlmError(`${baseUrl}/chat/completions 请求失败：${message}`));
+  }
   if (!response.ok) {
     const body = await response.text();
     throw new Error(formatLocalLlmError(`本地 LLM API ${response.status}: ${body.slice(0, 500)}`));
@@ -293,6 +299,48 @@ export async function completeGemma4Chat(messages: OpenAiMessage[]): Promise<str
     throw new Error("未找到已安装的本地模型");
   }
   return completeLocalLlmChat(modelId, messages);
+}
+
+
+/** 经 llm_server /readability 用 readability-lxml 提取正文（无需 GGUF 已加载） */
+export async function extractReadabilityFromHtml(
+  url: string,
+  html: string,
+  signal?: AbortSignal,
+): Promise<{ title: string; text: string } | undefined> {
+  if (!html.trim()) {
+    return undefined;
+  }
+  const baseUrl = resolveLocalLlmApiBaseUrl();
+  const apiKey = process.env.LOCAL_LLM_API_KEY?.trim() || process.env.GEMMA4_API_KEY?.trim() || "";
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (apiKey) {
+    headers.Authorization = `Bearer ${apiKey}`;
+  }
+  const timeoutMs = Number(process.env.LOCAL_LLM_READABILITY_TIMEOUT_MS ?? 30_000);
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  const combinedSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}/readability`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ url, html }),
+      signal: combinedSignal,
+    });
+  } catch {
+    return undefined;
+  }
+  if (!response.ok) {
+    return undefined;
+  }
+  const payload = await response.json() as { title?: string; text?: string };
+  const text = typeof payload.text === "string" ? payload.text.trim() : "";
+  if (!text) {
+    return undefined;
+  }
+  const title = typeof payload.title === "string" ? payload.title.trim() : "";
+  return { title, text };
 }
 
 

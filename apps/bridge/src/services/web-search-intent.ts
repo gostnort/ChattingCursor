@@ -1,4 +1,5 @@
-import { preferChineseWebSearchReply } from "./google-serp-parse.js";
+import { resolveWebSearchReplyLanguage } from "./google-serp-parse.js";
+import { webSearchQueryHash } from "./websearch-state.js";
 
 
 /** formatWebSearchReply 使用的检索元信息（不含正文摘录） */
@@ -135,6 +136,47 @@ export function extractWebSearchUserIntent(
 }
 
 
+/** 统计当前会话中、当前消息之前出现过的同规范化搜索词次数 */
+export function countEarlierSameWebSearchQueriesInSession(
+  currentPrompt: string,
+  sessionMessages: { role: string; content: string }[] = [],
+): number {
+  const trimmedPrompt = currentPrompt.trim();
+  const currentQuery = extractWebSearchQuery(trimmedPrompt);
+  if (!currentQuery.trim()) {
+    return 0;
+  }
+  const currentKey = webSearchQueryHash(currentQuery);
+  let count = 0;
+  for (const message of sessionMessages) {
+    if (message.role !== "user") {
+      continue;
+    }
+    const content = message.content.trim();
+    if (!content || content === trimmedPrompt) {
+      continue;
+    }
+    const priorQuery = extractWebSearchQuery(content);
+    if (!priorQuery.trim()) {
+      continue;
+    }
+    if (webSearchQueryHash(priorQuery) === currentKey) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
+
+/** 当前 /websearch 的 pass 序号 k（1-based，含本次） */
+export function resolveSessionWebSearchPassK(
+  currentPrompt: string,
+  sessionMessages: { role: string; content: string }[] = [],
+): number {
+  return countEarlierSameWebSearchQueriesInSession(currentPrompt, sessionMessages) + 1;
+}
+
+
 /** 从自然语言或 /websearch、/google 指令中提取联网搜索关键词 */
 export function extractWebSearchQuery(prompt: string): string {
   const trimmed = prompt.trim();
@@ -234,8 +276,9 @@ export function formatWebSearchReply(
     meta: WebSearchReplyMeta;
     message?: string;
   },
+  fullPrompt?: string,
 ): string {
-  const zh = preferChineseWebSearchReply(userIntent);
+  const zh = resolveWebSearchReplyLanguage("", userIntent, fullPrompt);
   if (!result.ok) {
     return [
       zh

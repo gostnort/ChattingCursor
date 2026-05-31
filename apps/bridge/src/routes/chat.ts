@@ -3,7 +3,10 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { v4 as uuidv4 } from "uuid";
 import { listCursorModels, mergeAssistantStreamText, probeCursorCli, runCursorCli } from "@chatting-cursor/cli-client";
 import type { RunEvent } from "@chatting-cursor/shared";
-import { formatLocalLlmError } from "@chatting-cursor/shared";
+import {
+  formatLocalLlmError,
+  formatModelDropdownLabel,
+} from "@chatting-cursor/shared";
 import {
   chatAnalyzeImageRequestSchema,
   chatCancelRequestSchema,
@@ -15,7 +18,7 @@ import {
   imageFileToDataUrl,
   isLocalLlmModel,
 } from "../services/local-llm-client.js";
-import { probeLocalLlmLoadState } from "../services/local-llm-lifecycle.js";
+import { probeLocalLlmLoadState, ensureLocalLlmSidecarStarted } from "../services/local-llm-lifecycle.js";
 import { analyzeUploadedImage, buildImageForwardPrompt } from "../services/image-analysis-service.js";
 import { readStoredImage, saveUploadedImage } from "../services/image-store.js";
 import { loadConfig, resolveCorsOrigin } from "../config.js";
@@ -144,6 +147,7 @@ function scheduleLocalLlmRun(options: {
     timestamp: startedAt,
     data: { source: "offline_local_llm", status: "loading" },
   });
+  void ensureLocalLlmSidecarStarted(modelId).catch(() => undefined);
   const loadPollTimer = setInterval(() => {
     void probeLocalLlmLoadState().then((probe) => {
       if (probe.state === "error") {
@@ -362,7 +366,7 @@ export async function registerChatRoutes(app: FastifyInstance): Promise<void> {
       .filter((item) => item.weightsReady)
       .map((item) => ({
         id: item.id,
-        label: `${item.author}/${item.modelSlug}`,
+        label: formatModelDropdownLabel(item.author, item.modelSlug),
         kind: "offline" as const,
       }));
     const separator = localModels.length > 0
@@ -514,11 +518,21 @@ export async function registerChatRoutes(app: FastifyInstance): Promise<void> {
         { query, userIntent: userIntent || undefined, endpoint: "http://127.0.0.1:9222", path: "chrome-google-search" },
         "Windows CDP search (Bridge → Chrome 9222, not WSL MCP)",
       );
+      if (useLocalLlm && model) {
+        void ensureLocalLlmSidecarStarted(model).catch(() => undefined);
+      }
       let skipWebResult = false;
       registerActiveRun(runId, () => {
         skipWebResult = true;
       });
-      void openGoogleSearchInChrome(query, { userIntent: userIntent || undefined }).then((result) => {
+      void openGoogleSearchInChrome(query, {
+        userIntent: userIntent || undefined,
+        fullPrompt: prompt,
+        sessionMessages: session.messages,
+        model,
+        workspace,
+        runId,
+      }).then((result) => {
         unregisterActiveRun(runId);
         if (skipWebResult) {
           finishCancelledRun({
@@ -543,7 +557,7 @@ export async function registerChatRoutes(app: FastifyInstance): Promise<void> {
           },
           "websearch finished",
         );
-        const replyText = formatWebSearchReply(userIntent || query, result);
+        const replyText = formatWebSearchReply(userIntent || query, result, prompt);
         finishDirectReplyRun(runId, session.sessionId, prompt, replyText, "chrome_web_search", modelLabel);
       }).catch((error: unknown) => {
         unregisterActiveRun(runId);

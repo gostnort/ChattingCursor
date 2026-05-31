@@ -3,6 +3,7 @@ fastapi>=0.115.0
 uvicorn[standard]>=0.32.0
 llama-cpp-python>=0.3.0
 huggingface-hub>=0.26.0
+readability-lxml>=0.8.1
 
 # Windows CUDA（可选，需匹配本机 CUDA 版本）：
 #   pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124

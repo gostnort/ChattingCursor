@@ -128,19 +128,16 @@ export const GOOGLE_SERP_EXTRACT_EXPRESSION = `(() => {
 })()`;
 
 
-/** CDP：摘录结果页正文（article/main，限长） */
-export const GOOGLE_PAGE_MAIN_TEXT_EXPRESSION = `(() => {
-  const pick = document.querySelector("article")
-    || document.querySelector("main")
-    || document.querySelector("[role='main']")
-    || document.body;
-  const text = ((pick && pick.innerText) || "").replace(/\\s+/g, " ").trim();
-  return {
-    title: document.title || "",
-    url: location.href || "",
-    text: text.slice(0, 4000),
-  };
-})()`;
+/** CDP：抓取整页 HTML，供 Python readability-lxml 提取正文 */
+export const GOOGLE_PAGE_HTML_CAPTURE_EXPRESSION = `(() => ({
+  title: document.title || "",
+  url: location.href || "",
+  html: (document.documentElement && document.documentElement.outerHTML) || ""
+}))()`;
+
+
+/** @deprecated 使用 GOOGLE_PAGE_HTML_CAPTURE_EXPRESSION + /readability */
+export const GOOGLE_PAGE_MAIN_TEXT_EXPRESSION = GOOGLE_PAGE_HTML_CAPTURE_EXPRESSION;
 
 
 /** 根据 URL 与正文判断 Google 同意页 / 验证码 */
@@ -192,6 +189,25 @@ export function parseGoogleSerpEvaluateValue(value: unknown): GoogleSerpSnapshot
 /** 查询是否以中文回复为主 */
 export function preferChineseWebSearchReply(query: string): boolean {
   return CHINESE_CHAR.test(query);
+}
+
+
+/** 根据用户意图、搜索词或完整输入判断回复是否用中文 */
+export function resolveWebSearchReplyLanguage(
+  query: string,
+  userIntent?: string,
+  fullPrompt?: string,
+): boolean {
+  if (preferChineseWebSearchReply(userIntent ?? "")) {
+    return true;
+  }
+  if (preferChineseWebSearchReply(query)) {
+    return true;
+  }
+  if (fullPrompt && preferChineseWebSearchReply(fullPrompt)) {
+    return true;
+  }
+  return false;
 }
 
 
@@ -269,6 +285,42 @@ export function collectNewOrganicResultUrls(
 }
 
 
+/** Fisher–Yates 原地洗牌（用于随机抽样 SERP 链接） */
+function shuffleInPlace<T>(items: T[]): void {
+  for (let index = items.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    const temp = items[index];
+    items[index] = items[swapIndex];
+    items[swapIndex] = temp;
+  }
+}
+
+
+/** 从 SERP 条目中随机抽取未见有机结果 URL（受每页与总量上限约束） */
+export function collectRandomNewOrganicResultUrls(
+  items: GoogleSerpItem[],
+  seenUrls: Set<string>,
+  limits: { perPageMax: number; totalMax: number; alreadyQueued: number },
+): { urls: string[]; truncated: boolean } {
+  const eligible: string[] = [];
+  for (const item of items) {
+    const href = pickOrganicUrlFromSerpHrefs([item.url ?? ""]);
+    if (!href || seenUrls.has(href)) {
+      continue;
+    }
+    eligible.push(href);
+  }
+  shuffleInPlace(eligible);
+  const picked = eligible.slice(0, limits.perPageMax);
+  const remaining = limits.totalMax - limits.alreadyQueued;
+  if (picked.length > remaining) {
+    return { urls: picked.slice(0, Math.max(0, remaining)), truncated: true };
+  }
+  const truncated = picked.length >= limits.perPageMax && eligible.length > limits.perPageMax;
+  return { urls: picked, truncated };
+}
+
+
 /** 由 DOM 结果块生成结构化摘要（不依赖付费 API） */
 export function buildStructuredSerpSummary(query: string, snapshot: GoogleSerpSnapshot): string {
   const zh = preferChineseWebSearchReply(query);
@@ -322,8 +374,9 @@ export function buildSynthesizedSearchSummary(
   query: string,
   items: GoogleSerpItem[],
   pages: CrawledPageText[],
+  userIntent?: string,
 ): string {
-  const zh = preferChineseWebSearchReply(query);
+  const zh = resolveWebSearchReplyLanguage(query, userIntent);
   const bullets: string[] = [];
   const seen = new Set<string>();
   const pushBullet = (line: string): void => {

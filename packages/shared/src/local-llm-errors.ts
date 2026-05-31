@@ -3,6 +3,7 @@ export type LocalLlmErrorKind =
   | "vram_insufficient"
   | "weights_missing"
   | "cuda_missing"
+  | "binary_mismatch"
   | "sidecar_down"
   | "load_timeout"
   | "preflight_failed"
@@ -22,7 +23,12 @@ const WEIGHTS_PATTERNS = [
 
 
 const CUDA_PATTERNS = [
-  /cuda|cublas|libcublas|libcuda|dll load failed|could not load.*llama|llama_cpp.*error|gpu.*not found/i,
+  /cuda|cublas|libcublas|libcuda|dll load failed|could not load.*llama|llama_cpp.*error|gpu.*not found|no module named ['"]llama_cpp|llama_cpp or inference dependencies missing/i,
+];
+
+
+const BINARY_MISMATCH_PATTERNS = [
+  /0xc000001d|status_illegal_instruction|illegal instruction|-1073741795|指令集.*不匹配|cuda\/cpu.*不匹配/i,
 ];
 
 
@@ -55,6 +61,9 @@ export function classifyLocalLlmError(raw: string): LocalLlmErrorKind {
   if (VRAM_PATTERNS.some((pattern) => pattern.test(text))) {
     return "vram_insufficient";
   }
+  if (BINARY_MISMATCH_PATTERNS.some((pattern) => pattern.test(text))) {
+    return "binary_mismatch";
+  }
   if (WEIGHTS_PATTERNS.some((pattern) => pattern.test(text))) {
     return "weights_missing";
   }
@@ -86,6 +95,7 @@ const ERROR_HEADLINES: Record<LocalLlmErrorKind, string> = {
   vram_insufficient: "显存或系统内存不足，无法加载当前 GGUF 模型。",
   weights_missing: "未找到或未完整安装 GGUF 权重文件。",
   cuda_missing: "CUDA / GPU 运行库不可用，llama.cpp 无法使用显卡加速。",
+  binary_mismatch: "llama.cpp 指令集或 CUDA/CPU 版本不匹配（STATUS_ILLEGAL_INSTRUCTION）。",
   sidecar_down: "本地推理 sidecar（端口 4322）未运行或无响应。",
   load_timeout: "模型加载超时，可能因 GGUF 过大或显存不足。",
   preflight_failed: "加载前检查未通过，当前硬件/配置无法安全加载该模型。",
@@ -98,6 +108,7 @@ const ERROR_FIXES: Record<LocalLlmErrorKind, string> = {
   vram_insufficient: "建议：改用 Q4_K_M 量化（约 15 GB）、设置 LOCAL_LLM_N_GPU_LAYERS=35 启用混合模式，或换用更小模型（如 gemma-4-E4B）。",
   weights_missing: "建议：打开「本地 → 本地模型」安装 GGUF，或运行 local_llm/server/install.bat。",
   cuda_missing: "建议：安装 NVIDIA 驱动与 CUDA；若无独显，设置 LOCAL_LLM_N_GPU_LAYERS=0 使用纯 CPU。",
+  binary_mismatch: "建议：运行 local_llm/server/install.bat 重装 cu124 wheel；确保 Bridge 启动时 PATH 含 NVIDIA DLL；若无独显，设置 LOCAL_LLM_N_GPU_LAYERS=0。",
   sidecar_down: "建议：确认 Bridge 已启动且 LOCAL_LLM_MANAGED=1；或手动运行 local_llm/server/llm_server.py。",
   load_timeout: "建议：改用更小量化、增大 LOCAL_LLM_LOAD_TIMEOUT_MS，或设置 LOCAL_LLM_N_GPU_LAYERS=35。",
   preflight_failed: "建议：改用 Q4_K_M 量化或更小模型；混合模式可设 LOCAL_LLM_N_GPU_LAYERS=35。",
@@ -106,9 +117,25 @@ const ERROR_FIXES: Record<LocalLlmErrorKind, string> = {
 };
 
 
+/** 将 fetch/网络底层错误转为更可读的中文片段 */
+function humanizeFetchFailure(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return trimmed;
+  }
+  if (/^fetch failed$/i.test(trimmed)) {
+    return "无法连接本地推理 sidecar（fetch failed，端口 4322 无响应）";
+  }
+  if (/ECONNREFUSED|connection refused/i.test(trimmed)) {
+    return "连接被拒绝（127.0.0.1:4322 未监听）";
+  }
+  return trimmed;
+}
+
+
 /** 将原始错误映射为带修复建议的中文用户消息 */
 export function formatLocalLlmError(raw: string): string {
-  const trimmed = raw.trim();
+  const trimmed = humanizeFetchFailure(raw.trim());
   if (!trimmed) {
     return `${ERROR_HEADLINES.unknown}${ERROR_FIXES.unknown}`;
   }

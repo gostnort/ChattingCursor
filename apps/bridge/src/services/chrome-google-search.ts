@@ -2,24 +2,39 @@
 
 import { resolveBridgeChromeEndpoint } from "@chatting-cursor/shared/chrome-endpoint";
 import {
-  GOOGLE_PAGE_MAIN_TEXT_EXPRESSION,
+  GOOGLE_PAGE_HTML_CAPTURE_EXPRESSION,
   GOOGLE_SERP_EXTRACT_EXPRESSION,
   buildStructuredSerpSummary,
-  buildSynthesizedSearchSummary,
   collectNewOrganicResultUrls,
+  collectRandomNewOrganicResultUrls,
   preferChineseWebSearchReply,
   type CrawledPageText,
   type GoogleSerpItem,
   parseGoogleSerpEvaluateValue,
 } from "./google-serp-parse.js";
+import { extractReadabilityFromHtml, isLocalLlmModel } from "./local-llm-client.js";
+import {
+  ensureGemma4SidecarStarted,
+  ensureLocalLlmReady,
+  ensureLocalLlmSidecarStarted,
+} from "./local-llm-lifecycle.js";
+import { resolveSessionWebSearchPassK } from "./web-search-intent.js";
 import {
   commitWebSearchRun,
   hashWebSearchPageContent,
+  maxLinksForWebSearchPass,
   planWebSearchRun,
-  WEBSEARCH_MAX_LINKS_PER_SEARCH,
+  WEBSEARCH_LINKS_PER_SERP_PAGE,
   WEBSEARCH_MAX_LINKS_PER_SERP_PAGE,
+  WEBSEARCH_PASS_DEADLINE_MS,
+  WEBSEARCH_REPEAT_PASS_DEADLINE_MS,
+  type WebSearchRunPlan,
 } from "./websearch-state.js";
-import { maybeSummarizeWebSearchWithSdk } from "./web-search-summarize.js";
+import {
+  persistWebSearchCrawlResults,
+  runWebSearchPipeline,
+  WEBSEARCH_SYNTHESIS_DEADLINE_MS,
+} from "./web-search-summarize.js";
 
 const NAVIGATE_TIMEOUT_MS = 15000;
 const CDP_SESSION_TIMEOUT_MS = 180000;
@@ -28,8 +43,10 @@ const PAGE_TEXT_MAX_CHARS = 3500;
 const AGGREGATE_EXCERPT_MAX_CHARS = 30000;
 /** 结果页并发打开上限（每批打开后关闭再开下一批） */
 export const WEBSEARCH_CRAWL_BATCH_SIZE = 5;
-/** 单次检索全局超时（毫秒） */
-export const WEBSEARCH_GLOBAL_DEADLINE_MS = 60_000;
+/** @deprecated 单次仅一阶段，预算见 resolveWebSearchPassByK */
+export const WEBSEARCH_GLOBAL_DEADLINE_MS = WEBSEARCH_REPEAT_PASS_DEADLINE_MS;
+export const WEBSEARCH_FIRST_PASS_DEADLINE_MS = WEBSEARCH_PASS_DEADLINE_MS;
+export const WEBSEARCH_SECOND_PASS_DEADLINE_MS = WEBSEARCH_REPEAT_PASS_DEADLINE_MS;
 
 
 /** Bridge stdout 日志（英文，便于排查 /websearch） */
@@ -41,6 +58,16 @@ function logWebSearch(stage: string, details: Record<string, unknown>): void {
 export interface ChromeGoogleSearchOptions {
   /** 用户待回答的问题（行内背景、会话上文或搜索词） */
   userIntent?: string;
+  /** 完整用户输入（用于判断回复语言） */
+  fullPrompt?: string;
+  /** 当前会话较早消息（用于 pass k 与意图） */
+  sessionMessages?: { role: string; content: string }[];
+  /** 会话所选模型（本地 LLM id 或 cursor CLI 模型名） */
+  model?: string;
+  workspace?: string;
+  signal?: AbortSignal;
+  /** Bridge runId，用于持久化抓取结果 */
+  runId?: string;
 }
 
 
@@ -50,6 +77,8 @@ export interface WebSearchMeta {
   searchUrl: string;
   pageUrl?: string;
   serpStartOffsets?: number[];
+  /** 同会话内该查询第几次检索（k） */
+  passK?: number;
   isRepeatSearch?: boolean;
   linksCrawled?: number;
   linksQueued?: number;
@@ -59,8 +88,12 @@ export interface WebSearchMeta {
   serpPagesFetched?: number;
   statePath?: string;
   block?: "consent" | "captcha" | null;
-  /** 是否在 60 秒全局截止前提前结束 */
+  /** 是否在抓取阶段时限内提前结束 */
   timedOut?: boolean;
+  /** 本次检索覆盖的 Google 页码范围（面向用户） */
+  serpPageRange?: { minPage: number; maxPage: number };
+  /** 抓取结果缓存文件路径 */
+  resultsCachePath?: string;
 }
 
 
@@ -136,7 +169,7 @@ interface PartialWebSearchBuildInput {
   endpoint: string;
   searchUrl: string;
   plan: Awaited<ReturnType<typeof planWebSearchRun>>;
-  serpOffsets: number[];
+  runPlan: WebSearchRunPlan;
   serpCapture: CdpSerpCapture | null;
   serpOffsetsUsed: number[];
   serpItems: GoogleSerpItem[];
@@ -145,6 +178,7 @@ interface PartialWebSearchBuildInput {
   linksTruncated: boolean;
   crawlBatchCount: number;
   timedOut: boolean;
+  modelReadyPromise?: Promise<void>;
 }
 
 
@@ -158,7 +192,7 @@ async function buildPartialWebSearchResult(
     endpoint,
     searchUrl,
     plan,
-    serpOffsets,
+    runPlan,
     serpCapture,
     serpOffsetsUsed,
     serpItems,
@@ -167,6 +201,7 @@ async function buildPartialWebSearchResult(
     linksTruncated,
     crawlBatchCount,
     timedOut,
+    modelReadyPromise,
   } = input;
   const structuredBullets = serpItems
     .map((item) => `- ${item.title}${item.snippet ? `: ${item.snippet.slice(0, 120)}` : ""}`)
@@ -174,13 +209,10 @@ async function buildPartialWebSearchResult(
   const pageBullets = crawledPages
     .map((page) => `- ${page.title} (${page.url}): ${page.text.slice(0, 240)}`)
     .join("\n");
-  const ruleSummary = serpCapture?.block
-    ? undefined
-    : buildSynthesizedSearchSummary(query, serpItems, crawledPages);
-  const aggregateExcerpt = [
-    serpCapture?.excerpt ?? "",
-    ...crawledPages.map((page) => `## ${page.title}\n${page.url}\n${page.text}`),
-  ].join("\n\n").slice(0, AGGREGATE_EXCERPT_MAX_CHARS);
+  const aggregateExcerpt = crawledPages
+    .map((page) => `## ${page.title}\n${page.url}\n${page.text}`)
+    .join("\n\n")
+    .slice(0, AGGREGATE_EXCERPT_MAX_CHARS);
   const blockSnapshot = {
     title: serpCapture?.title,
     url: serpCapture?.url && serpCapture.url !== "about:blank" ? serpCapture.url : searchUrl,
@@ -191,20 +223,55 @@ async function buildPartialWebSearchResult(
   const blockNotice = serpCapture?.block
     ? buildStructuredSerpSummary(query, blockSnapshot)
     : undefined;
-  const aiSummary = timedOut || serpCapture?.block
+  let resultsCachePath: string | undefined;
+  const summarizeContext = {
+    query,
+    userIntent: options.userIntent,
+    fullPrompt: options.fullPrompt,
+    aggregateExcerpt,
+    structuredBullets: [structuredBullets, pageBullets].filter(Boolean).join("\n"),
+    pagesQueued: crawlQueue.length,
+    pagesCrawled: crawledPages.length,
+    crawledPages,
+  };
+  if (!serpCapture?.block && options.runId && (crawledPages.length > 0 || serpItems.length > 0)) {
+    try {
+      resultsCachePath = await persistWebSearchCrawlResults(options.runId, summarizeContext, {
+        searchTimedOut: timedOut,
+        serpItems,
+      });
+      logWebSearch("crawl_results_persisted", {
+        runId: options.runId,
+        resultsCachePath,
+        pagesCrawled: crawledPages.length,
+        serpItemCount: serpItems.length,
+        searchTimedOut: timedOut,
+      });
+    } catch (persistError: unknown) {
+      const detail = persistError instanceof Error ? persistError.message : String(persistError);
+      logWebSearch("crawl_results_persist_failed", { runId: options.runId, error: detail });
+    }
+  }
+  const synthesisDeadlineMs = Date.now() + WEBSEARCH_SYNTHESIS_DEADLINE_MS;
+  const crawlPass = runPlan.passes[0];
+  const crawlBudgetMs = crawlPass?.deadlineMs ?? WEBSEARCH_PASS_DEADLINE_MS;
+  const aiSummary = serpCapture?.block
     ? undefined
-    : await maybeSummarizeWebSearchWithSdk(
-      query,
-      aggregateExcerpt,
-      [structuredBullets, pageBullets].filter(Boolean).join("\n"),
-      options.userIntent,
+    : await runWebSearchPipeline(
+      summarizeContext,
+      {
+        model: options.model,
+        workspace: options.workspace,
+        signal: options.signal,
+        synthesisDeadlineMs,
+        modelReadyPromise,
+      },
     );
   let synthesis = blockNotice?.trim()
     || aiSummary?.trim()
-    || ruleSummary?.trim()
     || undefined;
   if (timedOut) {
-    synthesis = appendWebSearchTimeoutFooter(synthesis, query);
+    synthesis = appendWebSearchTimeoutFooter(synthesis, query, crawlBudgetMs);
     logWebSearch("global_deadline_partial_reply", {
       serpItemCount: serpItems.length,
       linksCrawled: crawledPages.length,
@@ -212,17 +279,21 @@ async function buildPartialWebSearchResult(
     });
   }
   const statusNotes: string[] = [];
+  const crawlBudgetSec = Math.round(crawlBudgetMs / 1000);
   if (timedOut) {
-    statusNotes.push("检索在 60 秒全局时限内提前结束，已返回已收集资料的综合回答。");
+    statusNotes.push(`检索在 ${crawlBudgetSec} 秒抓取时限内提前结束，已返回已收集资料的综合回答。`);
   }
+  const pass = runPlan.passes[0];
+  const pageLabel = pass ? `第 ${pass.minPage}–${pass.maxPage} 页` : "";
   if (plan.isRepeat) {
-    statusNotes.push(`本次为重复查询，已抓取 Google start=${serpOffsets.join(",")} 共 ${serpOffsets.length} 页。`);
+    statusNotes.push(`本次为同会话第 ${plan.passK} 次相同查询，已抓取 Google ${pageLabel}（start=${serpOffsetsUsed.join(",")}）。`);
   } else {
-    statusNotes.push(`首次查询：已抓取 Google 第 2–3 页（start=${serpOffsets.join(",")}）。`);
+    statusNotes.push(`首次查询：已抓取 Google ${pageLabel}（start=${serpOffsetsUsed.join(",")}）。`);
   }
+  const maxLinks = pass ? maxLinksForWebSearchPass(pass) : 0;
   if (linksTruncated) {
     statusNotes.push(
-      `部分结果页未打开（上限：每 SERP 页 ${WEBSEARCH_MAX_LINKS_PER_SERP_PAGE} 条，单次合计 ${WEBSEARCH_MAX_LINKS_PER_SEARCH} 条）。`,
+      `部分结果页未打开（上限：每 SERP 页 ${WEBSEARCH_MAX_LINKS_PER_SERP_PAGE} 条，单次合计 ${maxLinks} 条）。`,
     );
   }
   if (crawlQueue.length > 0) {
@@ -232,6 +303,12 @@ async function buildPartialWebSearchResult(
   }
   statusNotes.push(`状态文件：${plan.statePath}`);
   const hasCollectedData = serpItems.length > 0 || crawledPages.length > 0 || Boolean(serpCapture?.block);
+  const serpPageRange = runPlan.passes.length > 0
+    ? {
+      minPage: runPlan.passes[0].minPage,
+      maxPage: runPlan.passes[runPlan.passes.length - 1].maxPage,
+    }
+    : undefined;
   return {
     ok: hasCollectedData || timedOut,
     synthesis,
@@ -240,6 +317,7 @@ async function buildPartialWebSearchResult(
       searchUrl,
       pageUrl: serpCapture?.url,
       serpStartOffsets: serpOffsetsUsed,
+      passK: plan.passK,
       isRepeatSearch: plan.isRepeat,
       linksCrawled: crawledPages.length,
       linksQueued: crawlQueue.length,
@@ -250,32 +328,53 @@ async function buildPartialWebSearchResult(
       statePath: plan.statePath,
       block: serpCapture?.block,
       timedOut,
+      serpPageRange,
+      resultsCachePath,
     },
     message: statusNotes.join(" "),
   };
 }
 
 
-/** 在 Chrome 新标签页打开 Google 搜索，等待加载并摘录 SERP */
+/** 在 Chrome 新标签页打开 Google 搜索，等待加载并摘录 SERP（两阶段抓取） */
 export async function openGoogleSearchInChrome(
   query: string,
   options: ChromeGoogleSearchOptions = {},
 ): Promise<ChromeGoogleSearchResult> {
-  const globalDeadline = Date.now() + WEBSEARCH_GLOBAL_DEADLINE_MS;
   const endpoint = resolveBridgeChromeEndpoint();
-  const plan = await planWebSearchRun(query);
-  const serpOffsets = plan.offsets;
-  const firstOffset = serpOffsets[0] ?? 10;
+  const sessionPassK = resolveSessionWebSearchPassK(
+    options.fullPrompt ?? query,
+    options.sessionMessages ?? [],
+  );
+  const plan = await planWebSearchRun(query, sessionPassK);
+  const { runPlan } = plan;
+  const pass = runPlan.passes[0];
+  if (!pass) {
+    return {
+      ok: false,
+      meta: { endpoint, searchUrl: buildGoogleSearchUrl(query) },
+      message: "无法规划检索阶段。",
+    };
+  }
+  const allOffsets = pass.offsets;
+  const firstOffset = allOffsets[0] ?? 0;
   const searchUrl = buildGoogleSearchUrl(query, firstOffset);
+  let modelReadyPromise: Promise<void> | undefined;
+  if (options.model && isLocalLlmModel(options.model)) {
+    void ensureLocalLlmSidecarStarted(options.model).catch(() => undefined);
+    modelReadyPromise = ensureLocalLlmReady(options.model).then(() => undefined);
+  } else {
+    void ensureGemma4SidecarStarted().catch(() => undefined);
+  }
   logWebSearch("state_loaded", {
     query: query.trim(),
     queryKey: plan.queryKey,
     statePath: plan.statePath,
     isRepeat: plan.isRepeat,
-    previousLastStartOffset: plan.previousLastStartOffset ?? null,
-    serpStartOffsets: serpOffsets,
+    passK: plan.passK,
+    serpStartOffsets: allOffsets,
+    deadlineMs: pass.deadlineMs,
     seenUrlCount: plan.seenUrls.size,
-    globalDeadlineMs: globalDeadline,
   });
   const chrome = await inspectChromeEndpoint();
   if (!chrome.available) {
@@ -294,28 +393,10 @@ export async function openGoogleSearchInChrome(
   let timedOut = false;
   let serpCapture: CdpSerpCapture | null = null;
   let crawledPages: CrawledPageText[] = [];
+  let mergedSerpItems: GoogleSerpItem[] = [];
+  let crawlBatchCount = 0;
   try {
-    if (isWebSearchDeadlineExceeded(globalDeadline)) {
-      timedOut = true;
-      logWebSearch("global_deadline_before_start", { query: query.trim() });
-      return buildPartialWebSearchResult({
-        query,
-        options,
-        endpoint,
-        searchUrl,
-        plan,
-        serpOffsets,
-        serpCapture,
-        serpOffsetsUsed,
-        serpItems: [],
-        crawledPages,
-        crawlQueue,
-        linksTruncated,
-        crawlBatchCount: 0,
-        timedOut,
-      });
-    }
-    const created = await openTab(endpoint, "about:blank", globalDeadline);
+    const created = await openTab(endpoint, "about:blank");
     const searchTargetId = typeof created.id === "string" ? created.id : "";
     if (searchTargetId) {
       createdTabIds.push(searchTargetId);
@@ -328,69 +409,114 @@ export async function openGoogleSearchInChrome(
         message: "已打开标签页，但无法获取 CDP WebSocket（无法导航或摘录）。",
       };
     }
-    serpCapture = await captureGoogleSerpForOffsets(wsUrl, query, serpOffsets, globalDeadline);
-    if (serpCapture.timedOut) {
-      timedOut = true;
-    }
-    serpOffsetsUsed = serpOffsets.slice(0, serpCapture.pagesFetched ?? serpOffsets.length);
-    const serpItems = serpCapture.serpItems ?? [];
-    const serpItemsWithUrl = serpItems.filter((item) => Boolean(item.url?.trim())).length;
-    logWebSearch("serp_captured", {
-      serpStartOffsets: serpOffsetsUsed,
-      serpItemCount: serpItems.length,
-      serpItemsWithUrl,
-      block: serpCapture.block ?? null,
-      timedOut: serpCapture.timedOut ?? false,
-    });
-    crawlQueue = [];
-    for (const pageItems of serpCapture.itemsByPage) {
-      const batch = collectNewOrganicResultUrls(pageItems, seenUrls, {
-        perPageMax: WEBSEARCH_MAX_LINKS_PER_SERP_PAGE,
-        totalMax: WEBSEARCH_MAX_LINKS_PER_SEARCH,
-        alreadyQueued: crawlQueue.length,
-      });
-      if (batch.truncated) {
-        linksTruncated = true;
+    for (let passIndex = 0; passIndex < runPlan.passes.length; passIndex += 1) {
+      const pass = runPlan.passes[passIndex];
+      const passDeadline = Date.now() + pass.deadlineMs;
+      if (isWebSearchDeadlineExceeded(passDeadline)) {
+        timedOut = true;
+        logWebSearch("pass_deadline_before_start", {
+          pass: passIndex + 1,
+          minPage: pass.minPage,
+          maxPage: pass.maxPage,
+        });
+        break;
       }
-      for (const href of batch.urls) {
-        crawlQueue.push(href);
-        seenUrls.add(href);
+      if (serpCapture?.block) {
+        break;
       }
-    }
-    if (crawlQueue.length >= WEBSEARCH_MAX_LINKS_PER_SEARCH) {
-      linksTruncated = true;
-    }
-    logWebSearch("links_queued", {
-      linksQueued: crawlQueue.length,
-      linksTruncated,
-    });
-    if (serpOffsetsUsed.length > 0) {
-      await commitWebSearchRun(query, serpOffsetsUsed, seenUrls, seenContentHashes);
-      logWebSearch("state_saved_after_serp", {
-        query: query.trim(),
-        queryKey: plan.queryKey,
-        lastStartOffset: serpOffsetsUsed.length > 0 ? Math.max(...serpOffsetsUsed) : 0,
-        seenUrlCount: seenUrls.size,
+      logWebSearch("pass_start", {
+        pass: passIndex + 1,
+        offsets: pass.offsets,
+        minPage: pass.minPage,
+        maxPage: pass.maxPage,
+        randomLinkSelection: pass.randomLinkSelection,
+        deadlineMs: pass.deadlineMs,
       });
-    }
-    const crawlBatchCount = computeCrawlBatchCount(crawlQueue.length, WEBSEARCH_CRAWL_BATCH_SIZE);
-    if (!isWebSearchDeadlineExceeded(globalDeadline) && crawlQueue.length > 0) {
-      const crawlOutcome = await crawlResultUrlsInBatches(
-        endpoint,
-        crawlQueue,
-        seenContentHashes,
-        WEBSEARCH_CRAWL_BATCH_SIZE,
-        globalDeadline,
+      const passSerpCapture = await captureGoogleSerpForOffsets(
+        wsUrl,
+        query,
+        pass.offsets,
+        passDeadline,
       );
-      crawledPages = crawlOutcome.pages;
-      if (crawlOutcome.timedOut) {
+      serpCapture = passSerpCapture;
+      if (passSerpCapture.timedOut) {
         timedOut = true;
       }
-    } else if (crawlQueue.length > 0 && isWebSearchDeadlineExceeded(globalDeadline)) {
-      timedOut = true;
-      logWebSearch("global_deadline_before_crawl", {
-        linksQueued: crawlQueue.length,
+      const passOffsetsUsed = pass.offsets.slice(
+        0,
+        passSerpCapture.pagesFetched ?? pass.offsets.length,
+      );
+      serpOffsetsUsed.push(...passOffsetsUsed);
+      const passSerpItems = passSerpCapture.serpItems ?? [];
+      mergedSerpItems = mergedSerpItems.concat(passSerpItems);
+      logWebSearch("serp_captured", {
+        pass: passIndex + 1,
+        serpStartOffsets: passOffsetsUsed,
+        serpItemCount: passSerpItems.length,
+        block: passSerpCapture.block ?? null,
+        timedOut: passSerpCapture.timedOut ?? false,
       });
+      const passQueue: string[] = [];
+      for (const pageItems of passSerpCapture.itemsByPage) {
+        const collect = pass.randomLinkSelection
+          ? collectRandomNewOrganicResultUrls
+          : collectNewOrganicResultUrls;
+        const batch = collect(pageItems, seenUrls, {
+          perPageMax: WEBSEARCH_LINKS_PER_SERP_PAGE,
+          totalMax: maxLinksForWebSearchPass(pass),
+          alreadyQueued: crawlQueue.length + passQueue.length,
+        });
+        if (batch.truncated) {
+          linksTruncated = true;
+        }
+        for (const href of batch.urls) {
+          passQueue.push(href);
+          seenUrls.add(href);
+        }
+      }
+      crawlQueue.push(...passQueue);
+      if (crawlQueue.length >= maxLinksForWebSearchPass(pass)) {
+        linksTruncated = true;
+      }
+      logWebSearch("links_queued", {
+        pass: passIndex + 1,
+        passLinksQueued: passQueue.length,
+        linksQueued: crawlQueue.length,
+        linksTruncated,
+      });
+      if (passOffsetsUsed.length > 0) {
+        await commitWebSearchRun(query, serpOffsetsUsed, seenUrls, seenContentHashes);
+        logWebSearch("state_saved_after_serp", {
+          pass: passIndex + 1,
+          query: query.trim(),
+          queryKey: plan.queryKey,
+          lastStartOffset: Math.max(...serpOffsetsUsed),
+          seenUrlCount: seenUrls.size,
+        });
+      }
+      if (passSerpCapture.block) {
+        break;
+      }
+      if (!isWebSearchDeadlineExceeded(passDeadline) && passQueue.length > 0) {
+        const crawlOutcome = await crawlResultUrlsInBatches(
+          endpoint,
+          passQueue,
+          seenContentHashes,
+          WEBSEARCH_CRAWL_BATCH_SIZE,
+          passDeadline,
+        );
+        crawledPages = crawledPages.concat(crawlOutcome.pages);
+        crawlBatchCount += computeCrawlBatchCount(passQueue.length, WEBSEARCH_CRAWL_BATCH_SIZE);
+        if (crawlOutcome.timedOut) {
+          timedOut = true;
+        }
+      } else if (passQueue.length > 0 && isWebSearchDeadlineExceeded(passDeadline)) {
+        timedOut = true;
+        logWebSearch("pass_deadline_before_crawl", {
+          pass: passIndex + 1,
+          linksQueued: passQueue.length,
+        });
+      }
     }
     if (serpOffsetsUsed.length > 0 || crawledPages.length > 0) {
       await commitWebSearchRun(query, serpOffsetsUsed, seenUrls, seenContentHashes);
@@ -409,19 +535,20 @@ export async function openGoogleSearchInChrome(
       endpoint,
       searchUrl,
       plan,
-      serpOffsets,
+      runPlan,
       serpCapture,
       serpOffsetsUsed,
-      serpItems,
+      serpItems: mergedSerpItems,
       crawledPages,
       crawlQueue,
       linksTruncated,
       crawlBatchCount,
       timedOut,
+      modelReadyPromise,
     });
   } catch (error: unknown) {
     const detail = error instanceof Error ? error.message : String(error);
-    const deadlineHit = detail.includes("global deadline");
+    const deadlineHit = detail.includes("global deadline") || detail.includes("deadline exceeded");
     if (deadlineHit) {
       timedOut = true;
     }
@@ -439,7 +566,7 @@ export async function openGoogleSearchInChrome(
         logWebSearch("state_save_failed", { error: commitDetail });
       }
     }
-    const serpItems = serpCapture?.serpItems ?? [];
+    const serpItems = mergedSerpItems.length > 0 ? mergedSerpItems : (serpCapture?.serpItems ?? []);
     if (deadlineHit || serpItems.length > 0 || crawledPages.length > 0) {
       return buildPartialWebSearchResult({
         query,
@@ -447,15 +574,16 @@ export async function openGoogleSearchInChrome(
         endpoint,
         searchUrl,
         plan,
-        serpOffsets,
+        runPlan,
         serpCapture,
         serpOffsetsUsed,
         serpItems,
         crawledPages,
         crawlQueue,
         linksTruncated,
-        crawlBatchCount: computeCrawlBatchCount(crawlQueue.length, WEBSEARCH_CRAWL_BATCH_SIZE),
+        crawlBatchCount: crawlBatchCount || computeCrawlBatchCount(crawlQueue.length, WEBSEARCH_CRAWL_BATCH_SIZE),
         timedOut: timedOut || deadlineHit,
+        modelReadyPromise,
       });
     }
     return {
@@ -476,17 +604,25 @@ export function isWebSearchDeadlineExceeded(deadlineMs: number, nowMs = Date.now
 
 
 /** 检索超时时的回复页脚（随查询语言中/英） */
-export function buildWebSearchTimeoutFooter(query: string): string {
+export function buildWebSearchTimeoutFooter(
+  query: string,
+  crawlBudgetMs = WEBSEARCH_PASS_DEADLINE_MS,
+): string {
+  const crawlBudgetSec = Math.round(crawlBudgetMs / 1000);
   const zh = preferChineseWebSearchReply(query);
   return zh
-    ? "（检索超时 60 秒，以下为已收集资料的综合回答）"
-    : "(Search timed out after 60 seconds; answer synthesized from sources collected so far)";
+    ? `（检索超时 ${crawlBudgetSec} 秒，以下为已收集资料的综合回答）`
+    : `(Search timed out after ${crawlBudgetSec} seconds; answer synthesized from sources collected so far)`;
 }
 
 
 /** 在已有综合回答后追加超时页脚 */
-export function appendWebSearchTimeoutFooter(synthesis: string | undefined, query: string): string {
-  const footer = buildWebSearchTimeoutFooter(query);
+export function appendWebSearchTimeoutFooter(
+  synthesis: string | undefined,
+  query: string,
+  crawlBudgetMs = WEBSEARCH_PASS_DEADLINE_MS,
+): string {
+  const footer = buildWebSearchTimeoutFooter(query, crawlBudgetMs);
   if (!synthesis?.trim()) {
     return footer;
   }
@@ -526,6 +662,7 @@ async function crawlResultUrlsInBatches(
   seenContentHashes: Set<string>,
   batchSize: number,
   globalDeadline: number,
+  signal?: AbortSignal,
 ): Promise<CrawlBatchOutcome> {
   const crawledPages: CrawledPageText[] = [];
   const batches = chunkUrls(urls, batchSize);
@@ -582,7 +719,7 @@ async function crawlResultUrlsInBatches(
           return null;
         }
         try {
-          return await capturePageMainTextViaCdp(pageWs, targetUrl);
+          return await capturePageMainTextViaCdp(pageWs, targetUrl, signal);
         } catch {
           return null;
         }
@@ -796,6 +933,7 @@ interface PageTextCapture {
 async function capturePageMainTextViaCdp(
   webSocketDebuggerUrl: string,
   targetUrl: string,
+  signal?: AbortSignal,
 ): Promise<PageTextCapture> {
   return withCdpSession(webSocketDebuggerUrl, CDP_SESSION_TIMEOUT_MS, async (sendCommand) => {
     await sendCommand("Page.enable");
@@ -820,14 +958,24 @@ async function capturePageMainTextViaCdp(
     }
     await waitForGenericPageLoad(sendCommand, targetUrl);
     const extractResponse = await sendCommand("Runtime.evaluate", {
-      expression: GOOGLE_PAGE_MAIN_TEXT_EXPRESSION,
+      expression: GOOGLE_PAGE_HTML_CAPTURE_EXPRESSION,
       returnByValue: true,
     });
     const value = readEvaluateValue(extractResponse) as Record<string, unknown> | undefined;
+    const pageUrl = typeof value?.url === "string" ? value.url : targetUrl;
+    const html = typeof value?.html === "string" ? value.html : "";
+    const readability = await extractReadabilityFromHtml(pageUrl, html, signal);
+    if (readability?.text.trim()) {
+      return {
+        title: readability.title || (typeof value?.title === "string" ? value.title : ""),
+        url: pageUrl,
+        text: readability.text,
+      };
+    }
     return {
       title: typeof value?.title === "string" ? value.title : "",
-      url: typeof value?.url === "string" ? value.url : targetUrl,
-      text: typeof value?.text === "string" ? value.text : "",
+      url: pageUrl,
+      text: "",
     };
   });
 }

@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -35,6 +36,11 @@ class ChatCompletionRequest(BaseModel):
     messages: list[ChatMessage]
     max_tokens: int | None = Field(default=None, ge=1)
     temperature: float | None = Field(default=None, ge=0.0)
+
+
+class ReadabilityRequest(BaseModel):
+    url: str = ""
+    html: str = ""
 
 
 app = FastAPI(title="ChattingCursor Local LLM Sidecar", version="2.1.0")
@@ -118,6 +124,42 @@ def gguf_size_gb(path: Path) -> float:
     return path.stat().st_size / (1024 ** 3)
 
 
+def venv_site_packages() -> Path:
+    if os.name == "nt":
+        return Path(sys.prefix) / "Lib" / "site-packages"
+    version = f"python{sys.version_info.major}.{sys.version_info.minor}"
+    return Path(sys.prefix) / "lib" / version / "site-packages"
+
+
+def prepend_llama_runtime_path() -> None:
+    if read_env("LOCAL_LLM_SKIP_RUNTIME_PATH", "GEMMA4_SKIP_RUNTIME_PATH").lower() in ("1", "true", "yes"):
+        return
+    site = venv_site_packages()
+    candidates = [
+        site / "nvidia" / "cublas" / "bin",
+        site / "nvidia" / "cuda_runtime" / "bin",
+        site / "bin",
+    ]
+    prepend: list[str] = []
+    for candidate in candidates:
+        if candidate.is_dir():
+            prepend.append(str(candidate))
+    if not prepend:
+        return
+    separator = ";" if os.name == "nt" else ":"
+    existing = os.environ.get("PATH", "")
+    os.environ["PATH"] = separator.join(prepend + ([existing] if existing else []))
+
+
+def probe_llama_gpu_offload() -> bool:
+    try:
+        prepend_llama_runtime_path()
+        import llama_cpp.llama_cpp as lc
+        return bool(lc.llama_supports_gpu_offload())
+    except Exception:
+        return False
+
+
 def probe_vram_gb() -> float | None:
     if shutil.which("nvidia-smi") is None:
         return None
@@ -142,12 +184,21 @@ def resolve_n_gpu_layers(gguf_gb: float) -> int:
     if _resolved_n_gpu_layers is not None:
         return _resolved_n_gpu_layers
     configured = read_env("LOCAL_LLM_N_GPU_LAYERS", "GEMMA4_N_GPU_LAYERS")
-    if configured and configured != "-1":
-        _resolved_n_gpu_layers = int(configured)
+    gpu_offload = probe_llama_gpu_offload()
+    if configured:
+        requested = int(configured)
+        if requested != 0 and not gpu_offload:
+            _resolved_n_gpu_layers = 0
+            return _resolved_n_gpu_layers
+        if requested >= 0:
+            _resolved_n_gpu_layers = requested
+            return _resolved_n_gpu_layers
+    elif not gpu_offload:
+        _resolved_n_gpu_layers = 0
         return _resolved_n_gpu_layers
     vram_gb = probe_vram_gb()
     if vram_gb is None:
-        _resolved_n_gpu_layers = -1
+        _resolved_n_gpu_layers = -1 if gpu_offload else 0
         return _resolved_n_gpu_layers
     usable_gb = max(vram_gb - VRAM_HEADROOM_GB, 0.5)
     if gguf_gb <= usable_gb * 0.9:
@@ -239,6 +290,18 @@ def format_load_exception(exc: Exception) -> str:
     if not text:
         return "llama.cpp 加载模型失败，请查看 sidecar 日志。"
     lower = text.lower()
+    if (
+        "0xc000001d" in lower
+        or "illegal instruction" in lower
+        or "-1073741795" in text
+        or "status_illegal_instruction" in lower
+    ):
+        return (
+            "llama.cpp 指令集或 CUDA/CPU 版本不匹配（STATUS_ILLEGAL_INSTRUCTION）。"
+            "请运行 local_llm/server/install.bat 重装 cu124 wheel；"
+            "若无独显，设置 LOCAL_LLM_N_GPU_LAYERS=0。"
+            f"原始错误：{text}"
+        )
     if "cuda" in lower or "cublas" in lower or "libcuda" in lower or "dll" in lower:
         return (
             f"CUDA/GPU 库加载失败：{text}。"
@@ -391,6 +454,36 @@ async def trigger_load() -> dict[str, str]:
     return build_health_payload()
 
 
+def html_summary_to_plain_text(summary_html: str) -> str:
+    if not summary_html.strip():
+        return ""
+    try:
+        from lxml import html as lxml_html
+        root = lxml_html.fromstring(summary_html)
+        return " ".join(root.itertext()).replace("\xa0", " ").strip()
+    except Exception:
+        return summary_html.strip()
+
+
+@app.post("/readability")
+@app.post("/v1/readability")
+async def extract_readability(body: ReadabilityRequest) -> dict[str, str]:
+    if not body.html.strip():
+        raise HTTPException(status_code=400, detail="html 不能为空")
+    try:
+        from readability import Document
+    except ImportError as exc:
+        raise HTTPException(status_code=503, detail="readability-lxml 未安装，请运行 local_llm/server/install.bat 或 install.sh") from exc
+    doc = Document(body.html)
+    title = (doc.title() or "").strip()
+    text = html_summary_to_plain_text(doc.summary() or "")
+    return {
+        "title": title,
+        "text": text,
+        "url": body.url.strip(),
+    }
+
+
 @app.get("/v1/models")
 async def list_models() -> dict[str, Any]:
     return {
@@ -471,7 +564,27 @@ async def chat_completions(body: ChatCompletionRequest, request: Request) -> dic
     }
 
 
+def verify_inference_deps() -> None:
+    """启动前检查 llama_cpp 是否可导入"""
+    prepend_llama_runtime_path()
+    try:
+        import llama_cpp  # noqa: F401
+    except ImportError as exc:
+        sys.stderr.write(
+            "ERROR: llama_cpp is not installed. "
+            "Run local_llm/server/install.bat (Windows) or install.sh (Linux).\n"
+        )
+        raise SystemExit(1) from exc
+    except Exception as exc:
+        sys.stderr.write(
+            f"ERROR: llama_cpp failed to load: {exc}\n"
+            "Reinstall with local_llm/server/install.bat (Windows) or install.sh (Linux).\n"
+        )
+        raise SystemExit(1) from exc
+
+
 def main() -> None:
+    verify_inference_deps()
     host = read_env("LOCAL_LLM_HOST", "GEMMA4_HOST") or DEFAULT_HOST
     port = parse_int_env("LOCAL_LLM_PORT", "GEMMA4_PORT", DEFAULT_PORT)
     if not defer_model_load():

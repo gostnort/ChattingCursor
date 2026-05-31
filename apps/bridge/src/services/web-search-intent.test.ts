@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  countEarlierSameWebSearchQueriesInSession,
   extractWebSearchQuery,
   extractWebSearchUserContext,
   extractWebSearchUserIntent,
   formatWebSearchReply,
   hasWebSearchIntent,
+  resolveSessionWebSearchPassK,
 } from "./web-search-intent.js";
 
 
@@ -71,6 +73,25 @@ test("extractWebSearchUserIntent 优先行内背景", () => {
     extractWebSearchUserIntent(mixed, []),
     "古埃及太阳神拉在最早文献里叫什么?",
   );
+});
+
+
+test("extractWebSearchUserIntent 保留 Opus 改进类问题与搜索词分离", () => {
+  const mixed = "最近opus 4.8 有什么改进？ /websearch claude opus 4.8";
+  assert.equal(extractWebSearchQuery(mixed), "claude opus 4.8");
+  assert.equal(extractWebSearchUserIntent(mixed, []), "最近opus 4.8 有什么改进？");
+});
+
+
+test("resolveSessionWebSearchPassK 按会话较早同查询计数", () => {
+  const messages = [
+    { role: "user", content: "/websearch trump visit" },
+    { role: "assistant", content: "answer one" },
+    { role: "user", content: "背景 /websearch trump visit" },
+  ];
+  assert.equal(countEarlierSameWebSearchQueriesInSession("新问题 /websearch trump visit", messages), 2);
+  assert.equal(resolveSessionWebSearchPassK("新问题 /websearch trump visit", messages), 3);
+  assert.equal(resolveSessionWebSearchPassK("/websearch first query", []), 1);
 });
 
 
