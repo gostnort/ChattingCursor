@@ -46,7 +46,10 @@ type SpawnRunner = (
 
 const DEFAULT_PORT = 4322;
 const DEFAULT_HOST = "127.0.0.1";
-const README_HINT = "请在「本地 → 本地模型」安装 GGUF 权重，或运行 local_llm/server/install.bat";
+const README_HINT = "Install GGUF weights in Local Models, or run local_llm/server/install.bat (Windows) / install.sh (Linux).";
+const INFERENCE_INSTALL_HINT = process.platform === "win32"
+  ? "Run local_llm/server/install.bat"
+  : "Run local_llm/server/install.sh";
 
 
 let managedChild: ChildProcess | null = null;
@@ -209,12 +212,13 @@ export async function probeLocalLlmLoadState(
       signal: AbortSignal.timeout(4000),
     });
     if (!response.ok) {
-      return { state: "down" };
+      return { state: "down", detail: `health HTTP ${response.status}` };
     }
     const body = (await response.json()) as SidecarHealthBody;
     return parseSidecarHealthBody(body);
-  } catch {
-    return { state: "down" };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { state: "down", detail: message.trim() || "fetch failed" };
   }
 }
 
@@ -231,20 +235,48 @@ export async function probeLocalLlmApiHealth(baseUrl = resolveLocalLlmApiBaseUrl
 export const probeGemma4ApiHealth = probeLocalLlmApiHealth;
 
 
-function pythonHasInferenceDeps(executable: string): boolean {
-  if (executable.includes(path.sep) && !existsSync(executable)) {
-    return false;
-  }
-  const probe = spawnSync(
-    executable,
-    ["-c", "import llama_cpp, fastapi, uvicorn"],
-    { timeout: 30_000, windowsHide: true, encoding: "utf8" },
-  );
-  return probe.status === 0;
+function listLocalLlmPythonCandidates(): string[] {
+  const repoRoot = getRepoRootDir();
+  return [
+    path.join(repoRoot, ".venv", "Scripts", "python.exe"),
+    path.join(repoRoot, ".venv", "bin", "python3"),
+    path.join(repoRoot, ".venv", "bin", "python"),
+  ];
 }
 
 
-/** 解析 Python 可执行文件 */
+function pythonHasInferenceDeps(executable: string): boolean {
+  return probeLocalLlmInferenceDeps(executable).ok;
+}
+
+
+/** 探测 llama_cpp / fastapi / uvicorn 是否可导入 */
+export function probeLocalLlmInferenceDeps(executable?: string): { ok: true } | { ok: false; detail: string } {
+  const target = executable ?? resolveLocalLlmPythonExecutable();
+  if (target.includes(path.sep) && !existsSync(target)) {
+    return { ok: false, detail: `Python executable not found: ${target}` };
+  }
+  const runtimePaths = resolveLlamaRuntimePathEntries(target);
+  const probeEnv: NodeJS.ProcessEnv = {
+    ...process.env,
+    PATH: prependPathEntries(process.env.PATH, runtimePaths),
+  };
+  const probe = spawnSync(
+    target,
+    ["-c", "import llama_cpp, fastapi, uvicorn"],
+    { timeout: 30_000, windowsHide: true, encoding: "utf8", env: probeEnv },
+  );
+  if (probe.status === 0) {
+    return { ok: true };
+  }
+  const stderr = (probe.stderr ?? "").trim();
+  const stdout = (probe.stdout ?? "").trim();
+  const detail = stderr || stdout || `import probe exited with code ${probe.status ?? "unknown"}`;
+  return { ok: false, detail };
+}
+
+
+/** 解析 Python 可执行文件（优先 repo .venv，避免回退到无 llama_cpp 的系统 Python） */
 export function resolveLocalLlmPythonExecutable(): string {
   const fromEnv = readEnv("LOCAL_LLM_PYTHON", "GEMMA4_PYTHON");
   if (fromEnv) {
@@ -253,24 +285,65 @@ export function resolveLocalLlmPythonExecutable(): string {
   if (cachedPython) {
     return cachedPython;
   }
-  const repoRoot = getRepoRootDir();
-  const candidates = [
-    path.join(repoRoot, ".venv", "Scripts", "python.exe"),
-    path.join(repoRoot, ".venv", "bin", "python3"),
-    path.join(repoRoot, ".venv", "bin", "python"),
-    process.platform === "win32" ? "python" : "python3",
-  ];
-  for (const candidate of candidates) {
+  let fallbackExisting: string | null = null;
+  for (const candidate of listLocalLlmPythonCandidates()) {
+    if (!existsSync(candidate)) {
+      continue;
+    }
+    fallbackExisting = candidate;
     if (pythonHasInferenceDeps(candidate)) {
       cachedPython = candidate;
       return candidate;
     }
+  }
+  if (fallbackExisting) {
+    cachedPython = fallbackExisting;
+    return fallbackExisting;
   }
   return process.platform === "win32" ? "python" : "python3";
 }
 
 
 export const resolveGemma4PythonExecutable = resolveLocalLlmPythonExecutable;
+
+
+/** 解析 llama-cpp-python 运行时 DLL 目录（CUDA/cuBLAS 等） */
+export function resolveLlamaRuntimePathEntries(pythonExecutable?: string): string[] {
+  const executable = pythonExecutable ?? resolveLocalLlmPythonExecutable();
+  const normalized = path.normalize(executable);
+  let venvRoot = "";
+  const scriptsMatch = normalized.match(/[\\/]\.venv[\\/]Scripts[\\/]/i);
+  if (scriptsMatch) {
+    venvRoot = normalized.slice(0, scriptsMatch.index! + ".venv".length + 1);
+  } else {
+    const binMatch = normalized.match(/[\\/]\.venv[\\/]bin[\\/]/i);
+    if (binMatch) {
+      venvRoot = normalized.slice(0, binMatch.index! + ".venv".length + 1);
+    }
+  }
+  if (!venvRoot) {
+    return [];
+  }
+  const sitePackages = process.platform === "win32"
+    ? path.join(venvRoot, "Lib", "site-packages")
+    : path.join(venvRoot, "lib", `python${process.version.match(/^v(\d+\.\d+)/)?.[1] ?? "3.12"}`, "site-packages");
+  const candidates = [
+    path.join(sitePackages, "nvidia", "cublas", "bin"),
+    path.join(sitePackages, "nvidia", "cuda_runtime", "bin"),
+    path.join(sitePackages, "bin"),
+  ];
+  return candidates.filter((entry) => existsSync(entry));
+}
+
+
+function prependPathEntries(basePath: string | undefined, entries: string[]): string {
+  if (entries.length === 0) {
+    return basePath ?? "";
+  }
+  const separator = process.platform === "win32" ? ";" : ":";
+  const existing = basePath?.trim();
+  return existing ? `${entries.join(separator)}${separator}${existing}` : entries.join(separator);
+}
 
 
 /** 解析 sidecar 启动命令 */
@@ -298,17 +371,18 @@ export function buildLocalLlmServerEnv(options: {
   port: number;
 }): NodeJS.ProcessEnv {
   const nCtx = readEnv("LOCAL_LLM_N_CTX", "GEMMA4_N_CTX") || "8192";
-  const nGpuLayers = readEnv("LOCAL_LLM_N_GPU_LAYERS", "GEMMA4_N_GPU_LAYERS") || "-1";
+  const nGpuLayers = readEnv("LOCAL_LLM_N_GPU_LAYERS", "GEMMA4_N_GPU_LAYERS");
   const maxNew = readEnv("LOCAL_LLM_MAX_NEW_TOKENS", "GEMMA4_MAX_NEW_TOKENS") || "1024";
   const deferLoad = readEnv("LOCAL_LLM_DEFER_MODEL_LOAD", "GEMMA4_DEFER_MODEL_LOAD") || "1";
-  return {
+  const pythonExecutable = resolveLocalLlmPythonExecutable();
+  const runtimePaths = resolveLlamaRuntimePathEntries(pythonExecutable);
+  const env: NodeJS.ProcessEnv = {
     ...process.env,
     LOCAL_LLM_WEIGHTS_DIR: options.modelDir,
     LOCAL_LLM_MODEL_ID: options.modelId,
     LOCAL_LLM_HOST: options.host,
     LOCAL_LLM_PORT: String(options.port),
     LOCAL_LLM_N_CTX: nCtx,
-    LOCAL_LLM_N_GPU_LAYERS: nGpuLayers,
     LOCAL_LLM_MAX_NEW_TOKENS: maxNew,
     LOCAL_LLM_DEFER_MODEL_LOAD: deferLoad,
     GEMMA4_WEIGHTS_DIR: options.modelDir,
@@ -316,10 +390,15 @@ export function buildLocalLlmServerEnv(options: {
     GEMMA4_HOST: options.host,
     GEMMA4_PORT: String(options.port),
     GEMMA4_N_CTX: nCtx,
-    GEMMA4_N_GPU_LAYERS: nGpuLayers,
     GEMMA4_MAX_NEW_TOKENS: maxNew,
     GEMMA4_DEFER_MODEL_LOAD: deferLoad,
+    PATH: prependPathEntries(process.env.PATH, runtimePaths),
   };
+  if (nGpuLayers) {
+    env.LOCAL_LLM_N_GPU_LAYERS = nGpuLayers;
+    env.GEMMA4_N_GPU_LAYERS = nGpuLayers;
+  }
+  return env;
 }
 
 
@@ -363,12 +442,23 @@ function formatSpawnExitError(exitCode: number | null): Error {
     .filter(Boolean)
     .slice(-10)
     .join("\n");
-  const hint = "请确认已执行 pip install -r local_llm/server/requirements-inference.txt。";
-  const codeText = exitCode === null ? "未知" : String(exitCode);
+  const hint = `${INFERENCE_INSTALL_HINT}.`;
+  const codeText = exitCode === null ? "unknown" : String(exitCode);
   if (tail) {
-    return new Error(`本地推理进程已退出（code ${codeText}）。\n${tail}\n${hint}`);
+    return new Error(`Local inference process exited (code ${codeText}).\n${tail}\n${hint}`);
   }
-  return new Error(`本地推理进程已退出（code ${codeText}）。${hint}`);
+  return new Error(`Local inference process exited (code ${codeText}). ${hint}`);
+}
+
+
+function assertInferenceDepsReady(): void {
+  const python = resolveLocalLlmPythonExecutable();
+  const probe = probeLocalLlmInferenceDeps(python);
+  if (probe.ok) {
+    return;
+  }
+  console.error(`[local-llm] Inference deps check failed (${python}): ${probe.detail}. ${INFERENCE_INSTALL_HINT}`);
+  throw new Error(`llama_cpp or inference dependencies missing: ${probe.detail}. ${INFERENCE_INSTALL_HINT}`);
 }
 
 
@@ -519,6 +609,7 @@ async function waitForModelReady(timeoutMs: number): Promise<void> {
 
 
 async function spawnManagedServer(modelId: string): Promise<void> {
+  assertInferenceDepsReady();
   const model = await findInstalledLocalLlmModel(modelId);
   if (!model) {
     throw new Error(`未找到已安装本地模型：${modelId}`);
@@ -536,6 +627,12 @@ async function spawnManagedServer(modelId: string): Promise<void> {
   }
   activeModelId = modelId;
   const { host, port } = resolveHostPort();
+  const sidecarProbe = await probeLocalLlmLoadState();
+  if (sidecarProbe.state === "down") {
+    killProcessListeningOnPort(port);
+    const waitMs = process.platform === "win32" ? 500 : 200;
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
+  }
   const launch = resolveLocalLlmServerLaunch();
   const logPath = readEnv("LOCAL_LLM_LOG_PATH", "GEMMA4_LOG_PATH");
   lastSpawnStderr = "";
@@ -694,6 +791,12 @@ function killProcessListeningOnPort(port: number): boolean {
 }
 
 
+/** 当前 sidecar 正在服务的 model id（无则为 null） */
+export function getActiveLocalLlmModelId(): string | null {
+  return activeModelId;
+}
+
+
 /** 删除模型前：停止托管 sidecar 并清理端口占用，Windows 额外等待文件锁释放 */
 export async function forceStopLocalLlmSidecar(): Promise<{ unloaded: boolean }> {
   const hadManaged = managedChild !== null && managedChild.exitCode === null;
@@ -783,6 +886,11 @@ export async function getGemma4HealthStatus(): Promise<LocalLlmHealthStatus> {
 export async function maybeWarmLocalLlmOnBridgeStart(): Promise<void> {
   const flag = readEnv("LOCAL_LLM_AUTO_START_ON_BRIDGE", "GEMMA4_AUTO_START_ON_BRIDGE");
   if (flag !== "1" && flag?.toLowerCase() !== "true") {
+    return;
+  }
+  const deps = probeLocalLlmInferenceDeps();
+  if (!deps.ok) {
+    console.warn(`[local-llm] Warmup skipped: ${deps.detail}. ${INFERENCE_INSTALL_HINT}`);
     return;
   }
   const { listInstalledLocalLlmModels } = await import("./local-llm-store.js");

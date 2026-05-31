@@ -1,11 +1,9 @@
 # local_llm 本地推理（llama.cpp GGUF sidecar）
 fastapi>=0.115.0
 uvicorn[standard]>=0.32.0
-llama-cpp-python>=0.3.0
 huggingface-hub>=0.26.0
 readability-lxml>=0.8.1
 
-# Windows CUDA（可选，需匹配本机 CUDA 版本）：
-#   pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124
-# Linux CUDA 示例：
-#   CMAKE_ARGS="-DLLAMA_CUDA=on" pip install llama-cpp-python --force-reinstall --no-cache-dir
+# llama-cpp-python 不在此列出：PyPI 无预编译 wheel，会触发源码编译失败。
+# 请运行 local_llm/server/install.sh（Linux/macOS）或 install.bat（Windows），
+# 脚本会按平台安装 CPU / CUDA / Metal 预编译 wheel。

@@ -51,11 +51,14 @@ function Ensure-PythonVenv {
   } else {
     Write-Host "Python venv 已存在: $(Join-Path $Root '.venv')"
   }
-  $localLlmReq = Join-Path $Root "local_llm\server\requirements-inference.txt"
-  if (Test-Path -LiteralPath $localLlmReq) {
-    Write-Step "安装 local_llm 本地推理依赖（llama-cpp-python、fastapi 等）..."
-    & $venvPython -m pip install -r $localLlmReq
-    Write-Host "  local_llm 使用 GGUF + llama.cpp；在 Web「本地模型」页安装权重，或运行 local_llm/server/install.bat"
+  $localLlmInstall = Join-Path $Root "local_llm\server\install.bat"
+  if (Test-Path -LiteralPath $localLlmInstall) {
+    Write-Step "Installing local_llm inference deps (llama-cpp-python, fastapi, etc.)..."
+    & cmd /c $localLlmInstall
+    if ($LASTEXITCODE -ne 0) {
+      exit $LASTEXITCODE
+    }
+    Write-Host "  local_llm uses GGUF + llama.cpp; install weights in Web Local Models"
   }
 }
 
@@ -97,7 +100,7 @@ if (-not $SkipCloudflared) {
 
 Write-Host ""
 Write-Host "安装完成。"
-Write-Host "local_llm 可选: 运行 local_llm\server\install.bat 安装推理依赖（在 Web「本地模型」页安装 GGUF）"
+Write-Host "local_llm optional: run local_llm\server\install.bat for inference deps (install GGUF weights in Web Local Models)"
 Write-Host "下一步: 双击 run.bat 或运行 .\run.bat"
 $homeHint = if ($env:USERPROFILE) { "$env:USERPROFILE\.chattingcursor" } else { "~/.chattingcursor" }
 Write-Host "手机远程: 默认 token 在 ${homeHint}\chattingcursor-token.txt；可放进云盘或于配置页改路径。"

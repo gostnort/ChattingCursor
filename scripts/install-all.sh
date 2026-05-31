@@ -22,7 +22,7 @@ test_node_ready() {
   if ! command -v node >/dev/null 2>&1; then
     return 1
   fi
-  local major
+  local majo
   major="$(node -p "process.versions.node.split('.')[0]")"
   [[ "${major}" -ge 20 ]]
 }
@@ -52,10 +52,10 @@ ensure_python_venv() {
   else
     echo "Python venv 已存在: ${ROOT}/.venv"
   fi
-  if [[ -f "${ROOT}/local_llm/server/requirements-inference.txt" ]]; then
-    log_step "安装 local_llm 本地推理依赖（llama-cpp-python、fastapi 等）..."
-    "${venv_py}" -m pip install -r "${ROOT}/local_llm/server/requirements-inference.txt"
-    echo "  local_llm 使用 GGUF + llama.cpp；在 Web「本地模型」页安装权重，或运行 local_llm/server/install.sh"
+  if [[ -f "${ROOT}/local_llm/server/install.sh" ]]; then
+    log_step "Installing local_llm inference deps (llama-cpp-python, fastapi, etc.)..."
+    bash "${ROOT}/local_llm/server/install.sh"
+    echo "  local_llm uses GGUF + llama.cpp; install weights in Web Local Models"
   fi
 }
 
@@ -94,7 +94,7 @@ fi
 
 echo ""
 echo "安装完成。"
-echo "local_llm 可选: ./local_llm/server/install.sh 安装推理依赖（在 Web「本地模型」页安装 GGUF）"
+echo "local_llm optional: run ./local_llm/server/install.sh for inference deps (install GGUF weights in Web Local Models)"
 echo "下一步: ./run.sh"
 echo "手机远程: 默认 token 在 ~/.chattingcursor/chattingcursor-token.txt；可放进云盘或于配置页改路径。"
 echo ""

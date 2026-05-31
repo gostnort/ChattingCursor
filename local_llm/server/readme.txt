@@ -1,7 +1,8 @@
 local_llm GGUF 推理 sidecar（llama.cpp / llama-cpp-python）
 
-安装依赖：
-  pip install -r local_llm/server/requirements-inference.txt
+安装依赖（含 llama-cpp-python 预编译 wheel，按 CPU/CUDA/Metal 自动选择）：
+  bash local_llm/server/install.sh        # Linux / macOS
+  local_llm\server\install.bat            # Windows
 
 硬件自检：
   python local_llm/server/check_hardware.py

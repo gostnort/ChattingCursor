@@ -53,7 +53,7 @@ def run_quick() -> int:
         import llama_cpp  # noqa: F401
     except ImportError as exc:
         print(f"FAIL: 无法 import llama_cpp: {exc}")
-        print("请先: pip install -r local_llm/server/requirements-inference.txt")
+        print("请先: bash local_llm/server/install.sh 或 local_llm\\server\\install.bat")
         return 1
     wdir = weights_dir()
     gguf = find_gguf(wdir)

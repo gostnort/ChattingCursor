@@ -93,7 +93,7 @@ def probe_nvidia_smi() -> tuple[str | None, float | None]:
 
 
 def check_gpu() -> tuple[bool, str]:
-    llama_msg = "未安装 llama-cpp-python（pip install -r local_llm/server/requirements-inference.txt）"
+    llama_msg = "未安装 llama-cpp-python（运行 local_llm/server/install.sh 或 install.bat）"
     try:
         import llama_cpp  # noqa: F401
         llama_msg = "llama-cpp-python 已安装"
