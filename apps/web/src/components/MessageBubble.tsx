@@ -9,6 +9,7 @@ interface MessageBubbleProps {
   onSpeakToggle: (key: string, text: string) => void;
   isSpeaking: boolean;
   agentLabel?: string;
+  agentLabelTitle?: string;
   isFocused?: boolean;
   onAttachImage?: (file: File) => void;
   imageAttachBusy?: boolean;
@@ -22,6 +23,7 @@ export function MessageBubble({
   onSpeakToggle,
   isSpeaking,
   agentLabel = "Agent",
+  agentLabelTitle,
   isFocused = false,
   onAttachImage,
   imageAttachBusy = false,
@@ -29,6 +31,7 @@ export function MessageBubble({
 }: MessageBubbleProps) {
   const isUser = message.role === "user";
   const label = isUser ? "" : agentLabel;
+  const labelTitle = isUser ? "" : (agentLabelTitle ?? agentLabel);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
 
@@ -98,8 +101,8 @@ export function MessageBubble({
                 <button
                   type="button"
                   className={`bubble-model-pill${imageAttachBusy ? " bubble-model-pill-busy" : ""}`}
-                  title={imageAttachBusy ? `${label}…` : label}
-                  aria-label={imageAttachBusy ? `${label} busy` : label}
+                  title={imageAttachBusy ? `${labelTitle}…` : labelTitle}
+                  aria-label={imageAttachBusy ? `${labelTitle} busy` : labelTitle}
                   disabled={imageAttachBusy || imageAttachDisabled}
                   onClick={handleModelPillClick}
                 >
@@ -109,7 +112,7 @@ export function MessageBubble({
                 </button>
               </>
             ) : (
-              <div className="bubble-model-pill bubble-model-pill-static" title={label} aria-hidden="true">
+              <div className="bubble-model-pill bubble-model-pill-static" title={labelTitle} aria-hidden="true">
                 <span className="bubble-model-pill-label">{label}</span>
               </div>
             )}

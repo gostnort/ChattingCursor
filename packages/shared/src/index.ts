@@ -65,6 +65,19 @@ export {
 } from "./local-llm-errors.js";
 export type { LocalLlmErrorKind } from "./local-llm-errors.js";
 
+export {
+  buildModelDisplayAuthorList,
+  buildModelDisplayAuthorListFromModelIds,
+  extractLocalLlmAuthorFromModelId,
+  formatAuthorDisplayName,
+  formatModelDisplayLabel,
+  formatModelDisplayLabelFromId,
+  formatModelDisplayName,
+  formatModelDropdownLabel,
+  formatModelDropdownLabelFromId,
+  formatModelSlugDisplayName,
+} from "./model-display-name.js";
+
 export { compareAlphaDescNumeric, sortAlphaDescNumeric } from "./alpha-desc-numeric-sort.js";
 
 export {

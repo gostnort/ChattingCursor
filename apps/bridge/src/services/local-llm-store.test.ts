@@ -379,3 +379,39 @@ test("finalizeLocalLlmInstall 写入 model.json 后出现在已安装列表", as
   assert.equal(models[0]?.modelSlug, modelSlug);
   assert.equal(existsSync(path.join(targetDir, ".cache")), false);
 });
+
+
+test("listInstalledLocalLlmModels 读取带 UTF-8 BOM 的 model.json", async (t) => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "cc-local-llm-bom-"));
+  const previous = process.env.CHATTINGCURSOR_LOCAL_LLM_DIR;
+  t.after(async () => {
+    process.env.CHATTINGCURSOR_LOCAL_LLM_DIR = previous ?? "";
+    await import("node:fs/promises").then((fs) => fs.rm(tempDir, { recursive: true, force: true }));
+  });
+  process.env.CHATTINGCURSOR_LOCAL_LLM_DIR = tempDir;
+  const author = "test-delete-tmp";
+  const modelSlug = "throwaway-model";
+  const modelId = buildLocalLlmModelId(author, modelSlug);
+  const modelDirPath = path.join(tempDir, author, modelSlug);
+  await mkdir(modelDirPath, { recursive: true });
+  await writeFile(path.join(modelDirPath, "weights.gguf"), "data");
+  const manifest = JSON.stringify({
+    id: modelId,
+    author,
+    modelSlug,
+    repoId: `${author}/${modelSlug}`,
+    displayName: modelSlug,
+    ggufGroupKey: "test",
+    filenames: ["weights.gguf"],
+    defaultPrompt: "test",
+    installedAt: new Date().toISOString(),
+  });
+  await writeFile(path.join(modelDirPath, "model.json"), `\uFEFF${manifest}`);
+  const authors = await listLocalLlmAuthors();
+  assert.ok(authors.includes(author));
+  const models = await listInstalledLocalLlmModels();
+  assert.equal(models.length, 1);
+  assert.equal(models[0]?.id, modelId);
+  await deleteInstalledLocalLlmModel(modelId);
+  assert.equal(existsSync(modelDirPath), false);
+});

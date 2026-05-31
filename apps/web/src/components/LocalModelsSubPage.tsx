@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type MouseEvent } from "react";
 import { sortAlphaDescNumeric } from "@chatting-cursor/shared";
 import {
   addLocalLlmAuthor,
   deleteLocalLlmModel,
+  fetchBridgeHealth,
   fetchLocalLlmAuthors,
   fetchLocalLlmHfFiles,
   fetchLocalLlmHfModels,
@@ -14,6 +15,8 @@ import {
   type HfModelSummary,
   type InstalledLocalModel,
 } from "../api/bridge";
+import { formatBridgeFetchError, normalizeBridgeUrl } from "../bridgeSettings";
+import { buildPath } from "../routing";
 
 
 interface LocalModelsSubPageProps {
@@ -23,6 +26,8 @@ interface LocalModelsSubPageProps {
 
 /** 本地模型管理：HF 浏览、安装、删除、defaultPrompt */
 export function LocalModelsSubPage({ bridgeUrl }: LocalModelsSubPageProps) {
+  const normalizedBridgeUrl = useMemo(() => normalizeBridgeUrl(bridgeUrl), [bridgeUrl]);
+  const configPath = useMemo(() => buildPath({ mode: "local", localSub: "config" }), []);
   const [authors, setAuthors] = useState<string[]>([]);
   const [newAuthor, setNewAuthor] = useState("");
   const [selectedAuthor, setSelectedAuthor] = useState("");
@@ -43,6 +48,14 @@ export function LocalModelsSubPage({ bridgeUrl }: LocalModelsSubPageProps) {
   const [deleting, setDeleting] = useState(false);
   const [deleteToast, setDeleteToast] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; label: string } | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [bridgeReachable, setBridgeReachable] = useState<boolean | null>(null);
+
+
+  const formatError = useCallback(
+    (err: unknown): string => formatBridgeFetchError(normalizedBridgeUrl, err),
+    [normalizedBridgeUrl],
+  );
 
 
   const sortedAuthors = useMemo(
@@ -85,7 +98,7 @@ export function LocalModelsSubPage({ bridgeUrl }: LocalModelsSubPageProps) {
 
 
   const refreshInstalled = useCallback(async (preferredId?: string) => {
-    const result = await fetchLocalLlmInstalled(bridgeUrl);
+    const result = await fetchLocalLlmInstalled(normalizedBridgeUrl);
     setInstalled(result.models);
     if (result.models.length === 0) {
       setSelectedInstalledId("");
@@ -106,7 +119,15 @@ export function LocalModelsSubPage({ bridgeUrl }: LocalModelsSubPageProps) {
     }
     setSelectedInstalledId("");
     setDefaultPrompt("");
-  }, [bridgeUrl, selectedInstalledId]);
+  }, [normalizedBridgeUrl, selectedInstalledId]);
+
+
+  const pingBridge = useCallback(async (): Promise<boolean> => {
+    const health = await fetchBridgeHealth(normalizedBridgeUrl);
+    const reachable = health !== null;
+    setBridgeReachable(reachable);
+    return reachable;
+  }, [normalizedBridgeUrl]);
 
 
   const loadGgufGroups = useCallback(async (repoId: string): Promise<void> => {
@@ -118,18 +139,18 @@ export function LocalModelsSubPage({ bridgeUrl }: LocalModelsSubPageProps) {
     setGgufGroupsLoading(true);
     setError(null);
     try {
-      const result = await fetchLocalLlmHfFiles(bridgeUrl, repoId);
+      const result = await fetchLocalLlmHfFiles(normalizedBridgeUrl, repoId);
       const groups = sortAlphaDescNumeric(result.groups, (group) => group.displayLabel);
       setGgufGroups(groups);
       setSelectedGroupKey(groups[0]?.groupKey ?? "");
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(formatError(err));
       setGgufGroups([]);
       setSelectedGroupKey("");
     } finally {
       setGgufGroupsLoading(false);
     }
-  }, [bridgeUrl]);
+  }, [formatError, normalizedBridgeUrl]);
 
 
   const loadHfModels = useCallback(async (author: string): Promise<void> => {
@@ -140,19 +161,25 @@ export function LocalModelsSubPage({ bridgeUrl }: LocalModelsSubPageProps) {
     setHfModelsLoading(true);
     setError(null);
     try {
-      const result = await fetchLocalLlmHfModels(bridgeUrl, author);
+      const result = await fetchLocalLlmHfModels(normalizedBridgeUrl, author);
       setHfModels(result.models);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(formatError(err));
       setHfModels([]);
     } finally {
       setHfModelsLoading(false);
     }
-  }, [bridgeUrl]);
+  }, [formatError, normalizedBridgeUrl]);
 
 
   useEffect(() => {
-    void fetchLocalLlmAuthors(bridgeUrl)
+    setBridgeReachable(null);
+    void pingBridge().catch(() => setBridgeReachable(false));
+  }, [pingBridge]);
+
+
+  useEffect(() => {
+    void fetchLocalLlmAuthors(normalizedBridgeUrl)
       .then((result) => {
         const nextAuthors = sortAlphaDescNumeric(result.authors, (author) => author);
         setAuthors(nextAuthors);
@@ -161,12 +188,14 @@ export function LocalModelsSubPage({ bridgeUrl }: LocalModelsSubPageProps) {
         }
       })
       .catch((err: unknown) => {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(formatError(err));
+        setBridgeReachable(false);
       });
     void refreshInstalled().catch((err: unknown) => {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(formatError(err));
+      setBridgeReachable(false);
     });
-  }, [bridgeUrl, refreshInstalled, selectedAuthor]);
+  }, [formatError, normalizedBridgeUrl, refreshInstalled, selectedAuthor]);
 
 
   useEffect(() => {
@@ -215,12 +244,12 @@ export function LocalModelsSubPage({ bridgeUrl }: LocalModelsSubPageProps) {
     setBusy(true);
     setError(null);
     try {
-      const result = await addLocalLlmAuthor(bridgeUrl, name);
+      const result = await addLocalLlmAuthor(normalizedBridgeUrl, name);
       setAuthors(sortAlphaDescNumeric(result.authors, (author) => author));
       setSelectedAuthor(name);
       setNewAuthor("");
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(formatError(err));
     } finally {
       setBusy(false);
     }
@@ -238,7 +267,7 @@ export function LocalModelsSubPage({ bridgeUrl }: LocalModelsSubPageProps) {
     setInstallPercent(null);
     setInstallIndeterminate(true);
     try {
-      const { jobId } = await installLocalLlmModel(bridgeUrl, {
+      const { jobId } = await installLocalLlmModel(normalizedBridgeUrl, {
         author: selectedAuthor,
         repoId: selectedRepo,
         ggufGroupKey: selectedGgufGroup.groupKey,
@@ -253,7 +282,7 @@ export function LocalModelsSubPage({ bridgeUrl }: LocalModelsSubPageProps) {
       while (Date.now() < deadline) {
         let status;
         try {
-          status = await fetchLocalLlmInstallStatus(bridgeUrl, jobId);
+          status = await fetchLocalLlmInstallStatus(normalizedBridgeUrl, jobId);
           notFoundRetries = 0;
         } catch (pollError: unknown) {
           const message = pollError instanceof Error ? pollError.message : String(pollError);
@@ -288,7 +317,7 @@ export function LocalModelsSubPage({ bridgeUrl }: LocalModelsSubPageProps) {
         await new Promise((resolve) => setTimeout(resolve, 5000));
       }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(formatError(err));
       setInstallProgress(null);
       setInstallPercent(null);
       setInstallIndeterminate(false);
@@ -305,6 +334,7 @@ export function LocalModelsSubPage({ bridgeUrl }: LocalModelsSubPageProps) {
       return;
     }
     const modelLabel = installed.find((item) => item.id === deletingId)?.label ?? deletingId;
+    setDeleteError(null);
     setDeleteConfirm({ id: deletingId, label: modelLabel });
   };
 
@@ -314,19 +344,34 @@ export function LocalModelsSubPage({ bridgeUrl }: LocalModelsSubPageProps) {
       return;
     }
     setDeleteConfirm(null);
+    setDeleteError(null);
   };
 
 
-  const confirmDeleteInstalled = async (): Promise<void> => {
-    const deletingId = deleteConfirm?.id;
+  const handleDeleteOverlayClick = (event: MouseEvent<HTMLDivElement>): void => {
+    if (event.target !== event.currentTarget) {
+      return;
+    }
+    closeDeleteConfirm();
+  };
+
+
+  const confirmDeleteInstalled = async (modelId: string): Promise<void> => {
+    const deletingId = modelId.trim();
     if (!deletingId) {
+      setDeleteError("未选择要删除的模型");
       return;
     }
     setDeleting(true);
     setError(null);
+    setDeleteError(null);
     setDeleteToast(null);
     try {
-      await deleteLocalLlmModel(bridgeUrl, deletingId);
+      const reachable = bridgeReachable ?? await pingBridge();
+      if (!reachable) {
+        throw new Error("Failed to fetch");
+      }
+      await deleteLocalLlmModel(normalizedBridgeUrl, deletingId);
       setDeleteConfirm(null);
       setSelectedInstalledId("");
       setDefaultPrompt("");
@@ -336,7 +381,9 @@ export function LocalModelsSubPage({ bridgeUrl }: LocalModelsSubPageProps) {
       }
       setDeleteToast("已删除");
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : String(err));
+      const message = formatError(err);
+      setDeleteError(message);
+      setError(message);
     } finally {
       setDeleting(false);
     }
@@ -350,10 +397,10 @@ export function LocalModelsSubPage({ bridgeUrl }: LocalModelsSubPageProps) {
     setBusy(true);
     setError(null);
     try {
-      await patchLocalLlmDefaultPrompt(bridgeUrl, selectedInstalledId, defaultPrompt);
+      await patchLocalLlmDefaultPrompt(normalizedBridgeUrl, selectedInstalledId, defaultPrompt);
       await refreshInstalled();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(formatError(err));
     } finally {
       setBusy(false);
     }
@@ -364,6 +411,15 @@ export function LocalModelsSubPage({ bridgeUrl }: LocalModelsSubPageProps) {
     <div className="local-sub-panel local-models-page">
       <h2>本地模型</h2>
       <p className="config-hint">从 Hugging Face 浏览并安装 GGUF；先选仓库，再选量化/分片，点击 + 仅下载所选分组。</p>
+      {bridgeReachable === false && (
+        <p className="config-error" role="alert">
+          无法连接 Bridge（{normalizedBridgeUrl}），请确认 run.bat 已启动。
+          {" "}
+          <a href={configPath}>前往配置</a>
+          {" "}
+          检查 Bridge URL。
+        </p>
+      )}
       {error && <p className="config-error" role="alert">{error}</p>}
       {deleteToast && <p className="config-save-toast" role="status">{deleteToast}</p>}
       {installProgress && (
@@ -520,20 +576,30 @@ export function LocalModelsSubPage({ bridgeUrl }: LocalModelsSubPageProps) {
         <div
           className="local-models-delete-overlay"
           role="presentation"
-          onClick={closeDeleteConfirm}
+          onClick={handleDeleteOverlayClick}
         >
           <div
             className="local-models-delete-dialog"
             role="dialog"
             aria-modal="true"
             aria-labelledby="local-models-delete-title"
-            onClick={(event) => event.stopPropagation()}
           >
             <h4 id="local-models-delete-title">确认删除</h4>
             <p>
               确定删除「{deleteConfirm.label}」及全部权重文件？
               若模型正在运行或下载，将先卸载并取消安装。
             </p>
+            {deleteError && (
+              <p className="local-models-delete-error" role="alert">
+                {deleteError}
+                {/failed to fetch|无法连接 Bridge/i.test(deleteError) && (
+                  <>
+                    {" "}
+                    <a href={configPath}>前往配置</a>
+                  </>
+                )}
+              </p>
+            )}
             <div className="local-models-delete-actions">
               <button
                 type="button"
@@ -546,11 +612,11 @@ export function LocalModelsSubPage({ bridgeUrl }: LocalModelsSubPageProps) {
               <button
                 type="button"
                 className="local-models-remove-btn local-models-delete-yes"
-                onClick={() => void confirmDeleteInstalled()}
+                onClick={() => void confirmDeleteInstalled(deleteConfirm.id)}
                 disabled={deleting}
                 aria-busy={deleting}
               >
-                {deleting ? "…" : "是"}
+                {deleting ? "删除中..." : "是"}
               </button>
             </div>
           </div>

@@ -439,6 +439,11 @@ body {
   color: #c9d1d9;
 }
 
+.local-models-delete-error {
+  margin-top: 0.75rem !important;
+  color: #f85149;
+}
+
 .local-models-delete-actions {
   display: flex;
   justify-content: flex-end;
@@ -915,7 +920,7 @@ body {
 
   text-overflow: ellipsis;
 
-  max-width: 6rem;
+  max-width: 14rem;
 
 }
 

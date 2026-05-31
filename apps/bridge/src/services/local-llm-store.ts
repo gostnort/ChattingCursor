@@ -344,9 +344,14 @@ function manifestPath(author: string, modelSlug: string): string {
 }
 
 
+function stripUtf8Bom(raw: string): string {
+  return raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw;
+}
+
+
 async function readJsonFile<T>(filePath: string): Promise<T | null> {
   try {
-    const raw = await readFile(filePath, "utf8");
+    const raw = stripUtf8Bom(await readFile(filePath, "utf8"));
     return JSON.parse(raw) as T;
   } catch {
     return null;
@@ -405,12 +410,32 @@ export async function addLocalLlmAuthor(author: string): Promise<string[]> {
 }
 
 
+/** 扫描 local_llm 下全部有效作者目录名（不要求已有 model.json） */
+async function listValidAuthorDirNames(root: string): Promise<string[]> {
+  let entries: Dirent[] = [];
+  try {
+    entries = await readdir(root, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  return entries
+    .filter((entry) => entry.isDirectory() && isValidLocalLlmAuthorName(entry.name))
+    .map((entry) => entry.name);
+}
+
+
 /** 扫描已安装模型（author/model_slug/model.json） */
 export async function listInstalledLocalLlmModels(): Promise<LocalLlmInstalledModel[]> {
   await maybeMigrateLegacyGemma4Weights();
   const root = getLocalLlmRootDir();
   await mkdir(root, { recursive: true });
-  const authors = await listLocalLlmAuthors();
+  const authors = sortAlphaDescNumeric(
+    [...new Set([
+      ...(await listLocalLlmAuthors()),
+      ...(await listValidAuthorDirNames(root)),
+    ])],
+    (item) => item,
+  );
   const models: LocalLlmInstalledModel[] = [];
   for (const author of authors) {
     const authorPath = path.join(root, author);

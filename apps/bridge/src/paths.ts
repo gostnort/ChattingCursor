@@ -55,6 +55,16 @@ export function getWebSearchStatePath(): string {
 }
 
 
+/** /websearch 抓取结果缓存目录（测试可通过 CHATTINGCURSOR_WEBSEARCH_CACHE_DIR 覆盖） */
+export function getWebSearchCacheDir(): string {
+  const override = process.env.CHATTINGCURSOR_WEBSEARCH_CACHE_DIR?.trim();
+  if (override) {
+    return override;
+  }
+  return path.join(getChattingCursorHomeDir(), "web-search-cache");
+}
+
+
 /** 仓库根目录（用于 Knowledge/、local_llm/ 推理代码与权重） */
 export function getRepoRootDir(): string {
   const override = process.env.CHATTINGCURSOR_REPO_ROOT?.trim();

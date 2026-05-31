@@ -15,21 +15,61 @@ if command -v cloudflared >/dev/null 2>&1 && [[ "${FORCE}" -eq 0 ]]; then
   exit 0
 fi
 
+install_with_apt() {
+  if ! command -v apt-get >/dev/null 2>&1; then
+    return 1
+  fi
+  echo "通过 apt 安装 cloudflared..."
+  # 默认 apt 源通常不含 cloudflared，先添加 Cloudflare 官方源
+  if command -v curl >/dev/null 2>&1; then
+    if sudo mkdir -p --mode=0755 /usr/share/keyrings && \
+       curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | sudo tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null; then
+      echo 'deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main' | \
+        sudo tee /etc/apt/sources.list.d/cloudflared.list >/dev/null
+    fi
+  fi
+  if sudo apt-get update -qq && sudo apt-get install -y cloudflared; then
+    return 0
+  fi
+  echo "apt 安装 cloudflared 失败，将尝试其他方式..."
+  return 1
+}
+
+
+install_with_dnf() {
+  if ! command -v dnf >/dev/null 2>&1; then
+    return 1
+  fi
+  echo "通过 dnf 安装 cloudflared..."
+  if sudo dnf install -y cloudflared; then
+    return 0
+  fi
+  echo "dnf 安装 cloudflared 失败，将尝试其他方式..."
+  return 1
+}
+
+
+install_with_brew() {
+  if ! command -v brew >/dev/null 2>&1; then
+    return 1
+  fi
+  echo "通过 Homebrew 安装 cloudflared..."
+  if brew install cloudflared; then
+    return 0
+  fi
+  echo "Homebrew 安装 cloudflared 失败，将尝试其他方式..."
+  return 1
+}
+
+
 install_with_package_manager() {
-  if command -v apt-get >/dev/null 2>&1; then
-    echo "通过 apt 安装 cloudflared..."
-    sudo apt-get update -qq
-    sudo apt-get install -y cloudflared
+  if install_with_apt; then
     return 0
   fi
-  if command -v dnf >/dev/null 2>&1; then
-    echo "通过 dnf 安装 cloudflared..."
-    sudo dnf install -y cloudflared
+  if install_with_dnf; then
     return 0
   fi
-  if command -v brew >/dev/null 2>&1; then
-    echo "通过 Homebrew 安装 cloudflared..."
-    brew install cloudflared
+  if install_with_brew; then
     return 0
   fi
   return 1

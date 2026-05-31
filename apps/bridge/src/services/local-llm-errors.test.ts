@@ -31,6 +31,21 @@ test("classifyLocalLlmError 识别 CUDA 缺失", () => {
 });
 
 
+test("classifyLocalLlmError 识别 llama.cpp 二进制不匹配", () => {
+  assert.equal(
+    classifyLocalLlmError("[WinError -1073741795] Windows Error 0xc000001d"),
+    "binary_mismatch",
+  );
+});
+
+
+test("formatLocalLlmError 映射 STATUS_ILLEGAL_INSTRUCTION", () => {
+  const formatted = formatLocalLlmError("OSError: [WinError -1073741795] Windows Error 0xc000001d");
+  assert.match(formatted, /指令集|CUDA\/CPU|0xc000001d/i);
+  assert.match(formatted, /install\.bat|cu124/i);
+});
+
+
 test("classifyLocalLlmError 识别 sidecar 未运行", () => {
   assert.equal(
     classifyLocalLlmError("推理 sidecar 未运行，无法加载模型"),
@@ -61,6 +76,13 @@ test("formatLocalLlmError 为英文 CUDA 错误补充中文说明", () => {
   const formatted = formatLocalLlmError("Failed to load CUDA library");
   assert.match(formatted, /CUDA/);
   assert.match(formatted, /LOCAL_LLM_N_GPU_LAYERS=0/);
+});
+
+
+test("formatLocalLlmError 将 fetch failed 映射为 sidecar 不可达", () => {
+  const formatted = formatLocalLlmError("fetch failed");
+  assert.match(formatted, /sidecar|4322/i);
+  assert.match(formatted, /fetch failed|无响应/i);
 });
 
 

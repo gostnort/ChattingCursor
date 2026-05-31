@@ -24,6 +24,8 @@ async function main(): Promise<void> {
     origin: (origin, callback) => {
       callback(null, isOriginAllowed(origin, config.corsOrigins));
     },
+    // 浏览器从 Vite(43210) 跨域调用 DELETE/PATCH 时会先发 OPTIONS 预检
+    methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   });
   await app.register(multipart, {
     limits: {

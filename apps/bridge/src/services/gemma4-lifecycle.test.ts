@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -14,6 +15,7 @@ import {
   probeLocalLlmLoadState,
   resolveLocalLlmApiBaseUrl,
   resolveLocalLlmServerLaunch,
+  resolveLlamaRuntimePathEntries,
   setLocalLlmSpawnRunnerForTests,
   stopManagedLocalLlm,
   triggerLocalLlmModelLoad,
@@ -98,6 +100,23 @@ test("buildLocalLlmServerEnv 传递权重目录与模型 id", () => {
   assert.equal(env.LOCAL_LLM_MODEL_ID, "local-llm/unsloth/test");
   assert.equal(env.LOCAL_LLM_DEFER_MODEL_LOAD, "1");
   assert.equal(env.GEMMA4_WEIGHTS_DIR, "/tmp/local");
+  assert.equal(env.LOCAL_LLM_N_GPU_LAYERS, undefined);
+});
+
+
+test("resolveLlamaRuntimePathEntries 拼接 venv CUDA DLL 目录", () => {
+  const repoRoot = path.resolve(path.join(path.dirname(getLocalLlmServerScriptPath()), "..", ".."));
+  const fakePython = path.join(repoRoot, ".venv", "Scripts", "python.exe");
+  const entries = resolveLlamaRuntimePathEntries(fakePython);
+  if (process.platform === "win32") {
+    const sitePackages = path.join(repoRoot, ".venv", "Lib", "site-packages");
+    for (const suffix of ["nvidia/cublas/bin", "nvidia/cuda_runtime/bin", "bin"]) {
+      const candidate = path.join(sitePackages, ...suffix.split("/"));
+      if (existsSync(candidate)) {
+        assert.ok(entries.includes(candidate));
+      }
+    }
+  }
 });
 
 

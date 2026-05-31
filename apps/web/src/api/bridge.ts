@@ -798,6 +798,18 @@ export async function patchLocalLlmDefaultPrompt(
 }
 
 
+/** 停止本地 LLM sidecar，释放 VRAM（已停止时不报错） */
+export async function stopLocalLlmSidecar(
+  bridgeUrl: string,
+): Promise<{ ok: boolean; unloaded: boolean }> {
+  const response = await fetch(`${bridgeUrl}/local-llm/stop`, { method: "POST" });
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, `停止本地模型失败 (${response.status})`));
+  }
+  return response.json() as Promise<{ ok: boolean; unloaded: boolean }>;
+}
+
+
 /** 验证当前口令是否有效 */
 export async function verifyBridgeToken(bridgeUrl: string, token: string): Promise<AuthVerifyResponse> {
   const response = await fetch(`${bridgeUrl}/auth/verify`, {

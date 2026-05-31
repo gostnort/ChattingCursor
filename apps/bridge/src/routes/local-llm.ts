@@ -14,7 +14,11 @@ import {
   startLocalLlmInstall,
   updateLocalLlmDefaultPrompt,
 } from "../services/local-llm-store.js";
-import { forceStopLocalLlmSidecar } from "../services/local-llm-lifecycle.js";
+import {
+  forceStopLocalLlmSidecar,
+  getActiveLocalLlmModelId,
+  stopManagedLocalLlm,
+} from "../services/local-llm-lifecycle.js";
 
 
 function readStringField(body: unknown, key: string): string {
@@ -135,6 +139,13 @@ export async function registerLocalLlmRoutes(app: FastifyInstance): Promise<void
   });
 
 
+  app.post("/local-llm/stop", async (_request, reply) => {
+    const wasRunning = getActiveLocalLlmModelId() !== null;
+    await stopManagedLocalLlm();
+    return reply.send({ ok: true, unloaded: wasRunning });
+  });
+
+
   app.get("/local-llm/installed", async (_request, reply) => {
     const models = await listInstalledLocalLlmModels();
     return reply.send({
@@ -166,7 +177,10 @@ export async function registerLocalLlmRoutes(app: FastifyInstance): Promise<void
       if (model) {
         installCancelled = await cancelActiveInstallsForModel(model.author, model.modelSlug);
       }
-      const { unloaded: sidecarStopped } = await forceStopLocalLlmSidecar();
+      let sidecarStopped = false;
+      if (getActiveLocalLlmModelId() === modelId) {
+        sidecarStopped = (await forceStopLocalLlmSidecar()).unloaded;
+      }
       await deleteInstalledLocalLlmModel(modelId);
       return reply.send({
         ok: true,
