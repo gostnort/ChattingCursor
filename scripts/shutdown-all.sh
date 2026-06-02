@@ -9,6 +9,8 @@ source "${SCRIPT_DIR}/sh/common.sh"
 source "${SCRIPT_DIR}/sh/resolve-token-sync-dir.sh"
 # shellcheck source=sh/token-file-pids.sh
 source "${SCRIPT_DIR}/sh/token-file-pids.sh"
+# shellcheck source=sh/token-file-name.sh
+source "${SCRIPT_DIR}/sh/token-file-name.sh"
 
 BRIDGE_PORT=4321
 WEB_PORT=43210
@@ -28,7 +30,7 @@ done
 
 ROOT="$(chattingcursor_repo_root)"
 TOKEN_SYNC_DIR="$(resolve_token_sync_dir "")"
-TOKEN_FILE="${TOKEN_SYNC_DIR}/chattingcursor-token.txt"
+TOKEN_FILE="$(chattingcursor_token_file_path "${TOKEN_SYNC_DIR}")"
 stop_process_safe() {
   local pid="$1"
   local label="$2"

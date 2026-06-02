@@ -145,10 +145,12 @@ export class HistoryStore {
   }
 
 
-  /** 搜索本地历史文本 */
-  async search(query: string): Promise<Array<{ file: string; snippet: string; line?: number }>> {
-    const keyword = query.trim().toLowerCase();
-    if (!keyword) {
+  /** 搜索本地历史文本（支持多关键词 OR 匹配） */
+  async search(query: string | string[]): Promise<Array<{ file: string; snippet: string; line?: number }>> {
+    const keywords = (Array.isArray(query) ? query : [query])
+      .map((term) => term.trim().toLowerCase())
+      .filter((term) => term.length >= 2);
+    if (keywords.length === 0) {
       return [];
     }
     await this.cleanupOldFiles();
@@ -174,12 +176,21 @@ export class HistoryStore {
       for (let index = 0; index < lines.length; index++) {
         const line = lines[index];
         const lower = line.toLowerCase();
-        const matchIndex = lower.indexOf(keyword);
+        let matchedKeyword = "";
+        let matchIndex = -1;
+        for (const keyword of keywords) {
+          const foundAt = lower.indexOf(keyword);
+          if (foundAt >= 0) {
+            matchedKeyword = keyword;
+            matchIndex = foundAt;
+            break;
+          }
+        }
         if (matchIndex < 0) {
           continue;
         }
         const start = Math.max(0, matchIndex - SNIPPET_CONTEXT_CHARS);
-        const end = Math.min(line.length, matchIndex + keyword.length + SNIPPET_CONTEXT_CHARS);
+        const end = Math.min(line.length, matchIndex + matchedKeyword.length + SNIPPET_CONTEXT_CHARS);
         const snippet = (start > 0 ? "…" : "") + line.slice(start, end) + (end < line.length ? "…" : "");
         hits.push({ file: name, snippet, line: index + 1 });
         if (hits.length >= 50) {

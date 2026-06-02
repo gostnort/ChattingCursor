@@ -11,6 +11,8 @@ source "${SCRIPT_DIR}/sh/resolve-cursor-cli-mode.sh"
 source "${SCRIPT_DIR}/sh/resolve-token-sync-dir.sh"
 # shellcheck source=sh/resolve-cloudflare-tunnel.sh
 source "${SCRIPT_DIR}/sh/resolve-cloudflare-tunnel.sh"
+# shellcheck source=sh/token-file-name.sh
+source "${SCRIPT_DIR}/sh/token-file-name.sh"
 
 NO_WEB=0
 EXTRA_ARGS=()
@@ -33,7 +35,7 @@ TOKEN_SYNC_DIR_SOURCE="$(resolve_token_sync_dir_source "")"
 TOKEN_SYNC_DIR="$(resolve_token_sync_dir "")"
 ensure_token_sync_dir_ready "${TOKEN_SYNC_DIR}" "${TOKEN_SYNC_DIR_SOURCE}" || exit 1
 export CHATTINGCURSOR_TOKEN_SYNC_DIR="${TOKEN_SYNC_DIR}"
-TOKEN_FILE="${TOKEN_SYNC_DIR}/chattingcursor-token.txt"
+TOKEN_FILE="$(chattingcursor_token_file_path "${TOKEN_SYNC_DIR}")"
 TUNNEL_URL_PATTERN='https://[a-z0-9-]+\.trycloudflare\.com'
 NAMED_PUBLIC_URL=""
 if named_lines="$(read_named_tunnel_public_url 2>/dev/null)"; then
@@ -137,7 +139,7 @@ fi
 echo ""
 if [[ "${startup_ok}" -eq 1 ]]; then
   echo "[OK] Startup flow complete. 服务在后台继续运行。"
-  echo "     查看 token 文件 chattingcursor-token.txt 中的 pid.* 行。"
+  echo "     查看 token 文件 ${TOKEN_FILE} 中的 pid.* 行。"
   echo "     停止: ./shutdown.sh"
   echo "     日志: ${LOG_PATH}"
   exit 0

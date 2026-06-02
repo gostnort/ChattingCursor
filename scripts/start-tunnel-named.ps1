@@ -9,7 +9,9 @@ param(
 )
 
 . (Join-Path $PSScriptRoot "Resolve-TokenSyncDir.ps1")
+. (Join-Path $PSScriptRoot "Get-TokenFileName.ps1")
 $TokenSyncDir = Resolve-TokenSyncDir -Override $TokenSyncDir
+$TokenFilePath = Get-ChattingCursorTokenFilePath -TokenSyncDir $TokenSyncDir
 
 $Root = Split-Path -Parent $PSScriptRoot
 $CloudflaredDir = Join-Path $HOME ".cloudflared"
@@ -54,7 +56,7 @@ if (-not $SkipBridge) {
 Write-Host "Phone setup:"
 Write-Host "  1. https://gostnort.github.io/ChattingCursor/"
 Write-Host "  2. local -> config -> Bridge URL = $PublicUrl"
-Write-Host "  3. Token: $TokenSyncDir\chattingcursor-token.txt"
+Write-Host "  3. Token: $TokenFilePath"
 Write-Host ""
 Write-Host "Verify: $PublicUrl/auth/status"
 Write-Host ""

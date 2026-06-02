@@ -7,7 +7,9 @@ param(
 )
 
 . (Join-Path $PSScriptRoot "Resolve-TokenSyncDir.ps1")
+. (Join-Path $PSScriptRoot "Get-TokenFileName.ps1")
 $TokenSyncDir = Resolve-TokenSyncDir -Override $TokenSyncDir
+$TokenFilePath = Get-ChattingCursorTokenFilePath -TokenSyncDir $TokenSyncDir
 
 $Root = Split-Path -Parent $PSScriptRoot
 $escapedRoot = $Root.Replace("'", "''")
@@ -48,7 +50,7 @@ Write-Host "After you copy the trycloudflare URL:"
 Write-Host "  1. Optional: .\scripts\start-remote.ps1 -BridgePublicUrl `"YOUR_URL`""
 Write-Host "  2. Phone: https://gostnort.github.io/ChattingCursor/ -> local -> config"
 Write-Host "  3. Bridge URL = your trycloudflare HTTPS URL"
-Write-Host "  4. Token file: $TokenSyncDir\chattingcursor-token.txt"
+Write-Host "  4. Token file: $TokenFilePath"
 Write-Host ""
 Write-Host "Verify: open https://YOUR_URL/auth/status in a browser"
 Write-Host "Press Ctrl+C to stop the tunnel."

@@ -22,6 +22,7 @@ import {
   fetchModels,
   mergeAssistantStreamText,
   cancelChatRun,
+  fetchRunFinalText,
   sendChatMessage,
   subscribeRunEvents,
   uploadChatImage,
@@ -54,6 +55,7 @@ import { MessageBubble } from "./MessageBubble";
 
 const LATEST_RUN_ID_KEY = "latestRunId";
 const OFFLINE_LOAD_TIMEOUT_MS = 600_000;
+const SSE_IDLE_TIMEOUT_MS = 5_000;
 // 离线模型通知约定：顶栏 offlineLoadPhase 仅展示预热/加载进度（waiting/loading/ready）与预热失败；
 // 聊天 SSE 推理/SSE 连接失败时，完整错误只写入助手气泡，避免顶栏与气泡重复同一段文案。
 
@@ -196,6 +198,7 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
   const currentAssistantLabelRef = useRef("Agent");
   const sseCloseRef = useRef<(() => void) | null>(null);
   const currentRunIdRef = useRef<string | null>(null);
+  const runFinishedRef = useRef(false);
   const sendQueueRef = useRef<string[]>([]);
   const runInFlightRef = useRef(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -217,6 +220,7 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
     sseCloseRef.current?.();
     sseCloseRef.current = null;
     currentRunIdRef.current = null;
+    runFinishedRef.current = false;
     sendQueueRef.current = [];
     runInFlightRef.current = false;
     assistantBufferRef.current = "";
@@ -403,7 +407,10 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
     void initSession();
     return () => {
       cancelled = true;
-      sseCloseRef.current?.();
+      // initSession 依赖变化时不误杀活跃 SSE
+      if (!currentRunIdRef.current) {
+        sseCloseRef.current?.();
+      }
     };
   }, [bridgeToken, bridgeUrl, compressedModels.aliases, models, persistOfflineModelContext, restoreOnlineChatFromStorage, sessionId, unloadOfflineSidecar]);
 
@@ -718,6 +725,7 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
     sseCloseRef.current?.();
     sseCloseRef.current = null;
     currentRunIdRef.current = null;
+    runFinishedRef.current = false;
     sendQueueRef.current = [];
     runInFlightRef.current = false;
     assistantBufferRef.current = "";
@@ -752,6 +760,47 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
         modelLabel: currentAssistantLabelRef.current,
       },
     ]);
+  };
+
+
+  const updateLastAssistantBubble = (content: string): void => {
+    setMessages((prev) => {
+      const last = prev[prev.length - 1];
+      if (last?.role === "assistant") {
+        return [...prev.slice(0, -1), {
+          ...last,
+          content,
+          modelLabel: last.modelLabel ?? currentAssistantLabelRef.current,
+        }];
+      }
+      if (!content) {
+        return prev;
+      }
+      return [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content,
+          createdAt: new Date().toISOString(),
+          modelLabel: currentAssistantLabelRef.current,
+        },
+      ];
+    });
+  };
+
+
+  const alignAssistantWithBridgeFinalText = async (runId: string): Promise<void> => {
+    try {
+      const { text } = await fetchRunFinalText(bridgeUrl, runId, bridgeToken);
+      if (!text) {
+        return;
+      }
+      assistantBufferRef.current = mergeAssistantStreamText(assistantBufferRef.current, text);
+      updateLastAssistantBubble(assistantBufferRef.current);
+    } catch {
+      // 对齐失败不影响主流程，保留 SSE 已收到的文本
+    }
   };
 
 
@@ -876,7 +925,12 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
       });
     }
     if (event.type === "run_finished") {
+      if (runFinishedRef.current) {
+        return;
+      }
+      runFinishedRef.current = true;
       sseCloseRef.current = null;
+      const finishedRunId = currentRunIdRef.current;
       currentRunIdRef.current = null;
       const exitCode = typeof event.data?.exitCode === "number" ? event.data.exitCode : null;
       const cancelled = event.data?.cancelled === true;
@@ -886,10 +940,15 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
         appendAssistantError(`CLI 运行失败（exit=${exitCode}）。`);
       }
       stderrBufferRef.current = "";
-      if (!cancelled) {
-        playNotificationSound();
-      }
-      drainSendQueue();
+      void (async () => {
+        if (finishedRunId) {
+          await alignAssistantWithBridgeFinalText(finishedRunId);
+        }
+        if (!cancelled) {
+          playNotificationSound();
+        }
+        drainSendQueue();
+      })();
     }
   };
 
@@ -916,24 +975,33 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
 
 
   const subscribeToRun = (runId: string, activeSessionId: string): void => {
+    runFinishedRef.current = false;
     currentRunIdRef.current = runId;
     setSessionId(activeSessionId);
     setConnectionError(null);
     localStorage.setItem(LATEST_RUN_ID_KEY, runId);
     sseCloseRef.current = subscribeRunEvents(bridgeUrl, runId, handleStreamEvent, (error) => {
+      if (currentRunIdRef.current !== runId || runFinishedRef.current) {
+        return;
+      }
       const formatted = formatLocalLlmError(error.message);
       appendAssistantError(`流式连接失败：${formatted}`);
       if (offlineModelSelected) {
         revertOfflineTopAfterChatFailure();
       }
       sseCloseRef.current = null;
+      currentRunIdRef.current = null;
       drainSendQueue();
-    }, bridgeToken);
+    }, bridgeToken, {
+      idleTimeoutMs: SSE_IDLE_TIMEOUT_MS,
+      shouldContinue: () => currentRunIdRef.current === runId && !runFinishedRef.current,
+    });
   };
 
 
   const startRun = async (prompt: string): Promise<void> => {
     runInFlightRef.current = true;
+    runFinishedRef.current = false;
     setIsSending(true);
     setIsThinking(true);
     assistantBufferRef.current = "";

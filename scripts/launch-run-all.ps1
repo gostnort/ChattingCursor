@@ -8,6 +8,7 @@
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot "Resolve-CursorCliMode.ps1")
+. (Join-Path $PSScriptRoot "Get-TokenFileName.ps1")
 Initialize-CursorCliMode
 $RunAllScript = Join-Path $PSScriptRoot "run-all.ps1"
 $LogPath = Join-Path $env:TEMP "chattingcursor-run-all.log"
@@ -102,7 +103,7 @@ function Write-RunAllErrTail {
 Write-Host ""
 if ($startupOk) {
   Write-Host "[OK] Startup flow complete. Services keep running in the background."
-  Write-Host "     Check pid.* lines in your token file (chattingcursor-token.txt)."
+  Write-Host "     Check pid.* lines in your token file ($(Get-ChattingCursorTokenFileName))."
   Write-Host "     Stop everything: shutdown.bat"
   Write-Host "     Monitor log: $LogPath"
   exit 0

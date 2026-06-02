@@ -3,8 +3,10 @@ import path from "node:path";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import {
   getChattingCursorHomeDir,
+  getDefaultTokenFileName,
   getDefaultTokenSyncDir,
   getLegacyTokenSyncDir,
+  LEGACY_TOKEN_FILE_NAME,
 } from "../paths.js";
 import {
   ensureTokenSyncDirectoryReady,
@@ -314,7 +316,7 @@ export class TokenRotationService {
       this.directory = resolveTokenSyncDirectory();
       this.userSpecifiedSyncDir = isUserSpecifiedTokenSyncDirectory();
     }
-    this.fileName = options.fileName?.trim() || "chattingcursor-token.txt";
+    this.fileName = options.fileName?.trim() || getDefaultTokenFileName();
     this.publicBridgeUrl = options.publicBridgeUrl;
   }
 
@@ -372,7 +374,7 @@ export class TokenRotationService {
 
   async migrateLegacyTokenFileIfNeeded(): Promise<void> {
     const targetPath = this.getFilePath();
-    const legacyPath = path.join(getLegacyTokenSyncDir(), this.fileName);
+    const legacyPath = path.join(getLegacyTokenSyncDir(), LEGACY_TOKEN_FILE_NAME);
     if (path.resolve(this.directory) === path.resolve(getLegacyTokenSyncDir())) {
       return;
     }
@@ -392,6 +394,29 @@ export class TokenRotationService {
       console.log(`[token] Migrated token file from legacy directory: ${legacyPath} -> ${targetPath}`);
     } catch {
       // 旧目录无文件则跳过
+    }
+  }
+
+
+  /** 同目录下从旧固定文件名迁移到按主机名命名（升级兼容） */
+  async migrateUnversionedTokenFileIfNeeded(): Promise<void> {
+    if (this.fileName === LEGACY_TOKEN_FILE_NAME) {
+      return;
+    }
+    const targetPath = this.getFilePath();
+    try {
+      await access(targetPath);
+      return;
+    } catch {
+      // 新文件名尚不存在
+    }
+    const unversionedPath = path.join(this.directory, LEGACY_TOKEN_FILE_NAME);
+    try {
+      await access(unversionedPath);
+      await copyFile(unversionedPath, targetPath);
+      console.log(`[token] Migrated token file from legacy filename: ${unversionedPath} -> ${targetPath}`);
+    } catch {
+      // 旧文件名不存在则跳过
     }
   }
 
@@ -485,6 +510,7 @@ export class TokenRotationService {
     const filePath = this.getFilePath();
     await this.ensureSyncDirectoryReady();
     await this.migrateLegacyTokenFileIfNeeded();
+    await this.migrateUnversionedTokenFileIfNeeded();
     try {
       const existing = await readFile(filePath, "utf8");
       const parsed = parseTokenFile(existing);
@@ -575,6 +601,6 @@ export class TokenRotationService {
 
 export const tokenRotationService = new TokenRotationService({
   directory: resolveTokenSyncDirectory(),
-  fileName: process.env.CHATTINGCURSOR_TOKEN_FILE_NAME,
+  fileName: process.env.CHATTINGCURSOR_TOKEN_FILE_NAME?.trim() || undefined,
   publicBridgeUrl: process.env.BRIDGE_PUBLIC_URL?.trim() || "http://127.0.0.1:4321",
 });

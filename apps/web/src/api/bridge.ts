@@ -8,6 +8,7 @@ import type {
   ChatAnalyzeImageResponse,
   HistorySearchResponse,
   LatestRunResponse,
+  RunFinalTextResponse,
   LocalConfigResponse,
   LocalHistoryContentResponse,
   LocalHistoryListResponse,
@@ -300,6 +301,22 @@ export async function analyzeChatImage(
 }
 
 
+/** 获取 run 的权威最终 assistant 文本（用于 run_finished 对齐） */
+export async function fetchRunFinalText(
+  bridgeUrl: string,
+  runId: string,
+  token?: string,
+): Promise<RunFinalTextResponse> {
+  const response = await fetch(`${bridgeUrl}/chat/runs/${encodeURIComponent(runId)}/final-text`, {
+    headers: buildAuthHeaders(token),
+  });
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, `获取 run 最终文本失败 (${response.status})`));
+  }
+  return response.json() as Promise<RunFinalTextResponse>;
+}
+
+
 function parseSsePayload(buffer: string, onEvent: (event: RunEvent) => void): string {
   const chunks = buffer.split("\n\n");
   const tail = chunks.pop() ?? "";
@@ -327,6 +344,7 @@ function streamRunEvents(
   token: string | undefined,
   onEvent: (event: RunEvent) => void,
   onError?: (error: Error) => void,
+  onStreamEnd?: () => void,
 ): () => void {
   const controller = new AbortController();
   void (async () => {
@@ -352,6 +370,9 @@ function streamRunEvents(
       if (buffer.trim()) {
         parseSsePayload(buffer + "\n\n", onEvent);
       }
+      if (!controller.signal.aborted) {
+        onStreamEnd?.();
+      }
     } catch (error) {
       if (controller.signal.aborted) {
         return;
@@ -363,15 +384,129 @@ function streamRunEvents(
 }
 
 
-/** 订阅 run 的流式事件 */
+/** SSE 订阅选项：空闲超时与重连 */
+export interface SubscribeRunEventsOptions {
+  /** 活跃 run 期间无事件超过该毫秒数则重连 */
+  idleTimeoutMs?: number;
+  /** 返回 false 时停止重连并触发 onError */
+  shouldContinue?: () => boolean;
+  /** 每次重连前回调（Bridge 会回放 run.events） */
+  onReconnect?: () => void;
+}
+
+
+const SSE_RECONNECT_DELAY_MS = 300;
+
+
+/** 订阅 run 的流式事件（支持 SSE 断线/空闲重连） */
 export function subscribeRunEvents(
   bridgeUrl: string,
   runId: string,
   onEvent: (event: RunEvent) => void,
   onError?: (error: Error) => void,
   token?: string,
+  options?: SubscribeRunEventsOptions,
 ): () => void {
-  return streamRunEvents(`${bridgeUrl}/chat/stream/${runId}`, token, onEvent, onError);
+  const url = `${bridgeUrl}/chat/stream/${runId}`;
+  if (!options?.idleTimeoutMs) {
+    return streamRunEvents(url, token, onEvent, onError);
+  }
+  let disposed = false;
+  let runFinished = false;
+  let currentClose: (() => void) | null = null;
+  let idleTimer: ReturnType<typeof setTimeout> | undefined;
+  let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+  const clearIdleTimer = (): void => {
+    if (idleTimer !== undefined) {
+      clearTimeout(idleTimer);
+      idleTimer = undefined;
+    }
+  };
+  const clearReconnectTimer = (): void => {
+    if (reconnectTimer !== undefined) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = undefined;
+    }
+  };
+  const shouldContinue = (): boolean => {
+    if (disposed || runFinished) {
+      return false;
+    }
+    return options.shouldContinue?.() ?? true;
+  };
+  const scheduleReconnect = (): void => {
+    clearReconnectTimer();
+    if (!shouldContinue()) {
+      return;
+    }
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = undefined;
+      if (!shouldContinue()) {
+        return;
+      }
+      options.onReconnect?.();
+      connect();
+    }, SSE_RECONNECT_DELAY_MS);
+  };
+  const armIdleTimer = (): void => {
+    clearIdleTimer();
+    if (!shouldContinue()) {
+      return;
+    }
+    idleTimer = setTimeout(() => {
+      idleTimer = undefined;
+      if (!shouldContinue()) {
+        return;
+      }
+      options.onReconnect?.();
+      connect();
+    }, options.idleTimeoutMs);
+  };
+  const handleEvent = (event: RunEvent): void => {
+    if (event.type === "run_finished") {
+      runFinished = true;
+      clearIdleTimer();
+      clearReconnectTimer();
+    } else {
+      armIdleTimer();
+    }
+    onEvent(event);
+  };
+  const handleStreamFailure = (error: Error): void => {
+    clearIdleTimer();
+    if (!shouldContinue()) {
+      if (!runFinished) {
+        onError?.(error);
+      }
+      return;
+    }
+    scheduleReconnect();
+  };
+  const connect = (): void => {
+    currentClose?.();
+    currentClose = streamRunEvents(
+      url,
+      token,
+      handleEvent,
+      handleStreamFailure,
+      () => {
+        clearIdleTimer();
+        if (runFinished || !shouldContinue()) {
+          return;
+        }
+        scheduleReconnect();
+      },
+    );
+    armIdleTimer();
+  };
+  connect();
+  return () => {
+    disposed = true;
+    clearIdleTimer();
+    clearReconnectTimer();
+    currentClose?.();
+    currentClose = null;
+  };
 }
 
 

@@ -1,7 +1,7 @@
 import { createReadStream } from "node:fs";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { v4 as uuidv4 } from "uuid";
-import { listCursorModels, mergeAssistantStreamText, probeCursorCli, runCursorCli } from "@chatting-cursor/cli-client";
+import { listCursorModels, probeCursorCli, runCursorCli } from "@chatting-cursor/cli-client";
 import type { RunEvent } from "@chatting-cursor/shared";
 import {
   formatLocalLlmError,
@@ -18,23 +18,33 @@ import {
   imageFileToDataUrl,
   isLocalLlmModel,
 } from "../services/local-llm-client.js";
-import { probeLocalLlmLoadState, ensureLocalLlmSidecarStarted } from "../services/local-llm-lifecycle.js";
+import { probeLocalLlmLoadState } from "../services/local-llm-lifecycle.js";
 import { analyzeUploadedImage, buildImageForwardPrompt } from "../services/image-analysis-service.js";
 import { readStoredImage, saveUploadedImage } from "../services/image-store.js";
 import { loadConfig, resolveCorsOrigin } from "../config.js";
 import { requireRemoteToken } from "../middleware/auth.js";
 import { openGoogleSearchInChrome } from "../services/chrome-google-search.js";
+import { collectHistoryData } from "../services/collect-history-data.js";
+import { collectKnowledgeByTags } from "../services/collect-knowledge-by-tags.js";
 import {
-  extractSearchKeywords,
-  formatHistorySearchReply,
   hasHistorySearchIntent,
 } from "../services/history-search-intent.js";
+import {
+  listAllKnowledgeTags,
+} from "../services/knowledge-store.js";
+import { shouldRunKnowledgeTagPipeline } from "../services/knowledge-tag-intent.js";
+import {
+  runExternalDataPipeline,
+  WEBSEARCH_SYNTHESIS_DEADLINE_MS,
+} from "../services/external-data-pipeline.js";
+import { ensureLocalLlmSidecarStarted } from "../services/local-llm-lifecycle.js";
 import {
   extractWebSearchQuery,
   extractWebSearchUserIntent,
   formatWebSearchReply,
   hasWebSearchIntent,
 } from "../services/web-search-intent.js";
+import { buildCliPromptFromSession } from "../services/cli-conversation-context.js";
 import { wrapCursorCliPrompt } from "../services/cli-conversation-guard.js";
 import { historyStore } from "../services/history-store.js";
 import { runStore } from "../services/run-store.js";
@@ -45,6 +55,7 @@ import {
   registerActiveRun,
   unregisterActiveRun,
 } from "../services/active-run-registry.js";
+import { extractAssistantText } from "../services/run-final-text.js";
 
 
 /** 构建 SSE 响应头（hijack 后需手动写入 CORS） */
@@ -74,12 +85,19 @@ const TERMINAL_EVENT_TYPES = new Set<RunEvent["type"]>([
 ]);
 
 
+type DirectReplySource =
+  | "history_search"
+  | "knowledge_search"
+  | "chrome_web_search"
+  | "offline_gemma4";
+
+
 /** 写入直连回复的 result 与 run_finished（run_started 须由调用方先发） */
 function emitDirectReplyResult(
   runId: string,
   sessionId: string,
   replyText: string,
-  source: "history_search" | "chrome_web_search" | "offline_gemma4",
+  source: DirectReplySource,
   modelLabel?: string,
 ): void {
   runStore.appendEvent(runId, {
@@ -109,7 +127,7 @@ function finishDirectReplyRun(
   sessionId: string,
   prompt: string,
   replyText: string,
-  source: "history_search" | "chrome_web_search" | "offline_gemma4",
+  source: DirectReplySource,
   modelLabel?: string,
 ): void {
   runStore.appendEvent(runId, {
@@ -119,6 +137,84 @@ function finishDirectReplyRun(
     data: { source, prompt },
   });
   emitDirectReplyResult(runId, sessionId, replyText, source, modelLabel);
+}
+
+
+/** 采集外部资料后经 LLM-1/LLM-2 管线生成直连回复 */
+function scheduleExternalDataPipelineRun(options: {
+  runId: string;
+  sessionId: string;
+  prompt: string;
+  model?: string;
+  workspace?: string;
+  modelLabel?: string;
+  source: DirectReplySource;
+  sourceKind: "history" | "knowledge" | "web";
+  collect: () => Promise<{ chunks: import("../services/external-data-pipeline.js").CollectedChunk[]; query: string; userIntent: string }>;
+  failurePrefix: string;
+}): void {
+  const {
+    runId,
+    sessionId,
+    prompt,
+    model,
+    workspace,
+    modelLabel,
+    source,
+    sourceKind,
+    collect,
+    failurePrefix,
+  } = options;
+  if (model && isLocalLlmModel(model)) {
+    void ensureLocalLlmSidecarStarted(model).catch(() => undefined);
+  }
+  let skipResult = false;
+  registerActiveRun(runId, () => {
+    skipResult = true;
+  });
+  void (async () => {
+    try {
+      const collected = await collect();
+      unregisterActiveRun(runId);
+      if (skipResult) {
+        finishCancelledRun({ runId, sessionId, prompt, modelLabel, source });
+        return;
+      }
+      const replyText = await runExternalDataPipeline(
+        {
+          chunks: collected.chunks,
+          userIntent: collected.userIntent,
+          query: collected.query,
+          fullPrompt: prompt,
+          sourceKind,
+        },
+        {
+          model,
+          workspace,
+          synthesisDeadlineMs: Date.now() + WEBSEARCH_SYNTHESIS_DEADLINE_MS,
+        },
+      );
+      const finalText = replyText?.trim()
+        || `未能生成回答。${failurePrefix}`;
+      finishDirectReplyRun(runId, sessionId, prompt, finalText, source, modelLabel);
+      void historyStore.appendTurn(sessionId, prompt, finalText, sessionStore.getOrCreate(sessionId).createdAt);
+    } catch (error: unknown) {
+      unregisterActiveRun(runId);
+      if (skipResult) {
+        finishCancelledRun({ runId, sessionId, prompt, modelLabel, source });
+        return;
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      finishDirectReplyRun(
+        runId,
+        sessionId,
+        prompt,
+        `${failurePrefix}：${message}`,
+        source,
+        modelLabel,
+      );
+    }
+  })();
 }
 
 
@@ -244,51 +340,59 @@ function scheduleCursorCliRun(options: {
   workspace?: string;
 }): void {
   const { runId, sessionId, prompt, model, modelLabel, workspace } = options;
-  void runCursorCli({
-    runId,
-    prompt: wrapCursorCliPrompt(prompt),
-    model,
-    workspace,
-    onEvent: (event) => {
-      runStore.appendEvent(runId, event);
-    },
-    onChild: (child) => {
-      registerActiveRun(runId, () => {
-        child.kill("SIGTERM");
+  void (async () => {
+    const session = sessionStore.getOrCreate(sessionId);
+    const fullPrompt = await buildCliPromptFromSession({
+      prompt,
+      history: session.messages,
+    });
+    try {
+      await runCursorCli({
+        runId,
+        prompt: wrapCursorCliPrompt(fullPrompt),
+        model,
+        workspace,
+        onEvent: (event) => {
+          runStore.appendEvent(runId, event);
+        },
+        onChild: (child) => {
+          registerActiveRun(runId, () => {
+            child.kill("SIGTERM");
+          });
+        },
       });
-    },
-  }).then(async () => {
-    unregisterActiveRun(runId);
-    const run = runStore.get(runId);
-    if (!run) {
-      return;
-    }
-    const assistantText = extractAssistantText(run.events);
-    if (assistantText) {
-      sessionStore.appendMessage(sessionId, {
-        role: "assistant",
-        content: assistantText,
+      unregisterActiveRun(runId);
+      const run = runStore.get(runId);
+      if (!run) {
+        return;
+      }
+      const assistantText = extractAssistantText(run.events);
+      if (assistantText) {
+        sessionStore.appendMessage(sessionId, {
+          role: "assistant",
+          content: assistantText,
+          timestamp: new Date().toISOString(),
+          modelLabel,
+        });
+        await historyStore.appendTurn(sessionId, prompt, assistantText, sessionStore.getOrCreate(sessionId).createdAt);
+      }
+    } catch (error: unknown) {
+      unregisterActiveRun(runId);
+      const message = error instanceof Error ? error.message : String(error);
+      runStore.appendEvent(runId, {
+        runId,
+        type: "error",
         timestamp: new Date().toISOString(),
-        modelLabel,
+        text: message,
       });
-      await historyStore.appendTurn(sessionId, prompt, assistantText, sessionStore.getOrCreate(sessionId).createdAt);
+      runStore.appendEvent(runId, {
+        runId,
+        type: "run_finished",
+        timestamp: new Date().toISOString(),
+        data: { exitCode: 1 },
+      });
     }
-  }).catch((error: unknown) => {
-    unregisterActiveRun(runId);
-    const message = error instanceof Error ? error.message : String(error);
-    runStore.appendEvent(runId, {
-      runId,
-      type: "error",
-      timestamp: new Date().toISOString(),
-      text: message,
-    });
-    runStore.appendEvent(runId, {
-      runId,
-      type: "run_finished",
-      timestamp: new Date().toISOString(),
-      data: { exitCode: 1 },
-    });
-  });
+  })();
 }
 
 
@@ -298,7 +402,7 @@ function finishCancelledRun(options: {
   sessionId: string;
   prompt: string;
   modelLabel?: string;
-  source: "history_search" | "chrome_web_search" | "offline_gemma4";
+  source: DirectReplySource;
 }): void {
   const { runId, sessionId, prompt, modelLabel, source } = options;
   const run = runStore.get(runId);
@@ -317,21 +421,6 @@ function finishCancelledRun(options: {
     timestamp: new Date().toISOString(),
     data: { exitCode: null, cancelled: true, source },
   });
-}
-
-
-/** 从 run 事件中提取最终 assistant 文本 */
-function extractAssistantText(events: RunEvent[]): string {
-  let text = "";
-  for (const event of events) {
-    if (event.type === "assistant" && event.text) {
-      text = mergeAssistantStreamText(text, event.text);
-    }
-    if (event.type === "result" && event.text) {
-      text = event.text;
-    }
-  }
-  return text;
 }
 
 
@@ -420,6 +509,20 @@ export async function registerChatRoutes(app: FastifyInstance): Promise<void> {
   });
 
 
+  app.get("/chat/runs/:runId/final-text", async (request, reply) => {
+    const { runId } = request.params as { runId: string };
+    const run = runStore.get(runId);
+    if (!run) {
+      return reply.status(404).send({ error: "run_not_found" });
+    }
+    return reply.send({
+      runId: run.runId,
+      status: run.status,
+      text: extractAssistantText(run.events),
+    });
+  });
+
+
   app.post("/chat/cancel", async (request, reply) => {
     const parsed = chatCancelRequestSchema.safeParse(request.body);
     if (!parsed.success) {
@@ -445,9 +548,15 @@ export async function registerChatRoutes(app: FastifyInstance): Promise<void> {
     }
     const { prompt, model, modelLabel, workspace } = parsed.data;
     const useLocalLlm = isLocalLlmModel(model);
+    const session = sessionStore.getOrCreate(parsed.data.sessionId);
+    const knownKnowledgeTags = await listAllKnowledgeTags();
+    const knowledgeTagPipeline = !hasHistorySearchIntent(prompt)
+      && !hasWebSearchIntent(prompt)
+      && shouldRunKnowledgeTagPipeline(prompt, knownKnowledgeTags, session.messages);
     const needsCursorCli = !useLocalLlm
       && !hasHistorySearchIntent(prompt)
-      && !hasWebSearchIntent(prompt);
+      && !hasWebSearchIntent(prompt)
+      && !knowledgeTagPipeline;
     if (needsCursorCli) {
       const cli = await probeCursorCli();
       if (!cli.available) {
@@ -457,7 +566,6 @@ export async function registerChatRoutes(app: FastifyInstance): Promise<void> {
         });
       }
     }
-    const session = sessionStore.getOrCreate(parsed.data.sessionId);
     const runId = uuidv4();
     runStore.create(runId);
     const startedAt = new Date().toISOString();
@@ -468,46 +576,37 @@ export async function registerChatRoutes(app: FastifyInstance): Promise<void> {
       timestamp: startedAt,
     });
     if (hasHistorySearchIntent(prompt)) {
-      const query = extractSearchKeywords(prompt);
-      let skipResult = false;
-      registerActiveRun(runId, () => {
-        skipResult = true;
-      });
-      void historyStore.search(query).then((hits) => {
-        unregisterActiveRun(runId);
-        if (skipResult) {
-          finishCancelledRun({
-            runId,
-            sessionId: session.sessionId,
-            prompt,
-            modelLabel,
-            source: "history_search",
-          });
-          return;
-        }
-        const replyText = formatHistorySearchReply(query, hits);
-        finishDirectReplyRun(runId, session.sessionId, prompt, replyText, "history_search", modelLabel);
-      }).catch((error: unknown) => {
-        unregisterActiveRun(runId);
-        if (skipResult) {
-          finishCancelledRun({
-            runId,
-            sessionId: session.sessionId,
-            prompt,
-            modelLabel,
-            source: "history_search",
-          });
-          return;
-        }
-        const message = error instanceof Error ? error.message : String(error);
-        finishDirectReplyRun(
-          runId,
+      scheduleExternalDataPipelineRun({
+        runId,
+        sessionId: session.sessionId,
+        prompt,
+        model,
+        workspace,
+        modelLabel,
+        source: "history_search",
+        sourceKind: "history",
+        failurePrefix: "搜索本地历史失败",
+        collect: () => collectHistoryData(
           session.sessionId,
+          session.messages,
           prompt,
-          `搜索本地历史失败：${message}`,
-          "history_search",
-          modelLabel,
-        );
+          historyStore,
+        ),
+      });
+      return reply.send({ runId, sessionId: session.sessionId });
+    }
+    if (knowledgeTagPipeline) {
+      scheduleExternalDataPipelineRun({
+        runId,
+        sessionId: session.sessionId,
+        prompt,
+        model,
+        workspace,
+        modelLabel,
+        source: "knowledge_search",
+        sourceKind: "knowledge",
+        failurePrefix: "知识库标签检索失败",
+        collect: () => collectKnowledgeByTags(prompt, session.messages),
       });
       return reply.send({ runId, sessionId: session.sessionId });
     }

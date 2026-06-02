@@ -103,7 +103,7 @@ Write-Host "安装完成。"
 Write-Host "local_llm optional: run local_llm\server\install.bat for inference deps (install GGUF weights in Web Local Models)"
 Write-Host "下一步: 双击 run.bat 或运行 .\run.bat"
 $homeHint = if ($env:USERPROFILE) { "$env:USERPROFILE\.chattingcursor" } else { "~/.chattingcursor" }
-Write-Host "手机远程: 默认 token 在 ${homeHint}\chattingcursor-token.txt；可放进云盘或于配置页改路径。"
+Write-Host "手机远程: 默认 token 为 ${homeHint}\chattingcursor-<主机名>-token.txt；可放进云盘或于配置页改路径。"
 Write-Host ""
 
 if ($script:NeedsShellRestart) {

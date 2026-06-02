@@ -9,6 +9,45 @@ export function getChattingCursorHomeDir(): string {
 }
 
 
+/** 旧版固定 token 文件名（同目录迁移用） */
+export const LEGACY_TOKEN_FILE_NAME = "chattingcursor-token.txt";
+
+
+/** 将主机名整理为可安全用于文件名的片段（Windows / Linux 通用） */
+export function sanitizeHostnameForFilename(hostname: string): string {
+  const trimmed = hostname.trim();
+  if (!trimmed) {
+    return "unknown";
+  }
+  const sanitized = trimmed
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, "_")
+    .replace(/\s+/g, "_")
+    .replace(/^\.+/, "")
+    .replace(/\.+$/, "")
+    .slice(0, 63);
+  return sanitized || "unknown";
+}
+
+
+/** 本机短主机名（与 shell 脚本 hostname -s / 去域名一致） */
+export function getShortHostname(): string {
+  const raw = os.hostname().trim();
+  const dot = raw.indexOf(".");
+  const short = dot > 0 ? raw.slice(0, dot) : raw;
+  return sanitizeHostnameForFilename(short);
+}
+
+
+/** 默认 token 文件名：每台机器独立，避免云盘同目录互相覆盖 */
+export function getDefaultTokenFileName(): string {
+  const override = process.env.CHATTINGCURSOR_TOKEN_FILE_NAME?.trim();
+  if (override) {
+    return override;
+  }
+  return `chattingcursor-${getShortHostname()}-token.txt`;
+}
+
+
 /** 默认 token 同步目录：与 history 同属 ~/.chattingcursor */
 export function getDefaultTokenSyncDir(): string {
   return getChattingCursorHomeDir();

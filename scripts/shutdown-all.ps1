@@ -9,8 +9,9 @@ param(
 $ErrorActionPreference = "Continue"
 . (Join-Path $PSScriptRoot "Resolve-TokenSyncDir.ps1")
 . (Join-Path $PSScriptRoot "TokenFilePids.ps1")
+. (Join-Path $PSScriptRoot "Get-TokenFileName.ps1")
 $TokenSyncDir = Resolve-TokenSyncDir -Override ""
-$TokenFilePath = Join-Path $TokenSyncDir "chattingcursor-token.txt"
+$TokenFilePath = Get-ChattingCursorTokenFilePath -TokenSyncDir $TokenSyncDir
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $RootPattern = [regex]::Escape($Root)
 $StoppedBridge = $false

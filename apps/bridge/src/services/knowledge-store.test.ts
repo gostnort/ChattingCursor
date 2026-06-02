@@ -25,7 +25,10 @@ test("知识库：创建子节点、上传 markdown、拼装上下文", async (t
   const child = await createKnowledgeChild("root", "测试主题");
   const renamed = await renameKnowledgeNode(child.id, "重命名主题");
   assert.equal(renamed.name, "重命名主题");
-  await uploadKnowledgeMarkdown(child.id, "# 说明\n离线模型可读此段。");
+  await uploadKnowledgeMarkdown(child.id, "# 说明\n离线模型可读此段。", ["测试标签"]);
+  const treeAfter = await listKnowledgeTree();
+  const uploaded = treeAfter.nodes.find((node) => node.id === child.id);
+  assert.deepEqual(uploaded?.tags, ["测试标签"]);
   const context = await buildKnowledgeContext(8000);
   assert.match(context, /重命名主题/);
   assert.match(context, /离线模型可读此段/);

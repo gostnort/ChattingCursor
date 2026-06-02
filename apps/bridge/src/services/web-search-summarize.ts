@@ -243,7 +243,7 @@ export function resolveWebSearchSummarizeTimeoutMs(model?: string): number {
 }
 
 
-function resolveSummarizeCallTimeoutMs(
+export function resolveSummarizeCallTimeoutMs(
   model: string | undefined,
   synthesisDeadlineMs: number | undefined,
 ): number {
@@ -419,7 +419,7 @@ export async function ensureWebSearchSummarizeModelReady(
 }
 
 
-function buildActiveModelProvider(
+export function buildSummarizeModelProvider(
   model: string | undefined,
   workspace: string | undefined,
   signal?: AbortSignal,
@@ -453,7 +453,7 @@ export async function summarizeWebSearchWithActiveModel(
   } = {},
 ): Promise<string | undefined> {
   const { model, workspace, signal } = options;
-  const provider = buildActiveModelProvider(model, workspace, signal);
+  const provider = buildSummarizeModelProvider(model, workspace, signal);
   const timeoutMs = resolveWebSearchSummarizeTimeoutMs(model);
   if (options.phase === "search_summary") {
     return summarizeWebSearchMaterialWithProvider(
@@ -470,11 +470,6 @@ export async function summarizeWebSearchWithActiveModel(
     timeoutMs,
   );
 }
-
-function isSynthesisDeadlineExceeded(deadlineMs: number | undefined, nowMs = Date.now()): boolean {
-  return deadlineMs !== undefined && nowMs >= deadlineMs;
-}
-
 
 function resolveSearchSummaryMaterial(context: WebSearchSummarizeContext): string {
   const pages = context.crawledPages ?? [];
@@ -533,7 +528,27 @@ export async function runWebSearchSynthesisFromPersisted(
 }
 
 
-/** LLM-1 搜索摘要 + LLM-2 最终回答（无逐页 LLM） */
+/** 将联网检索上下文转为统一采集片段 */
+export function webSearchContextToCollectedChunks(
+  context: WebSearchSummarizeContext,
+): import("./external-data-pipeline.js").CollectedChunk[] {
+  const pages = context.crawledPages ?? [];
+  if (pages.length > 0) {
+    return pages.map((page) => ({
+      source: "web",
+      title: page.title,
+      url: page.url,
+      text: page.text,
+    }));
+  }
+  if (context.aggregateExcerpt.trim()) {
+    return [{ source: "web", title: context.query, text: context.aggregateExcerpt }];
+  }
+  return [];
+}
+
+
+/** LLM-1 搜索摘要 + LLM-2 最终回答（委托统一外部资料管线） */
 export async function runWebSearchPipeline(
   context: WebSearchSummarizeContext,
   options: {
@@ -543,66 +558,31 @@ export async function runWebSearchPipeline(
     /** @deprecated 使用 synthesisDeadlineMs */
     deadlineMs?: number;
     synthesisDeadlineMs?: number;
-    /** 测试注入 */
     provider?: WebSearchSummarizeProvider;
-    /** 测试注入：跳过 ensureLocalLlmReady */
     skipModelReady?: boolean;
-    /** 测试注入：模型已在抓取阶段并行加载 */
     modelReadyPromise?: Promise<void>;
   } = {},
 ): Promise<string | undefined> {
-  const synthesisDeadlineMs = options.synthesisDeadlineMs
-    ?? (options.deadlineMs !== undefined
-      ? options.deadlineMs
-      : Date.now() + WEBSEARCH_SYNTHESIS_DEADLINE_MS);
   const material = resolveSearchSummaryMaterial(context);
   const hasData = Boolean(material.trim()) || Boolean(context.structuredBullets.trim());
   if (!hasData) {
     return undefined;
   }
-  if (options.modelReadyPromise) {
-    await options.modelReadyPromise.catch(() => undefined);
-  }
-  if (!options.skipModelReady) {
-    try {
-      await ensureWebSearchSummarizeModelReady(options.model, options.signal);
-    } catch {
-      if (!material.trim()) {
-        return undefined;
-      }
-    }
-  }
-  if (isSynthesisDeadlineExceeded(synthesisDeadlineMs)) {
-    if (!material.trim()) {
-      return undefined;
-    }
-    return buildWebSearchSynthesisUnavailableMessage(context);
-  }
-  const provider = options.provider
-    ?? buildActiveModelProvider(options.model, options.workspace, options.signal);
-  const summarizeTimeoutMs = resolveSummarizeCallTimeoutMs(options.model, synthesisDeadlineMs);
-  let searchSummary = material
-    ? await summarizeWebSearchMaterialWithProvider(context, provider, material, summarizeTimeoutMs)
-    : undefined;
-  if (!searchSummary?.trim()) {
-    searchSummary = material.slice(0, AGGREGATE_PROMPT_MAX_CHARS);
-  }
-  if (!searchSummary.trim()) {
-    return buildWebSearchSynthesisUnavailableMessage(context);
-  }
-  const finalTimeoutMs = resolveSummarizeCallTimeoutMs(options.model, synthesisDeadlineMs);
-  const finalAnswer = await summarizeWebSearchWithProvider(context, provider, searchSummary, finalTimeoutMs);
-  if (finalAnswer) {
-    return finalAnswer;
-  }
-  if (material.trim() && material !== searchSummary) {
-    const fallbackTimeoutMs = resolveSummarizeCallTimeoutMs(options.model, synthesisDeadlineMs);
-    const fallback = await summarizeWebSearchWithProvider(context, provider, material, fallbackTimeoutMs);
-    if (fallback) {
-      return fallback;
-    }
-  }
-  return buildWebSearchSynthesisUnavailableMessage(context);
+  const { runExternalDataPipeline } = await import("./external-data-pipeline.js");
+  return runExternalDataPipeline(
+    {
+      chunks: webSearchContextToCollectedChunks(context),
+      userIntent: context.userIntent ?? context.query,
+      query: context.query,
+      fullPrompt: context.fullPrompt,
+      structuredBullets: context.structuredBullets,
+      pagesQueued: context.pagesQueued,
+      pagesCrawled: context.pagesCrawled,
+      crawledPages: context.crawledPages,
+      sourceKind: "web",
+    },
+    options,
+  );
 }
 
 /** @deprecated 仅 SDK；请用 summarizeWebSearchWithActiveModel */

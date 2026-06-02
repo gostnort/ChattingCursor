@@ -13,6 +13,8 @@ source "${SCRIPT_DIR}/sh/resolve-cursor-cli-mode.sh"
 source "${SCRIPT_DIR}/sh/resolve-cloudflare-tunnel.sh"
 # shellcheck source=sh/token-file-pids.sh
 source "${SCRIPT_DIR}/sh/token-file-pids.sh"
+# shellcheck source=sh/token-file-name.sh
+source "${SCRIPT_DIR}/sh/token-file-name.sh"
 
 BRIDGE_PORT=4321
 WEB_PORT=43210
@@ -42,7 +44,7 @@ BRIDGE_ERR_LOG="${TMP_BASE}/chattingcursor-bridge.err.log"
 TOKEN_SYNC_DIR_SOURCE="$(resolve_token_sync_dir_source "${TOKEN_SYNC_DIR_OVERRIDE}")"
 TOKEN_SYNC_DIR="$(resolve_token_sync_dir "${TOKEN_SYNC_DIR_OVERRIDE}")"
 export CHATTINGCURSOR_TOKEN_SYNC_DIR="${TOKEN_SYNC_DIR}"
-TOKEN_FILE="${TOKEN_SYNC_DIR}/chattingcursor-token.txt"
+TOKEN_FILE="$(chattingcursor_token_file_path "${TOKEN_SYNC_DIR}")"
 TUNNEL_URL_PATTERN='https://[a-z0-9-]+\.trycloudflare\.com'
 TUNNEL_URL_HTTP_PATTERN='http://[a-z0-9-]+\.trycloudflare\.com'
 

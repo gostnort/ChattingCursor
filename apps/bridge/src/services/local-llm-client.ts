@@ -2,7 +2,12 @@ import { readFile } from "node:fs/promises";
 import { formatLocalLlmError, isOfflineModelId } from "@chatting-cursor/shared";
 import { ensureLocalLlmReady, resolveLocalLlmApiBaseUrl } from "./local-llm-lifecycle.js";
 import { findInstalledLocalLlmModel, resolveHfToken } from "./local-llm-store.js";
-import { buildKnowledgeContext } from "./knowledge-store.js";
+import {
+  buildOfflineSystemContent,
+  isPromptDuplicatedInRecentHistory,
+  RECENT_HISTORY_LIMIT,
+  selectRecentHistory,
+} from "./conversation-context.js";
 import type { SessionMessage } from "./session-store.js";
 
 
@@ -90,24 +95,17 @@ export async function buildLocalLlmMessages(options: {
   modelId: string;
 }): Promise<OpenAiMessage[]> {
   const model = await findInstalledLocalLlmModel(options.modelId);
-  const knowledge = await buildKnowledgeContext();
-  const systemParts = [
-    model?.defaultPrompt?.trim()
-      || "You are a helpful assistant running locally for ChattingCursor. Answer clearly and helpfully.",
-    knowledge ? `\n${knowledge}` : "",
-  ].filter(Boolean);
   const messages: OpenAiMessage[] = [
-    { role: "system", content: systemParts.join("\n") },
+    {
+      role: "system",
+      content: await buildOfflineSystemContent({
+        defaultPrompt: model?.defaultPrompt,
+      }),
+    },
   ];
-  const recent = options.history.slice(-20);
+  const recent = selectRecentHistory(options.history, RECENT_HISTORY_LIMIT);
   for (const item of recent) {
-    if (item.role !== "user" && item.role !== "assistant") {
-      continue;
-    }
     const text = item.content.trim();
-    if (!text) {
-      continue;
-    }
     if (item.role === "user" && item.imageUrl) {
       const resolved = await resolveImageUrl(item.imageUrl, options.bridgeOrigin);
       if (resolved) {
@@ -133,8 +131,7 @@ export async function buildLocalLlmMessages(options: {
     });
     return messages;
   }
-  const last = recent[recent.length - 1];
-  if (last?.role === "user" && last.content.trim() === options.prompt.trim()) {
+  if (isPromptDuplicatedInRecentHistory(options.history, options.prompt)) {
     return messages;
   }
   messages.push({ role: "user", content: options.prompt });

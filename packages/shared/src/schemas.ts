@@ -182,6 +182,16 @@ export const latestRunResponseSchema = z.object({
 export type LatestRunResponse = z.infer<typeof latestRunResponseSchema>;
 
 
+/** GET /chat/runs/:runId/final-text 响应体 */
+export const runFinalTextResponseSchema = z.object({
+  runId: z.string().min(1),
+  status: z.enum(["pending", "running", "finished", "error"]),
+  text: z.string(),
+});
+
+export type RunFinalTextResponse = z.infer<typeof runFinalTextResponseSchema>;
+
+
 /** GET /models 单项 */
 export const modelInfoSchema = z.object({
   id: z.string().min(1),
@@ -473,6 +483,7 @@ export const knowledgeNodeSchema = z.object({
   name: z.string().min(1),
   parentId: z.string().nullable(),
   hasContent: z.boolean().optional(),
+  tags: z.array(z.string().min(1).max(64)).optional(),
 });
 
 export type KnowledgeNode = z.infer<typeof knowledgeNodeSchema>;
@@ -516,7 +527,10 @@ export type KnowledgeUploadContentResponse = z.infer<typeof knowledgeUploadConte
 
 /** PATCH /knowledge/nodes/:id 请求体 */
 export const knowledgeRenameNodeRequestSchema = z.object({
-  name: z.string().min(1).max(120),
+  name: z.string().min(1).max(120).optional(),
+  tags: z.array(z.string().min(1).max(64)).optional(),
+}).refine((body) => body.name !== undefined || body.tags !== undefined, {
+  message: "name 或 tags 至少提供一个",
 });
 
 export type KnowledgeRenameNodeRequest = z.infer<typeof knowledgeRenameNodeRequestSchema>;

@@ -20,6 +20,7 @@ $ErrorActionPreference = "Continue"
 . (Join-Path $PSScriptRoot "Resolve-TokenSyncDir.ps1")
 . (Join-Path $PSScriptRoot "Resolve-CloudflareTunnel.ps1")
 . (Join-Path $PSScriptRoot "TokenFilePids.ps1")
+. (Join-Path $PSScriptRoot "Get-TokenFileName.ps1")
 $script:NamedTunnelConfig = Read-NamedCloudflareTunnelConfig
 $TokenSyncDir = Resolve-TokenSyncDir -Override $TokenSyncDir
 $script:ServicePids = @{}
@@ -318,7 +319,7 @@ function Ensure-HttpsPublicBridgeUrl([string]$Url) {
 
 
 function Get-TokenFilePath {
-  return Join-Path $TokenSyncDir "chattingcursor-token.txt"
+  return Get-ChattingCursorTokenFilePath -TokenSyncDir $TokenSyncDir
 }
 
 

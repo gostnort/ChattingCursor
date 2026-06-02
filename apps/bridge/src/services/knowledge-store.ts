@@ -14,6 +14,8 @@ interface WikiIndexNode {
   id: string;
   name: string;
   parentId: string | null;
+  /** 上传时标注的标签，用于对话中按标签检索 */
+  tags?: string[];
 }
 
 
@@ -85,12 +87,35 @@ async function nodeHasContent(nodeId: string): Promise<boolean> {
 
 
 /** 转为 API 节点 */
+function normalizeTags(tags: string[] | undefined): string[] {
+  if (!tags?.length) {
+    return [];
+  }
+  const seen = new Set<string>();
+  const ordered: string[] = [];
+  for (const raw of tags) {
+    const tag = raw.trim();
+    if (tag.length < 1) {
+      continue;
+    }
+    const key = tag.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    ordered.push(tag);
+  }
+  return ordered;
+}
+
+
 async function toApiNode(node: WikiIndexNode): Promise<KnowledgeNode> {
   return {
     id: node.id,
     name: node.name,
     parentId: node.parentId,
     hasContent: await nodeHasContent(node.id),
+    tags: normalizeTags(node.tags),
   };
 }
 
@@ -111,19 +136,33 @@ export async function listKnowledgeTree(): Promise<{
 }
 
 
-/** 重命名节点 */
-export async function renameKnowledgeNode(nodeId: string, name: string): Promise<KnowledgeNode> {
+/** 重命名节点或更新元数据 */
+export async function updateKnowledgeNode(
+  nodeId: string,
+  patch: { name?: string; tags?: string[] },
+): Promise<KnowledgeNode> {
   const index = await loadIndex();
   if (!index.nodes[nodeId]) {
     throw new Error("节点不存在");
   }
-  const trimmed = name.trim();
-  if (!trimmed) {
-    throw new Error("节点名称不能为空");
+  if (patch.name !== undefined) {
+    const trimmed = patch.name.trim();
+    if (!trimmed) {
+      throw new Error("节点名称不能为空");
+    }
+    index.nodes[nodeId].name = trimmed;
   }
-  index.nodes[nodeId].name = trimmed;
+  if (patch.tags !== undefined) {
+    index.nodes[nodeId].tags = normalizeTags(patch.tags);
+  }
   await saveIndex(index);
   return toApiNode(index.nodes[nodeId]);
+}
+
+
+/** 重命名节点 */
+export async function renameKnowledgeNode(nodeId: string, name: string): Promise<KnowledgeNode> {
+  return updateKnowledgeNode(nodeId, { name });
 }
 
 
@@ -144,16 +183,80 @@ export async function createKnowledgeChild(parentId: string, name: string): Prom
 }
 
 
-/** 上传或覆盖节点 markdown */
-export async function uploadKnowledgeMarkdown(nodeId: string, markdown: string): Promise<number> {
+/** 上传或覆盖节点 markdown（可选同时写入标签） */
+export async function uploadKnowledgeMarkdown(
+  nodeId: string,
+  markdown: string,
+  tags?: string[],
+): Promise<number> {
   const index = await loadIndex();
   if (!index.nodes[nodeId]) {
     throw new Error("节点不存在");
+  }
+  if (tags !== undefined) {
+    index.nodes[nodeId].tags = normalizeTags(tags);
+    await saveIndex(index);
   }
   const bytes = Buffer.byteLength(markdown, "utf8");
   await mkdir(path.join(getKnowledgeDir(), CONTENT_DIR), { recursive: true });
   await writeFile(getContentPath(nodeId), markdown, "utf8");
   return bytes;
+}
+
+
+/** 更新节点标签（不改 markdown） */
+export async function setKnowledgeNodeTags(nodeId: string, tags: string[]): Promise<KnowledgeNode> {
+  const index = await loadIndex();
+  if (!index.nodes[nodeId]) {
+    throw new Error("节点不存在");
+  }
+  index.nodes[nodeId].tags = normalizeTags(tags);
+  await saveIndex(index);
+  return toApiNode(index.nodes[nodeId]);
+}
+
+
+/** 列出知识库中所有不重复标签 */
+export async function listAllKnowledgeTags(): Promise<string[]> {
+  const index = await loadIndex();
+  const seen = new Set<string>();
+  const tags: string[] = [];
+  for (const node of Object.values(index.nodes)) {
+    for (const tag of normalizeTags(node.tags)) {
+      const key = tag.toLowerCase();
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      tags.push(tag);
+    }
+  }
+  return tags.sort((left, right) => left.localeCompare(right, "zh-CN"));
+}
+
+
+/** 按标签 OR 匹配节点（需有内容） */
+export async function searchKnowledgeNodesByTags(
+  tags: string[],
+): Promise<Array<WikiIndexNode & { tags: string[] }>> {
+  const index = await loadIndex();
+  const normalizedTags = tags.map((tag) => tag.trim().toLowerCase()).filter((tag) => tag.length > 0);
+  if (normalizedTags.length === 0) {
+    return [];
+  }
+  const matched: Array<WikiIndexNode & { tags: string[] }> = [];
+  for (const node of Object.values(index.nodes)) {
+    const nodeTags = normalizeTags(node.tags);
+    const hit = nodeTags.some((tag) => normalizedTags.includes(tag.toLowerCase()));
+    if (!hit) {
+      continue;
+    }
+    if (!(await nodeHasContent(node.id))) {
+      continue;
+    }
+    matched.push({ ...node, tags: nodeTags });
+  }
+  return matched;
 }
 
 

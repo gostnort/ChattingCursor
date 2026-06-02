@@ -5,7 +5,9 @@ param(
 )
 
 . (Join-Path $PSScriptRoot "Resolve-TokenSyncDir.ps1")
+. (Join-Path $PSScriptRoot "Get-TokenFileName.ps1")
 $TokenSyncDir = Resolve-TokenSyncDir -Override $TokenSyncDir
+$TokenFilePath = Get-ChattingCursorTokenFilePath -TokenSyncDir $TokenSyncDir
 
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
@@ -31,4 +33,4 @@ Write-Host "接下来你还需要："
 Write-Host "1. 让公网域名转发到本机 Bridge（tunnel）— 见 docs\CLOUDFLARE_TUNNEL_SETUP.md"
 Write-Host "   快速试通: .\scripts\start-tunnel-quick.ps1"
 Write-Host "2. 在手机网页里填写 Bridge URL"
-Write-Host "3. 从同步目录里的 chattingcursor-token.txt 查看当天口令"
+Write-Host "3. 从同步目录里的 $(Split-Path -Leaf $TokenFilePath) 查看当天口令"

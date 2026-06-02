@@ -6,9 +6,28 @@ import {
   createKnowledgeChild,
   deleteKnowledgeNode,
   listKnowledgeTree,
-  renameKnowledgeNode,
+  updateKnowledgeNode,
   uploadKnowledgeMarkdown,
 } from "../services/knowledge-store.js";
+
+
+function parseTagsField(raw: string | undefined): string[] | undefined {
+  if (!raw?.trim()) {
+    return undefined;
+  }
+  const trimmed = raw.trim();
+  if (trimmed.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(trimmed) as unknown;
+      if (Array.isArray(parsed)) {
+        return parsed.map((item) => String(item));
+      }
+    } catch {
+      return trimmed.split(/[,，]/).map((part) => part.trim()).filter(Boolean);
+    }
+  }
+  return trimmed.split(/[,，]/).map((part) => part.trim()).filter(Boolean);
+}
 
 
 /** 注册知识库 wiki 路由（本机可写，远程可读需 token + 本机 Bridge） */
@@ -57,9 +76,12 @@ export async function registerKnowledgeRoutes(app: FastifyInstance): Promise<voi
     }
     const buffer = await file.toBuffer();
     const text = buffer.toString("utf8");
+    const tagsField = file.fields.tags;
+    const tagsRaw = tagsField && "value" in tagsField ? String(tagsField.value) : undefined;
+    const tags = parseTagsField(tagsRaw);
     try {
-      const bytes = await uploadKnowledgeMarkdown(nodeId, text);
-      return reply.send({ nodeId, bytes });
+      const bytes = await uploadKnowledgeMarkdown(nodeId, text, tags);
+      return reply.send({ nodeId, bytes, tags: tags ?? [] });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return reply.status(400).send({ error: "upload_failed", message });
@@ -74,7 +96,10 @@ export async function registerKnowledgeRoutes(app: FastifyInstance): Promise<voi
       return reply.status(400).send({ error: "invalid_request", details: parsed.error.flatten() });
     }
     try {
-      const node = await renameKnowledgeNode(nodeId, parsed.data.name);
+      const node = await updateKnowledgeNode(nodeId, {
+        name: parsed.data.name,
+        tags: parsed.data.tags,
+      });
       return reply.send({ node });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

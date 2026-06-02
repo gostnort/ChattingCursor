@@ -115,7 +115,7 @@ export function ConfigSubPage({
   const [loading, setLoading] = useState(true);
   const [bridgeUrlInput, setBridgeUrlInput] = useState(bridgeUrl);
   const [tokenInput, setTokenInput] = useState(bridgeToken);
-  const [tokenFileName, setTokenFileName] = useState("chattingcursor-token.txt");
+  const [tokenFileName, setTokenFileName] = useState("");
   const [tokenDirectoryInput, setTokenDirectoryInput] = useState("");
   const [webPortInput, setWebPortInput] = useState(() => String(getWebPort()));
   const [savedWebPort, setSavedWebPort] = useState(() => getWebPort());
@@ -223,7 +223,7 @@ export function ConfigSubPage({
           setCloudflareConfigPath(tunnelConfig.configPath);
           setCloudflareNamedEnabled(Boolean(tunnelConfig.namedTunnelEnabled));
         }
-        setTokenFileName(config.tokenFilePath.split(/[\\/]/).pop() ?? "chattingcursor-token.txt");
+        setTokenFileName(config.tokenFilePath.split(/[\\/]/).pop() ?? "");
         const fileToken = tokenFile ? parseTodayTokenFromContent(tokenFile.content) : "";
         if (fileToken && fileToken !== bridgeToken) {
           setTokenInput(fileToken);
