@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>ChattingCursor</title>
+    <script>
+      (function () {
+        var redirect = sessionStorage.redirect;
+        delete sessionStorage.redirect;
+        if (redirect) {
+          history.replaceState(null, "", redirect);
+        }
+      })();
+    </script>
+    <script type="module" crossorigin src="/ChattingCursor/assets/index-kEFwAPIN.js"></script>
+    <link rel="stylesheet" crossorigin href="/ChattingCursor/assets/index-Xmef_Sdu.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>
