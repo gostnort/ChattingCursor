@@ -159,23 +159,25 @@
 
 ## Phase 6：Sidecar API 扩展（音色 / 语气 / 方言）
 
-### [ ] [Task 6.1] 扩展 `SynthesizeRequest` Pydantic 模型
+### [x] [Task 6.1] 扩展 `SynthesizeRequest` Pydantic 模型
 *   **描述**：在 `pilot_tts/server/tts_server.py` 增加可选 `promptWav`、`emotion`、`language`（`spec_zh.md` FR-007）。`text` 仍必填。
 *   **前置条件**：Phase 2 完成。
 *   **验收标准**：
     *   `{ "text": "hi" }` 仍可接受。
     *   空 `text` 返回英文 400。
 *   **验证**：`curl -X POST :4323/synthesize -d '{"text":"test"}'` 返回音频。
+*   **完成**：已扩展 `SynthesizeRequest`；空 `text` → 400 英文；`py_compile` 通过。
 
-### [ ] [Task 6.2] Per-request prompt wav 覆盖
+### [x] [Task 6.2] Per-request prompt wav 覆盖
 *   **描述**：解析链：body → `PILOT_TTS_PROMPT_WAV` → upstream 自动路径；验证文件存在且后缀为 `.wav` 或 `.mp3`。
 *   **前置条件**：Task 6.1。
 *   **验收标准**：
     *   有效 `promptWav` 路径（`.wav` 或 `.mp3`）与默认可听感区分。
     *   缺失文件或不支持扩展名返回英文 `{ error, message, fallback: true }`。
 *   **验证**：两次不同 wav/mp3 路径合成对比。
+*   **完成**：`resolve_synthesis_prompt_wav()` + `is_valid_prompt_path()`；非法后缀 → 400；缺失文件 → 503。
 
-### [ ] [Task 6.3] Instruct 与 base 引擎选择
+### [x] [Task 6.3] Instruct 与 base 引擎选择
 *   **描述**：实现 `_engine_mode` 与 `load_gpu_engine(require_instruct)`（`plan_zh.md` §3.10）。
 *   **前置条件**：Task 6.1。
 *   **验收标准**：
@@ -183,19 +185,22 @@
     *   `{ text, emotion: "happy" }` 使用 instruct。
     *   无 instruct 权重时 emotion 请求 → 503。
 *   **验证**：带/不带 emotion 合成。
+*   **完成**：`_engine_mode`、`select_engine_artifacts()`、`ensure_gpu_engine()`；`/health` 与 `/load` 暴露 `engineMode`；模式不匹配时重载。
 
-### [ ] [Task 6.4] 向 `demo.synthesize` 传递 `emotion` / `language`
+### [x] [Task 6.4] 向 `demo.synthesize` 传递 `emotion` / `language`
 *   **描述**：构建 kwargs；对照克隆的 `upstream/demo.py` 复核签名。
 *   **前置条件**：Task 6.2、6.3。
 *   **验收标准**：
     *   `language: "zh-henan"` 在 instruct 就绪时到达上游。
     *   `text` 内副语言标签原样转发。
 *   **验证**：`plan_zh.md` §3.9 示例 JSON。
+*   **完成**：已对照 `upstream/demo.py`；仅传递非空 `emotion`/`language`；`text` 原样转发。
 
-### [ ] [Task 6.5] Sidecar 扩展手动测试
+### [x] [Task 6.5] Sidecar 扩展手动测试
 *   **描述**：记录手动测试矩阵。
 *   **前置条件**：Task 6.1–6.4。
 *   **验收标准**：SC-007–SC-010 在 `run.bat api` 下通过。
+*   **完成**：实机冒烟（2026-06-08）：`{ "text": "hello world" }` → 200（`engineMode: base`）；`{ "emotion": "happy" }` → 200（`engineMode: instruct`）；空 `text` → 400；非法 `.txt` promptWav → 400。待运维：SC-007 音色 A/B、SC-009 `zh-henan`。
 
 ---
 

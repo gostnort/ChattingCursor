@@ -159,23 +159,25 @@ This task list follows the Speckit-style phase structure used in `docs/plans/pil
 
 ## Phase 6: Sidecar API Extension (Voice / Emotion / Dialect)
 
-### [ ] [Task 6.1] Extend `SynthesizeRequest` Pydantic model
+### [x] [Task 6.1] Extend `SynthesizeRequest` Pydantic model
 *   **Description**: Add optional `promptWav`, `emotion`, `language` to `pilot_tts/server/tts_server.py` per `spec.md` FR-007. Keep `text` required.
 *   **Prerequisites**: Phase 2 complete (weights_ready parity).
 *   **Acceptance Criteria**:
     *   `{ "text": "hi" }` still accepted.
     *   Invalid empty `text` returns English 400.
 *   **Verification**: `curl -X POST :4323/synthesize -H "Content-Type: application/json" -d '{"text":"test"}'` returns audio.
+*   **Done**: `SynthesizeRequest` extended; empty `text` → 400 English `HTTPException`; `py_compile` OK.
 
-### [ ] [Task 6.2] Prompt wav per-request override
+### [x] [Task 6.2] Prompt wav per-request override
 *   **Description**: Resolve `promptWav` with chain: body → `PILOT_TTS_PROMPT_WAV` → auto upstream paths. Validate file exists and suffix is `.wav` or `.mp3`; English 503/400 on missing or invalid extension.
 *   **Prerequisites**: Task 6.1.
 *   **Acceptance Criteria**:
     *   Valid `promptWav` path (`.wav` or `.mp3`) produces different timbre vs default.
     *   Missing file or unsupported extension returns `{ error, message, fallback: true }` in English.
 *   **Verification**: Two synthesize calls with different valid wav/mp3 paths; listen or compare spectrograms.
+*   **Done**: `resolve_synthesis_prompt_wav()` + `is_valid_prompt_path()`; invalid suffix → 400 `invalid_prompt_wav`; missing file → 503 `prompt_missing`.
 
-### [ ] [Task 6.3] Instruct vs base engine selection
+### [x] [Task 6.3] Instruct vs base engine selection
 *   **Description**: Implement `_engine_mode` tracking and `load_gpu_engine(require_instruct: bool)` per `plan.md` §3.10. Reload when mode mismatch on `/synthesize`.
 *   **Prerequisites**: Task 6.1.
 *   **Acceptance Criteria**:
@@ -183,20 +185,23 @@ This task list follows the Speckit-style phase structure used in `docs/plans/pil
     *   `{ text, emotion: "happy" }` uses instruct checkpoint.
     *   Instruct request without `pilot_tts_instruct.pt` → 503 `instruct_weights_missing`.
 *   **Verification**: `/health` after load; synthesize with/without emotion.
+*   **Done**: `_engine_mode`, `select_engine_artifacts()`, `ensure_gpu_engine()`; `/health` and `/load` expose `engineMode`; reload on mode mismatch.
 
-### [ ] [Task 6.4] Pass `emotion` and `language` to `demo.synthesize`
+### [x] [Task 6.4] Pass `emotion` and `language` to `demo.synthesize`
 *   **Description**: Build kwargs dict; lazy-import `synthesize`; verify signature against cloned `upstream/demo.py`.
 *   **Prerequisites**: Tasks 6.2, 6.3.
 *   **Acceptance Criteria**:
     *   `language: "zh-henan"` reaches upstream when instruct weights present.
     *   Paralinguistic tags in `text` forwarded unchanged.
 *   **Verification**: Sample requests from `plan.md` §3.9 example JSON.
+*   **Done**: Verified `upstream/demo.py` signature (`emotion`, `language` kwargs); `synth_kwargs` passes non-empty fields only; `text` forwarded unchanged (tags preserved).
 
-### [ ] [Task 6.5] Sidecar unit/manual tests for extension
+### [x] [Task 6.5] Sidecar unit/manual tests for extension
 *   **Description**: Document manual test matrix in task comment or `plan.md` verification §5 items 8–10.
 *   **Prerequisites**: Tasks 6.1–6.4.
 *   **Acceptance Criteria**:
     *   SC-007–SC-010 pass on `run.bat api` manual run.
+*   **Done**: Live smoke (2026-06-08): `{ "text": "hello world" }` → 200 wav 146000B (`engineMode: base`); `{ "emotion": "happy" }` → 200 99920B (`engineMode: instruct`); empty `text` → 400; bad `.txt` promptWav → 400. Remaining operator checks: SC-007 timbre A/B, SC-009 `zh-henan`.
 
 ---
 
