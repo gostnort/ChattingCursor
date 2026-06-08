@@ -12,6 +12,12 @@ export type SchedulerUserSettings = {
   /** 用户勾选「启用朗读 API」：会话内自动启动 4323 与 GPU 预热 */
   pilotTtsApiEnabled: boolean;
   pilotTtsReservedVramGb: number;
+  /** 默认音色参考音频绝对路径（.wav 或 .mp3） */
+  pilotTtsPromptWavPath: string;
+  /** 默认语气标签（如 happy、neutral） */
+  pilotTtsDefaultEmotion: string;
+  /** 默认方言标签（如 zh-henan） */
+  pilotTtsDefaultLanguage: string;
   defaultOfflineVlmRepo: string;
   offlineVlmEnabled: boolean;
 };
@@ -34,6 +40,9 @@ export async function readSchedulerUserSettings(): Promise<SchedulerUserSettings
       pilotTtsEnabled: true,
       pilotTtsApiEnabled: false,
       pilotTtsReservedVramGb: DEFAULT_RESERVED_GB,
+      pilotTtsPromptWavPath: "",
+      pilotTtsDefaultEmotion: "",
+      pilotTtsDefaultLanguage: "",
       defaultOfflineVlmRepo: vision.defaultRepoId || DEFAULT_OFFLINE_VLM_REPO,
       offlineVlmEnabled: vision.enabled,
     };
@@ -46,6 +55,9 @@ export async function readSchedulerUserSettings(): Promise<SchedulerUserSettings
       pilotTtsEnabled: parsed.pilotTtsEnabled !== false,
       pilotTtsApiEnabled: parsed.pilotTtsApiEnabled === true,
       pilotTtsReservedVramGb: Number.isFinite(reserved) && reserved > 0 ? reserved : DEFAULT_RESERVED_GB,
+      pilotTtsPromptWavPath: parsed.pilotTtsPromptWavPath?.trim() ?? "",
+      pilotTtsDefaultEmotion: parsed.pilotTtsDefaultEmotion?.trim() ?? "",
+      pilotTtsDefaultLanguage: parsed.pilotTtsDefaultLanguage?.trim() ?? "",
       defaultOfflineVlmRepo: parsed.defaultOfflineVlmRepo?.trim() || DEFAULT_OFFLINE_VLM_REPO,
       offlineVlmEnabled: parsed.offlineVlmEnabled !== false,
     };
@@ -54,6 +66,9 @@ export async function readSchedulerUserSettings(): Promise<SchedulerUserSettings
       pilotTtsEnabled: true,
       pilotTtsApiEnabled: false,
       pilotTtsReservedVramGb: DEFAULT_RESERVED_GB,
+      pilotTtsPromptWavPath: "",
+      pilotTtsDefaultEmotion: "",
+      pilotTtsDefaultLanguage: "",
       defaultOfflineVlmRepo: DEFAULT_OFFLINE_VLM_REPO,
       offlineVlmEnabled: vision.enabled,
     };
@@ -70,6 +85,9 @@ export async function writeSchedulerUserSettings(
     pilotTtsEnabled: patch.pilotTtsEnabled ?? current.pilotTtsEnabled,
     pilotTtsApiEnabled: patch.pilotTtsApiEnabled ?? current.pilotTtsApiEnabled,
     pilotTtsReservedVramGb: patch.pilotTtsReservedVramGb ?? current.pilotTtsReservedVramGb,
+    pilotTtsPromptWavPath: patch.pilotTtsPromptWavPath?.trim() ?? current.pilotTtsPromptWavPath,
+    pilotTtsDefaultEmotion: patch.pilotTtsDefaultEmotion?.trim() ?? current.pilotTtsDefaultEmotion,
+    pilotTtsDefaultLanguage: patch.pilotTtsDefaultLanguage?.trim() ?? current.pilotTtsDefaultLanguage,
     defaultOfflineVlmRepo: patch.defaultOfflineVlmRepo?.trim() || current.defaultOfflineVlmRepo,
     offlineVlmEnabled: patch.offlineVlmEnabled ?? current.offlineVlmEnabled,
   };

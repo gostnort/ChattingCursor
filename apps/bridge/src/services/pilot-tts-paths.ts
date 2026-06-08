@@ -124,6 +124,12 @@ export function isPilotTtsWeightsReady(): boolean {
 }
 
 
+export function isPilotTtsInstructWeightsPresent(): boolean {
+  const weights = getPilotTtsWeightsDir();
+  return existsSync(path.join(weights, "pilot_tts_instruct.pt"));
+}
+
+
 export function resolvePilotTtsWebuiScript(): string {
   return path.join(getPilotTtsUpstreamDir(), "webui.py");
 }

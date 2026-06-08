@@ -20,11 +20,18 @@ import {
 } from "../services/pilot-tts-lifecycle.js";
 import {
   getPilotTtsInstallSnapshot,
+  isPilotTtsInstructWeightsPresent,
   isPilotTtsUpstreamPresent,
   isPilotTtsWeightsReady,
 } from "../services/pilot-tts-paths.js";
 import { getPilotTtsInstallJob, startPilotTtsInstall } from "../services/pilot-tts-install.js";
 import { mapPilotWebuiError, probePilotTtsWebui } from "../services/pilot-tts-webui-spawn.js";
+import {
+  mergeSynthesizePayload,
+  requiresInstructSynthesis,
+  type SynthesizeRequestBody,
+} from "../services/pilot-tts-synthesize.js";
+import { readSchedulerUserSettings } from "../services/scheduler-settings.js";
 import {
   getResourceSchedulerSnapshot,
   isResourceSchedulerBlocked,
@@ -212,7 +219,7 @@ export async function registerTtsRoutes(app: FastifyInstance): Promise<void> {
 
 
   app.post("/tts/synthesize", async (request, reply) => {
-    const body = (request.body ?? {}) as { text?: string };
+    const body = (request.body ?? {}) as SynthesizeRequestBody;
     const text = body.text?.trim() ?? "";
     if (!text) {
       return reply.status(400).send({ error: "invalid_request", message: "text 不能为空" });
@@ -221,6 +228,15 @@ export async function registerTtsRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(503).send({
         error: "weights_missing",
         message: "PilotTTS 权重未安装。请运行 pilot_tts/install.bat 下载 AmapVoice/PilotTTS。",
+        fallback: true,
+      });
+    }
+    const settings = await readSchedulerUserSettings();
+    const merged = mergeSynthesizePayload(body, settings);
+    if (requiresInstructSynthesis(merged) && !isPilotTtsInstructWeightsPresent()) {
+      return reply.status(503).send({
+        error: "instruct_weights_missing",
+        message: "Instruct model weights are not installed. Emotion and dialect require pilot_tts_instruct.pt.",
         fallback: true,
       });
     }
@@ -245,7 +261,7 @@ export async function registerTtsRoutes(app: FastifyInstance): Promise<void> {
     const response = await fetch(`${resolvePilotTtsBaseUrl()}/synthesize`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify(merged),
     });
     if (response.ok && (response.headers.get("content-type") ?? "").includes("audio")) {
       const buffer = Buffer.from(await response.arrayBuffer());

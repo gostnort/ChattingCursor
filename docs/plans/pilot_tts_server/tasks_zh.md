@@ -206,34 +206,38 @@
 
 ## Phase 7：Bridge 透传与 Spawn 默认
 
-### [ ] [Task 7.1] 扩展 `SchedulerUserSettings` schema
+### [x] [Task 7.1] 扩展 `SchedulerUserSettings` schema
 *   **描述**：在 `scheduler-settings.ts` 增加 `pilotTtsPromptWavPath`、`pilotTtsDefaultEmotion`、`pilotTtsDefaultLanguage`。
 *   **前置条件**：Task 6.1。
 *   **验收标准**：
     *   `GET/POST /local/scheduler-settings` 往返新字段。
     *   更新 `scheduler-settings.test.ts`。
 *   **验证**：经 API 保存并读取 home 目录 JSON。
+*   **完成**：扩展 schema 与 `local.ts` POST body；`scheduler-settings.test.ts` 覆盖 TTS 扩展字段往返。
 
-### [ ] [Task 7.2] Bridge `/tts/synthesize` 合并与透传
+### [x] [Task 7.2] Bridge `/tts/synthesize` 合并与透传
 *   **描述**：扩展 `tts.ts`：合并请求与持久化默认；代理完整 JSON 至 `:4323`。
 *   **前置条件**：Task 7.1。
 *   **验收标准**：
     *   客户端 `{ text }` + 已保存默认 → sidecar 收到合并 body。
     *   请求字段覆盖已保存默认。
 *   **验证**：Bridge curl 或集成测试。
+*   **完成**：`pilot-tts-synthesize.ts` 合并逻辑；`tts.ts` 代理完整 JSON；缺 instruct 权重且含 emotion/language 时返回英文 503。
 
-### [ ] [Task 7.3] Spawn 时可选注入 `PILOT_TTS_PROMPT_WAV`
+### [x] [Task 7.3] Spawn 时可选注入 `PILOT_TTS_PROMPT_WAV`
 *   **描述**：在 `pilot-tts-spawn.ts` 从设置注入非空默认 wav 路径。
 *   **前置条件**：Task 7.1。
 *   **验收标准**：
     *   请求省略 `promptWav` 时使用 spawn 默认。
     *   per-request 覆盖无需重启。
 *   **验证**：启用 TTS 车道后无 body `promptWav` 合成。
+*   **完成**：`spawnPilotTtsServer()` 读取设置并注入 `PILOT_TTS_PROMPT_WAV`（设置优先于 env）。
 
-### [ ] [Task 7.4] Bridge synthesize 扩展测试
+### [x] [Task 7.4] Bridge synthesize 扩展测试
 *   **描述**：新增/更新路由测试，断言合并 JSON 形状。
 *   **前置条件**：Task 7.2。
 *   **验收标准**：覆盖默认合并、覆盖、空字符串省略。
+*   **完成**：`pilot-tts-synthesize.test.ts`、`tts-synthesize-route.test.ts`、`pilot-tts-paths.test.ts` instruct 检测。
 
 ---
 

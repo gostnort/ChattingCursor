@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import {
   getPilotTtsUpstreamDir,
+  isPilotTtsInstructWeightsPresent,
   isPilotTtsUpstreamPresent,
   isPilotTtsWeightsReady,
   resolvePilotTtsInstallPhase,
@@ -108,6 +109,28 @@ test("手动 install.bat 后能从 sidecar 旁路检测到 upstream/webui.py", (
       delete process.env.PILOT_TTS_ROOT;
     } else {
       process.env.PILOT_TTS_ROOT = previousRoot;
+    }
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+
+test("isPilotTtsInstructWeightsPresent 检测 instruct 检查点", () => {
+  const tempRoot = mkdtempSync(join(tmpdir(), "pilot-instruct-"));
+  const previousWeights = process.env.PILOT_TTS_WEIGHTS_DIR;
+  try {
+    const weights = join(tempRoot, "pretrained_models");
+    mkdirSync(weights, { recursive: true });
+    writeFileSync(join(weights, "pilot_tts.pt"), "x", "utf8");
+    process.env.PILOT_TTS_WEIGHTS_DIR = weights;
+    assert.equal(isPilotTtsInstructWeightsPresent(), false);
+    writeFileSync(join(weights, "pilot_tts_instruct.pt"), "x", "utf8");
+    assert.equal(isPilotTtsInstructWeightsPresent(), true);
+  } finally {
+    if (previousWeights === undefined) {
+      delete process.env.PILOT_TTS_WEIGHTS_DIR;
+    } else {
+      process.env.PILOT_TTS_WEIGHTS_DIR = previousWeights;
     }
     rmSync(tempRoot, { recursive: true, force: true });
   }

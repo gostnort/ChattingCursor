@@ -207,15 +207,16 @@ This task list follows the Speckit-style phase structure used in `docs/plans/pil
 
 ## Phase 7: Bridge Passthrough & Spawn Defaults
 
-### [ ] [Task 7.1] Extend `SchedulerUserSettings` schema
+### [x] [Task 7.1] Extend `SchedulerUserSettings` schema
 *   **Description**: Add `pilotTtsPromptWavPath`, `pilotTtsDefaultEmotion`, `pilotTtsDefaultLanguage` to `apps/bridge/src/services/scheduler-settings.ts` with defaults `""`.
 *   **Prerequisites**: Task 6.1 (sidecar accepts fields).
 *   **Acceptance Criteria**:
     *   `GET/POST /local/scheduler-settings` round-trips new fields.
     *   Update `scheduler-settings.test.ts`.
 *   **Verification**: Save settings via API; read back JSON file in ChattingCursor home.
+*   **Done**: Schema + `local.ts` POST body extended; `scheduler-settings.test.ts` covers TTS extension fields round-trip.
 
-### [ ] [Task 7.2] Bridge `/tts/synthesize` merge and passthrough
+### [x] [Task 7.2] Bridge `/tts/synthesize` merge and passthrough
 *   **Description**: Extend `apps/bridge/src/routes/tts.ts` to merge request body with persisted defaults; proxy full JSON to sidecar `:4323`.
 *   **Prerequisites**: Task 7.1.
 *   **Acceptance Criteria**:
@@ -223,20 +224,23 @@ This task list follows the Speckit-style phase structure used in `docs/plans/pil
     *   Per-request fields override saved defaults.
     *   English errors for instruct-missing when emotion/language set.
 *   **Verification**: Integration test or manual Bridge curl to `/tts/synthesize`.
+*   **Done**: `mergeSynthesizePayload` in `pilot-tts-synthesize.ts`; `tts.ts` merges + proxies; `instruct_weights_missing` 503 before sidecar when emotion/language set without instruct checkpoint.
 
-### [ ] [Task 7.3] Optional `PILOT_TTS_PROMPT_WAV` on spawn
+### [x] [Task 7.3] Optional `PILOT_TTS_PROMPT_WAV` on spawn
 *   **Description**: In `pilot-tts-spawn.ts`, inject `PILOT_TTS_PROMPT_WAV` from settings when non-empty (read settings before spawn or pass from lifecycle).
 *   **Prerequisites**: Task 7.1.
 *   **Acceptance Criteria**:
     *   Sidecar `/health` + synthesize use spawned default when request omits `promptWav`.
     *   Per-request override still works without respawn.
 *   **Verification**: Start TTS lane with saved wav path; synthesize without `promptWav` in body.
+*   **Done**: `spawnPilotTtsServer()` reads settings; env `PILOT_TTS_PROMPT_WAV` = settings path || env override.
 
-### [ ] [Task 7.4] Bridge tests for synthesize extension
+### [x] [Task 7.4] Bridge tests for synthesize extension
 *   **Description**: Add/update route tests mocking sidecar; assert merged JSON shape.
 *   **Prerequisites**: Task 7.2.
 *   **Acceptance Criteria**:
     *   Tests cover default merge, override, and empty-string omission.
+*   **Done**: `pilot-tts-synthesize.test.ts` (merge + mp3 validation); `tts-synthesize-route.test.ts` (merge, override, instruct-missing 503); `pilot-tts-paths.test.ts` instruct checkpoint helper.
 
 ---
 

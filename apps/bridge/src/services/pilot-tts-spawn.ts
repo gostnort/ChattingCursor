@@ -9,6 +9,7 @@ import {
   resolvePilotTtsSidecarScriptPath,
 } from "./pilot-tts-paths.js";
 import { resolvePilotTtsPort } from "./pilot-tts-lifecycle.js";
+import { readSchedulerUserSettings } from "./scheduler-settings.js";
 
 
 function readEnv(name: string): string {
@@ -46,6 +47,8 @@ export async function spawnPilotTtsServer(): Promise<void> {
   const port = resolvePilotTtsPort();
   const weightsDir = getPilotTtsWeightsDir();
   const upstreamDir = getPilotTtsUpstreamDir();
+  const settings = await readSchedulerUserSettings();
+  const promptWavFromSettings = settings.pilotTtsPromptWavPath.trim();
   const child = spawn(python, [script], {
     cwd: upstreamDir,
     env: {
@@ -56,6 +59,7 @@ export async function spawnPilotTtsServer(): Promise<void> {
       PILOT_TTS_WEIGHTS_DIR: weightsDir,
       PILOT_TTS_RESERVED_VRAM_GB: readEnv("PILOT_TTS_RESERVED_VRAM_GB") || "3",
       PILOT_TTS_AUTO_LOAD: readEnv("PILOT_TTS_AUTO_LOAD") || "0",
+      PILOT_TTS_PROMPT_WAV: promptWavFromSettings || readEnv("PILOT_TTS_PROMPT_WAV") || "",
     },
     stdio: "ignore",
     windowsHide: true,
