@@ -26,7 +26,7 @@ This task list strictly follows the Speckit specification, breaking down the tec
 
 ## Phase 2: Foundational
 
-### [Task 2.1] Dynamic Hardware Adaptation Detection Mechanism
+### [x] [Task 2.1] Dynamic Hardware Adaptation Detection Mechanism
 *   **Description**:
     *   In `install.ps1`, query the `Win32_VideoController` CIM instances to retrieve the graphics card list and check for the "NVIDIA" keyword.
     *   As a fallback, detect if `nvidia-smi` is in the `PATH` or if the driver exists.
@@ -36,7 +36,7 @@ This task list strictly follows the Speckit specification, breaking down the tec
     *   On integrated graphics/CPU-only machines, prints: `No NVIDIA GPU detected. Gracefully falling back to CPU version of PyTorch.`
 *   **Prerequisites**: None
 
-### [Task 2.2] Isolated Python 3.10.x Virtual Environment Automated Deployment
+### [x] [Task 2.2] Isolated Python 3.10.x Virtual Environment Automated Deployment
 *   **Description**:
     *   Use `uv venv --python 3.10 .venv` in the `pilot_tts/` directory to create an isolated environment.
     *   Verify and update `pip` inside `.venv`.
