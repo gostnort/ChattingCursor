@@ -1,4 +1,4 @@
-# PilotTTS 安装核心控制器：环境预检、硬件检测、虚拟环境、依赖与上游部署（Phase 1–4）
+# PilotTTS 安装核心控制器：环境预检、硬件检测、虚拟环境、依赖与上游部署（Phase 1–5）
 param(
     [switch]$Reset,
     [switch]$SkipWeights
@@ -8,10 +8,75 @@ $ErrorActionPreference = "Stop"
 $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location -LiteralPath $ScriptRoot
 
+# 解析 install.bat 透传的 --reset / --skip-weights 风格参数
+foreach ($arg in $args) {
+    switch ($arg) {
+        "--reset" { $Reset = $true }
+        "--skip-weights" { $SkipWeights = $true }
+    }
+}
+
 
 function Write-InstallLog {
     param([string]$Message)
     Write-Host $Message
+}
+
+
+function Test-NonInteractiveInstall {
+    $flag = $env:PILOT_TTS_INSTALL_NONINTERACTIVE
+    if (-not $flag) {
+        return $false
+    }
+    $normalized = $flag.Trim().ToLower()
+    return $normalized -in @("1", "true", "yes")
+}
+
+
+function Confirm-ResetCleanup {
+    if (Test-NonInteractiveInstall) {
+        Write-InstallLog "[INFO] Non-interactive mode: proceeding with --reset cleanup."
+        return $true
+    }
+    Write-Host ""
+    Write-Host "[WARN] --reset will remove .venv and upstream directories." -ForegroundColor Yellow
+    $answer = Read-Host "Continue with full reset? [y/N]"
+    $normalized = if ($answer) { $answer.Trim().ToLower() } else { "" }
+    return $normalized -in @("y", "yes")
+}
+
+
+function Invoke-ResetCleanup {
+    # 在删除目录前执行 shutdown.bat 并调用 Python 安全清理逻辑（Task 5.2）
+    Write-InstallLog "=== PilotTTS Install: Reset Cleanup (Task 5.2) ==="
+    $shutdownBat = Join-Path $ScriptRoot "shutdown.bat"
+    if (Test-Path -LiteralPath $shutdownBat) {
+        Write-InstallLog "[INFO] Running shutdown.bat to release process locks..."
+        & cmd /c "`"$shutdownBat`""
+    } else {
+        Write-InstallLog "[WARN] shutdown.bat not found, skipping process shutdown step."
+    }
+    $backendScript = Join-Path $ScriptRoot "install_backend.py"
+    $venvPython = Join-Path $ScriptRoot ".venv\Scripts\python.exe"
+    if (Test-Path -LiteralPath $venvPython) {
+        & $venvPython $backendScript --reset-only
+    } else {
+        Write-InstallLog "[INFO] No .venv Python found, using uv-managed Python 3.10 for cleanup..."
+        & uv python install 3.10 2>$null | Out-Null
+        $uvPython = (& uv python find 3.10 2>&1 | Out-String).Trim()
+        if (-not $uvPython -or -not (Test-Path -LiteralPath $uvPython)) {
+            Write-Host ""
+            Write-Host "[ERROR] Unable to locate Python 3.10 for reset cleanup." -ForegroundColor Red
+            exit 1
+        }
+        & $uvPython $backendScript --reset-only
+    }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host ""
+        Write-Host "[ERROR] Reset cleanup failed." -ForegroundColor Red
+        exit 1
+    }
+    Write-InstallLog "=== Reset cleanup complete ==="
 }
 
 
@@ -189,7 +254,17 @@ function Ensure-VirtualEnvironment {
 }
 
 
-# 主流程入口：执行环境预检、硬件检测与虚拟环境部署
+# 主流程入口：处理 --reset、非交互模式，并执行环境预检与后端安装
+if ($Reset) {
+    if (-not (Confirm-ResetCleanup)) {
+        Write-InstallLog "[INFO] Reset cancelled by user."
+        exit 0
+    }
+    Invoke-ResetCleanup
+}
+if (Test-NonInteractiveInstall) {
+    Write-InstallLog "[INFO] Non-interactive install mode enabled (PILOT_TTS_INSTALL_NONINTERACTIVE=1)."
+}
 Write-InstallLog "=== PilotTTS Install: Environment Preflight ==="
 Ensure-EnvironmentPreflight
 Write-InstallLog "=== Preflight complete ==="
@@ -204,10 +279,22 @@ Write-InstallLog "=== Phase 2 foundational setup complete ==="
 Write-InstallLog "=== PilotTTS Install: Backend Executor (Phase 3-4) ==="
 $backendScript = Join-Path $ScriptRoot "install_backend.py"
 $pythonExe = Join-Path $ScriptRoot ".venv\Scripts\python.exe"
-& $pythonExe $backendScript
+$backendArgs = @($backendScript)
+if ($SkipWeights) {
+    $backendArgs += "--skip-weights"
+}
+& $pythonExe @backendArgs
 if ($LASTEXITCODE -ne 0) {
     Write-Host ""
-    Write-Host "[ERROR] Phase 3 dependency installation failed." -ForegroundColor Red
+    Write-Host "[ERROR] Backend installation failed." -ForegroundColor Red
     exit 1
 }
-Write-InstallLog "=== Phase 3-4 backend installation complete ==="
+Write-InstallLog "=== Backend installation complete ==="
+Write-InstallLog ""
+Write-InstallLog "=== PilotTTS deployment ready ==="
+Write-InstallLog "API:  http://127.0.0.1:4323  (run.bat api)"
+Write-InstallLog "WebUI: http://127.0.0.1:4324  (run.bat)"
+if (-not (Test-NonInteractiveInstall)) {
+    Write-InstallLog ""
+    Write-InstallLog "Installation complete. Run run.bat to start the WebUI."
+}

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """PilotTTS installation backend: hardware-aware PyTorch and dependency deployment."""
 
+import argparse
 import os
 import stat
 import shutil
@@ -188,6 +189,44 @@ def safe_remove_directory(target_dir: Path) -> None:
         shutil.rmtree(str(target_dir), onerror=remove_readonly)
 
 
+def run_shutdown_bat() -> None:
+    # 在目录删除前执行 shutdown.bat，释放 Python 进程占用的文件锁
+    shutdown_bat = ROOT / "shutdown.bat"
+    if shutdown_bat.is_file():
+        log("[INFO] Running shutdown.bat to release process locks...")
+        subprocess.run(
+            ["cmd", "/c", str(shutdown_bat)],
+            cwd=str(ROOT),
+            check=False,
+        )
+    else:
+        log("[WARN] shutdown.bat not found, skipping process shutdown step.")
+
+
+def perform_reset_cleanup() -> None:
+    # 执行 --reset 触发的 .venv 与 upstream 安全清理
+    run_shutdown_bat()
+    for target_name in (".venv", "upstream"):
+        safe_remove_directory(ROOT / target_name)
+    log("[OK] Reset cleanup complete.")
+
+
+def parse_cli_args() -> argparse.Namespace:
+    # 解析 install.ps1 透传的 --reset-only 与 --skip-weights 参数
+    parser = argparse.ArgumentParser(description="PilotTTS installation backend")
+    parser.add_argument(
+        "--reset-only",
+        action="store_true",
+        help="Stop services and safely remove .venv and upstream directories",
+    )
+    parser.add_argument(
+        "--skip-weights",
+        action="store_true",
+        help="Skip Hugging Face model weight download (Task 4.2)",
+    )
+    return parser.parse_args()
+
+
 def run_git(args: list[str], cwd: Path | None = None) -> None:
     # 执行 git 子命令并强制 15 秒超时，防止 Windows 网络握手挂起
     cmd = ["git"] + args
@@ -357,6 +396,11 @@ def download_hf_models(venv_py: Path, upstream_dir: Path) -> None:
 
 def main() -> int:
     try:
+        args = parse_cli_args()
+        if args.reset_only:
+            log("=== PilotTTS Install Backend: Reset Cleanup (Task 5.2) ===")
+            perform_reset_cleanup()
+            return 0
         log("=== PilotTTS Install Backend: Phase 3 Dependency Deployment ===")
         ensure_venv_python()
         extra_url = resolve_torch_extra_url()
@@ -371,9 +415,12 @@ def main() -> int:
         clone_or_update_upstream(upstream_dir)
         verify_upstream_webui(upstream_dir)
         log("=== Phase 4.1 upstream sync complete ===")
-        log("=== PilotTTS Install Backend: Phase 4.2 Model Weights ===")
-        download_hf_models(VENV_PY, upstream_dir)
-        log("=== Phase 4.2 model weights download complete ===")
+        if args.skip_weights:
+            log("[INFO] --skip-weights specified, skipping Hugging Face model download.")
+        else:
+            log("=== PilotTTS Install Backend: Phase 4.2 Model Weights ===")
+            download_hf_models(VENV_PY, upstream_dir)
+            log("=== Phase 4.2 model weights download complete ===")
         return 0
     except subprocess.CalledProcessError as exc:
         log(f"[ERROR] Command failed with exit code {exc.returncode}")

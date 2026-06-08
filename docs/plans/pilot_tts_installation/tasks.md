@@ -92,7 +92,7 @@ This task list strictly follows the Speckit specification, breaking down the tec
 
 ## Phase 5: Startup/Shutdown Control & Integration (P3 & P4)
 
-### [Task 5.1] Integrate Controller `install.ps1` with Entry `install.bat`
+### [x] [Task 5.1] Integrate Controller `install.ps1` with Entry `install.bat`
 *   **Description**:
     *   Refactor `install.bat` to launch the core controller via `powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0install.ps1" %*`.
     *   In `install.ps1`, handle user-passed arguments:
@@ -103,7 +103,7 @@ This task list strictly follows the Speckit specification, breaking down the tec
     *   Double-clicking `install.bat` smoothly executes the entire control chain without obstacles.
 *   **Prerequisites**: Task 4.1, Task 4.2
 
-### [Task 5.2] Robust Cleanup of Legacy Residuals (Safe Remove)
+### [x] [Task 5.2] Robust Cleanup of Legacy Residuals (Safe Remove)
 *   **Description**:
     *   Implement robust garbage cleanup logic triggered only when the directory is completely corrupted or the `--reset` flag is explicitly specified by the user.
     *   **Process Lock Prevention**: Before executing any folder deletion, run `shutdown.bat` (Task 5.4) to ensure all Python processes occupying or locking files in the directory are completely killed, preventing permission deadlocks.
@@ -116,7 +116,7 @@ This task list strictly follows the Speckit specification, breaking down the tec
     *   No `os` or `os.chmod` calls are present in the cleanup logic, fully complying with the `pathlib` specification.
 *   **Prerequisites**: Task 1.2
 
-### [Task 5.3] Reconstruct and Deploy `run.bat`
+### [x] [Task 5.3] Reconstruct and Deploy `run.bat`
 *   **Description**:
     *   Create/overwrite `run.bat` to activate the `.venv` virtual environment and launch the service.
     *   Unify ports: support launching the WebUI service on port `4324` and the API service on port `4323` (instead of the old `8090`).
@@ -125,7 +125,7 @@ This task list strictly follows the Speckit specification, breaking down the tec
     *   Running `run.bat` successfully launches the WebUI on port `4324` or the API service on port `4323` using the isolated `.venv` Python interpreter.
 *   **Prerequisites**: Task 2.2, Task 4.1
 
-### [Task 5.4] Reconstruct and Deploy `shutdown.bat`
+### [x] [Task 5.4] Reconstruct and Deploy `shutdown.bat`
 *   **Description**:
     *   Create/overwrite `shutdown.bat` to terminate processes listening on ports `4323` (API) and `4324` (WebUI).
     *   Use native Windows command-line tools (`netstat` and `taskkill`) to gracefully find and kill the processes.
