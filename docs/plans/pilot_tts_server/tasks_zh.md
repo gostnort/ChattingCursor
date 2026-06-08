@@ -126,30 +126,34 @@
 
 ## Phase 5：验证与检查点
 
-### [ ] [Task 5.1] Sidecar 手动验证（`run.bat api`）
+### [x] [Task 5.1] Sidecar 手动验证（`run.bat api`）
 *   **描述**：运行 `pilot_tts/run.bat api`；验证 `GET http://127.0.0.1:4323/health`、`POST /load`、`POST /v1/synthesize` 示例文本。
 *   **前置条件**：Phase 2–3 完成。
 *   **验收标准**：
     *   `spec.md` 中 SC-001–SC-004 在仅 sidecar 测试下通过。
+*   **完成**：`tts_upgrade` 实机冒烟（2026-06-08）：`GET /health` → 200（`weightsReady: true`、`demoPresent: true`、`PILOT_TTS_AUTO_LOAD=0` 时 `gpuLoaded: false`）；`POST /load` → 200（约 39s）；`POST /v1/synthesize` → 200 `audio/wav`（495440 字节）。SC-001/002/004 通过；SC-003 抽样（1 次合成后 `%TEMP%` 无孤立 `.wav`）；完整 100 次 SC-003 矩阵延后至 GPU 压测。
 
-### [ ] [Task 5.2] Bridge 集成验证
+### [x] [Task 5.2] Bridge 集成验证
 *   **描述**：启动 Bridge；启用 TTS 车道；确认 4323 spawn、`/tts/status` 端口、经 `/tts/synthesize` 代理合成。
 *   **前置条件**：Phase 4 完成。
 *   **验收标准**：
     *   SC-005、SC-006 通过。
     *   `tts-start-route.test.ts` 无回归。
+*   **完成**：`pilot-tts-paths.test.ts` + `tts-start-route.test.ts` 7/7 通过（含 w2v-bert 部分安装、`/tts/status` 端口）。SC-005 经 `tts.ts`（`4323`/`8090` note）与测试验证；SC-006 经 grep（安装计划无 `api.py`）。本会话未跑实机 Bridge spawn + `/tts/synthesize` 代理。
 
-### [ ] [Task 5.3] 编码规范审计
+### [x] [Task 5.3] 编码规范审计
 *   **描述**：验证 `tts_server.py` 符合 `coding-standards.mdc`：函数间 2 空行、函数内无空行、中文注释、英文 API 字符串、pathlib 用法。
 *   **前置条件**：Phase 2–3 完成。
 *   **验收标准**：
     *   等同 `pilot_tts_installation/tasks.md` Task 6.1 的检查表对修改文件通过。
+*   **完成**：`py_compile` 通过；函数间 2 空行、函数内无空行；仅中文注释（API 字符串无 CJK）；路径用 `pathlib.Path`（残留 `os.chdir`/`getcwd`/`environ` 见 Task 4.4）。`pilot-tts-paths.ts` 符合 Bridge TS 惯例。
 
-### [ ] [Task 5.4] 检查点签收
+### [x] [Task 5.4] 检查点签收
 *   **描述**：在本文件将已完成任务标为 `[x]`；记录延期 P2 项。
 *   **前置条件**：Task 5.1–5.3。
 *   **验收标准**：
     *   所有 P0/P1 任务已勾选或明确延期并说明原因。
+*   **完成**：Phase 1–5 的 P0/P1 已全部勾选。延期：SC-003 百次临时文件压测；实机 Bridge `/tts/synthesize` E2E（Phase 9 覆盖）。P2 Task 4.4（`os.chdir` 作用域）已在 Phase 4 完成。
 
 ---
 
