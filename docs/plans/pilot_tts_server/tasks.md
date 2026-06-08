@@ -36,7 +36,7 @@ This task list follows the Speckit-style phase structure used in `docs/plans/pil
 
 ## Phase 2: P0 Functional Fixes in `tts_server.py`
 
-### [ ] [Task 2.1] Extend `weights_ready()` for w2v-bert-2.0
+### [x] [Task 2.1] Extend `weights_ready()` for w2v-bert-2.0
 *   **Description**: Update `weights_ready()` in `pilot_tts/server/tts_server.py` to require `pretrained_models/w2v-bert-2.0/config.json` exists and is non-empty, matching `install_backend.verify_model_weights()`.
 *   **Prerequisites**: Task 1.1.
 *   **Acceptance Criteria**:
@@ -44,7 +44,7 @@ This task list follows the Speckit-style phase structure used in `docs/plans/pil
     *   Full install reports `weightsReady: true`.
     *   `POST /load` returns 503 with English message when w2v-bert missing (after Task 3.1).
 
-### [ ] [Task 2.2] Verify health/load/synthesize paths use updated `weights_ready()`
+### [x] [Task 2.2] Verify health/load/synthesize paths use updated `weights_ready()`
 *   **Description**: Confirm `health()`, `load_endpoint()`, `synthesize()`, and `main()` auto-load gate all call the updated function without duplicate logic.
 *   **Prerequisites**: Task 2.1.
 *   **Acceptance Criteria**:
@@ -54,34 +54,34 @@ This task list follows the Speckit-style phase structure used in `docs/plans/pil
 
 ## Phase 3: P1 Quality & Compliance
 
-### [ ] [Task 3.1] English user-facing API messages
+### [x] [Task 3.1] English user-facing API messages
 *   **Description**: Replace all Chinese strings in `HTTPException.detail`, JSON `message`, `_load_error`, and `/health` `message` with English per `spec.md` FR-002.
 *   **Prerequisites**: Task 2.1.
 *   **Acceptance Criteria**:
     *   Grep `tts_server.py` for CJK in string literals assigned to API fields → none.
     *   Chinese comments preserved.
 
-### [ ] [Task 3.2] Remove dead `import time`
+### [x] [Task 3.2] Remove dead `import time`
 *   **Description**: Delete unused `import time` from `tts_server.py`.
 *   **Prerequisites**: None (can parallel with 3.1).
 *   **Acceptance Criteria**:
     *   No `time` import; no linter unused-import warning.
 
-### [ ] [Task 3.3] Temp wav cleanup after synthesize
+### [x] [Task 3.3] Temp wav cleanup after synthesize
 *   **Description**: Add FastAPI `BackgroundTasks` (or equivalent) to delete temp `.wav` after `FileResponse`; delete on error if file was created.
 *   **Prerequisites**: Task 3.1.
 *   **Acceptance Criteria**:
     *   10 sequential synthesize calls leave 0 orphan temp wav files.
     *   Successful responses still return valid audio.
 
-### [ ] [Task 3.4] Align `PILOT_TTS_AUTO_LOAD` with Bridge
+### [x] [Task 3.4] Align `PILOT_TTS_AUTO_LOAD` with Bridge
 *   **Description**: Implement policy from `plan.md` §3.4 (recommended: `run.bat api` sets `PILOT_TTS_AUTO_LOAD=0`; document `main()` default behavior).
 *   **Prerequisites**: Task 1.3.
 *   **Acceptance Criteria**:
     *   Bridge spawn + `run.bat api` both disable eager GPU load unless env overrides.
     *   `POST /load` remains the explicit warmup path for Bridge.
 
-### [ ] [Task 3.5] Inline comments for lazy `demo` imports
+### [x] [Task 3.5] Inline comments for lazy `demo` imports
 *   **Description**: Add Chinese single-line comments before `from demo import load_engine` and `from demo import synthesize` blocks citing constitution exception.
 *   **Prerequisites**: Task 1.4.
 *   **Acceptance Criteria**:
@@ -147,3 +147,137 @@ This task list follows the Speckit-style phase structure used in `docs/plans/pil
 *   **Prerequisites**: Tasks 5.1–5.3.
 *   **Acceptance Criteria**:
     *   All P0/P1 tasks checked or explicitly deferred with reason.
+
+---
+
+## Phase 6: Sidecar API Extension (Voice / Emotion / Dialect)
+
+### [ ] [Task 6.1] Extend `SynthesizeRequest` Pydantic model
+*   **Description**: Add optional `promptWav`, `emotion`, `language` to `pilot_tts/server/tts_server.py` per `spec.md` FR-007. Keep `text` required.
+*   **Prerequisites**: Phase 2 complete (weights_ready parity).
+*   **Acceptance Criteria**:
+    *   `{ "text": "hi" }` still accepted.
+    *   Invalid empty `text` returns English 400.
+*   **Verification**: `curl -X POST :4323/synthesize -H "Content-Type: application/json" -d '{"text":"test"}'` returns audio.
+
+### [ ] [Task 6.2] Prompt wav per-request override
+*   **Description**: Resolve `promptWav` with chain: body → `PILOT_TTS_PROMPT_WAV` → auto upstream paths. Validate file exists and suffix is `.wav` or `.mp3`; English 503/400 on missing or invalid extension.
+*   **Prerequisites**: Task 6.1.
+*   **Acceptance Criteria**:
+    *   Valid `promptWav` path (`.wav` or `.mp3`) produces different timbre vs default.
+    *   Missing file or unsupported extension returns `{ error, message, fallback: true }` in English.
+*   **Verification**: Two synthesize calls with different valid wav/mp3 paths; listen or compare spectrograms.
+
+### [ ] [Task 6.3] Instruct vs base engine selection
+*   **Description**: Implement `_engine_mode` tracking and `load_gpu_engine(require_instruct: bool)` per `plan.md` §3.10. Reload when mode mismatch on `/synthesize`.
+*   **Prerequisites**: Task 6.1.
+*   **Acceptance Criteria**:
+    *   `{ text }` only uses base when `pilot_tts.pt` present.
+    *   `{ text, emotion: "happy" }` uses instruct checkpoint.
+    *   Instruct request without `pilot_tts_instruct.pt` → 503 `instruct_weights_missing`.
+*   **Verification**: `/health` after load; synthesize with/without emotion.
+
+### [ ] [Task 6.4] Pass `emotion` and `language` to `demo.synthesize`
+*   **Description**: Build kwargs dict; lazy-import `synthesize`; verify signature against cloned `upstream/demo.py`.
+*   **Prerequisites**: Tasks 6.2, 6.3.
+*   **Acceptance Criteria**:
+    *   `language: "zh-henan"` reaches upstream when instruct weights present.
+    *   Paralinguistic tags in `text` forwarded unchanged.
+*   **Verification**: Sample requests from `plan.md` §3.9 example JSON.
+
+### [ ] [Task 6.5] Sidecar unit/manual tests for extension
+*   **Description**: Document manual test matrix in task comment or `plan.md` verification §5 items 8–10.
+*   **Prerequisites**: Tasks 6.1–6.4.
+*   **Acceptance Criteria**:
+    *   SC-007–SC-010 pass on `run.bat api` manual run.
+
+---
+
+## Phase 7: Bridge Passthrough & Spawn Defaults
+
+### [ ] [Task 7.1] Extend `SchedulerUserSettings` schema
+*   **Description**: Add `pilotTtsPromptWavPath`, `pilotTtsDefaultEmotion`, `pilotTtsDefaultLanguage` to `apps/bridge/src/services/scheduler-settings.ts` with defaults `""`.
+*   **Prerequisites**: Task 6.1 (sidecar accepts fields).
+*   **Acceptance Criteria**:
+    *   `GET/POST /local/scheduler-settings` round-trips new fields.
+    *   Update `scheduler-settings.test.ts`.
+*   **Verification**: Save settings via API; read back JSON file in ChattingCursor home.
+
+### [ ] [Task 7.2] Bridge `/tts/synthesize` merge and passthrough
+*   **Description**: Extend `apps/bridge/src/routes/tts.ts` to merge request body with persisted defaults; proxy full JSON to sidecar `:4323`.
+*   **Prerequisites**: Task 7.1.
+*   **Acceptance Criteria**:
+    *   Client `{ text }` + saved defaults → sidecar receives merged body.
+    *   Per-request fields override saved defaults.
+    *   English errors for instruct-missing when emotion/language set.
+*   **Verification**: Integration test or manual Bridge curl to `/tts/synthesize`.
+
+### [ ] [Task 7.3] Optional `PILOT_TTS_PROMPT_WAV` on spawn
+*   **Description**: In `pilot-tts-spawn.ts`, inject `PILOT_TTS_PROMPT_WAV` from settings when non-empty (read settings before spawn or pass from lifecycle).
+*   **Prerequisites**: Task 7.1.
+*   **Acceptance Criteria**:
+    *   Sidecar `/health` + synthesize use spawned default when request omits `promptWav`.
+    *   Per-request override still works without respawn.
+*   **Verification**: Start TTS lane with saved wav path; synthesize without `promptWav` in body.
+
+### [ ] [Task 7.4] Bridge tests for synthesize extension
+*   **Description**: Add/update route tests mocking sidecar; assert merged JSON shape.
+*   **Prerequisites**: Task 7.2.
+*   **Acceptance Criteria**:
+    *   Tests cover default merge, override, and empty-string omission.
+
+---
+
+## Phase 8: Web Config UI & `useSpeech` Integration
+
+### [ ] [Task 8.1] Extend `SchedulerSettingsPayload` in Web API client
+*   **Description**: Update `apps/web/src/api/bridge.ts` types for new TTS settings fields.
+*   **Prerequisites**: Task 7.1.
+*   **Acceptance Criteria**:
+    *   TypeScript compiles; `fetchSchedulerSettings` / `saveSchedulerSettings` typed.
+
+### [ ] [Task 8.2] TtsSubPage voice settings UI
+*   **Description**: Add controls on `apps/web/src/components/TtsSubPage.tsx`: prompt wav path input, emotion dropdown (upstream tags), dialect dropdown. Save via `saveSchedulerSettings`.
+*   **Prerequisites**: Task 8.1.
+*   **Acceptance Criteria**:
+    *   User can persist all three fields from Local → Voice page.
+    *   Values reload on page refresh.
+    *   Help text links `8090` WebUI as optional advanced tuning.
+*   **Verification**: Manual UI test; confirm `scheduler-settings.json` updated.
+
+### [ ] [Task 8.3] `useSpeech.ts` send TTS defaults
+*   **Description**: Load scheduler TTS defaults; include in `POST /tts/synthesize` body from `tryPilotTtsSynthesize`.
+*   **Prerequisites**: Tasks 7.2, 8.1.
+*   **Acceptance Criteria**:
+    *   Chat read-aloud uses saved emotion/language/prompt wav without extra user action.
+    *   Browser fallback unchanged when Pilot unavailable.
+*   **Verification**: Configure happy + custom wav; trigger speak on chat message.
+
+### [ ] [Task 8.4] Web UI copy and validation
+*   **Description**: Client-side validation for absolute paths with `.wav` or `.mp3` suffix; emotion/dialect enum aligned with `spec.md` FR-013.
+*   **Prerequisites**: Task 8.2.
+*   **Acceptance Criteria**:
+    *   Invalid path shows user-facing error before save (Chinese UI copy allowed in Web; API remains English).
+
+---
+
+## Phase 9: E2E Verification Checkpoint
+
+### [ ] [Task 9.1] End-to-end settings → synthesize path
+*   **Description**: Full flow: TtsSubPage save → useSpeech → Bridge → sidecar → audio with emotion/dialect/prompt override.
+*   **Prerequisites**: Phases 6–8 complete.
+*   **Acceptance Criteria**:
+    *   SC-007–SC-011 pass.
+    *   Text-only regression test passes (SC-010).
+
+### [ ] [Task 9.2] Port and path regression
+*   **Description**: Confirm production API `4323`, WebUI `8090`; `/tts/status` notes unchanged.
+*   **Prerequisites**: Task 9.1.
+*   **Acceptance Criteria**:
+    *   SC-005 still passes.
+
+### [ ] [Task 9.3] Extension checkpoint sign-off
+*   **Description**: Mark Phase 6–9 tasks complete; update `plan.md` executability review if blockers found.
+*   **Prerequisites**: Tasks 9.1–9.2.
+*   **Acceptance Criteria**:
+    *   All extension tasks `[x]` or deferred with documented reason.

@@ -145,7 +145,7 @@ set "PILOT_TTS_AUTO_LOAD=0"
 | 函数 | 预期签名 | Sidecar 调用方 | 传入参数 |
 |------|----------|----------------|----------|
 | `load_engine` | `load_engine(*, config_path: str, checkpoint: str) -> Any` | `load_gpu_engine()` | `config_path`：`configs/infer_pilot_tts.yaml` 或 `infer_pilot_tts_instruct.yaml`；`checkpoint`：`weights_dir()` 下 `pilot_tts.pt` 或 `pilot_tts_instruct.pt` 的绝对路径 |
-| `synthesize` | `synthesize(engine, *, text: str, prompt_wav: str, output_path: str) -> None` | `synthesize()` 路由 | `engine`：模块全局 `_engine`；`text`：去空白用户输入（最多 500 字符）；`prompt_wav`：解析后的参考 wav；`output_path`：供 `FileResponse` 使用的临时 `.wav` |
+| `synthesize` | `synthesize(engine, *, text, prompt_wav, output_path, emotion=None, language=None) -> None` | `synthesize()` 路由 | Base：仅 text + prompt_wav。Instruct：合并非空 `emotion`/`language`。副语言标签保留在 `text` 内。 |
 
 **导入位置**（仅以下两处；sidecar 中无其他 `from demo import`）：
 1. `load_gpu_engine()` —— `ensure_upstream_on_path()` 与 `os.chdir` 之后，`from demo import load_engine`。
@@ -175,6 +175,85 @@ Phase 3 在每个块前添加中文单行注释，引用章程 §2.4（上游不
 | `pilot-tts-spawn.ts` | 预期无变更（`PILOT_TTS_AUTO_LOAD=0` 已正确） |
 | `pilot-tts-lifecycle.ts` | 验证健康探测容忍英文消息 |
 
+### 3.9 扩展 — 扩展 `SynthesizeRequest`（Phase 6）
+
+当前 sidecar 目标模型：
+
+```python
+class SynthesizeRequest(BaseModel):
+    text: str
+    promptWav: str | None = None
+    emotion: str | None = None
+    language: str | None = None
+```
+
+示例请求（生产 API `:4323`）：
+
+```json
+{
+  "text": "今天天气真好啊<|LAUGH|>我们去公园吧！",
+  "promptWav": "D:/voices/my_ref.wav",
+  "emotion": "happy",
+  "language": "zh-henan"
+}
+```
+
+最小向后兼容请求：
+
+```json
+{ "text": "Hello world" }
+```
+
+**Prompt wav 解析**（sidecar）：
+
+1. `body.promptWav` 已设置、文件存在且后缀为 `.wav` 或 `.mp3`（不区分大小写）
+2. `PILOT_TTS_PROMPT_WAV` env（用户路径同样校验扩展名）
+3. `upstream/` 下自动候选（`asset/prompt.wav` 等）
+
+**上游 demo 行为**：PilotTTS 推理经 `prompt_wav` 接受 MP3 参考音频进行音色克隆（torchaudio/librosa 解码），非仅 WAV。传输链 sidecar 校验须同时允许两种扩展名；自动解析默认仍为 upstream 内 `.wav` 资源。
+
+**校验**（Phase 6 sidecar + Bridge 保存）：
+
+```python
+ALLOWED_PROMPT_SUFFIXES = {".wav", ".mp3"}
+
+def is_valid_prompt_path(path: Path) -> bool:
+    return path.is_file() and path.suffix.lower() in ALLOWED_PROMPT_SUFFIXES
+```
+
+其他扩展名在合成前以英文 400/503 JSON 拒绝。
+
+### 3.10 扩展 — Instruct 与 Base 引擎选择
+
+| 条件 | 检查点 | 配置 YAML |
+|------|--------|-----------|
+| 无 `emotion`、无 `language`（合并默认后） | `pilot_tts.pt`（优先） | `infer_pilot_tts.yaml` |
+| 任一非空 `emotion` 或 `language` | `pilot_tts_instruct.pt`（必需） | `infer_pilot_tts_instruct.yaml` |
+
+模块全局 `_engine_mode: "base" | "instruct"`；模式不匹配时在 `/synthesize` 前重载引擎。
+
+### 3.11 扩展 — Bridge `/tts/synthesize`（Phase 7）
+
+合并持久化默认后再代理 sidecar；空字符串键省略。instruct 控制但仅 base 权重时 Bridge 返回 503。
+
+### 3.12 扩展 — 设置 Schema（Phase 7–8）
+
+扩展 `SchedulerUserSettings`：`pilotTtsPromptWavPath`、`pilotTtsDefaultEmotion`、`pilotTtsDefaultLanguage`。可选 spawn 时注入 `PILOT_TTS_PROMPT_WAV`。
+
+### 3.13 扩展 — 配置页 → 朗读数据流（Phase 8，规格）
+
+```
+TtsSubPage → saveSchedulerSettings → scheduler-settings.json
+    → useSpeech → Bridge /tts/synthesize → tts_server.py :4323 → demo.synthesize
+```
+
+`8090` WebUI 仍为手动测试/调试，非生产朗读路径。
+
+### 3.14 扩展 — `useSpeech.ts` 集成
+
+*   缓存 TTS 默认；在 `tryPilotTtsSynthesize` body 中包含合并字段。
+*   v1 不自动注入副语言标签；Pilot 不可用时浏览器 fallback 不变。
+
 ---
 
 ## 4. 文件触达图
@@ -186,8 +265,12 @@ Phase 3 在每个块前添加中文单行注释，引用章程 §2.4（上游不
 | 3 | `pilot_tts/server/tts_server.py`（错误、清理、导入、注释、auto-load/run.bat） |
 | 4 | `apps/bridge/src/services/pilot-tts-paths.ts`、`apps/bridge/src/routes/tts.ts`、测试 |
 | 5 | 手动验证清单 |
+| 6 | `pilot_tts/server/tts_server.py`（扩展请求、引擎模式、demo kwargs） |
+| 7 | `apps/bridge/src/routes/tts.ts`、`scheduler-settings.ts`、`pilot-tts-spawn.ts`、测试 |
+| 8 | `apps/web/src/components/TtsSubPage.tsx`、`useSpeech.ts`、`api/bridge.ts` |
+| 9 | E2E 验证（Bridge + sidecar + 设置往返） |
 
-**范围外**：`install_backend.py` 逻辑变更（已正确）、上游 `demo.py` 修改、Web React 变更。
+**范围外**：`install_backend.py` 逻辑变更（已正确）、上游 `demo.py` 修改、Phase 8 以外 Web React 变更。
 
 ---
 
@@ -200,6 +283,9 @@ Phase 3 在每个块前添加中文单行注释，引用章程 §2.4（上游不
 5. **Bridge spawn**：从 Web 启动 TTS → sidecar 在 4323，自动加载关闭直至 `/load`。
 6. **端口**：`/tts/status` 报告生产 API `4323` 与可选 WebUI `8090`。
 7. **run.bat api**：拉起 `server/tts_server.py`，4323 响应。
+8. **扩展**：instruct 权重就绪时经 Bridge 传 `{ text, emotion: "happy" }`。
+9. **扩展**：`{ text, promptWav: "<有效 .wav 或 .mp3 路径>" }` 使用覆盖参考音频。
+10. **扩展**：TtsSubPage 保存的设置出现在代理合成中，无需 WebUI。
 
 ---
 
@@ -211,3 +297,47 @@ Phase 3 在每个块前添加中文单行注释，引用章程 §2.4（上游不
 | Bridge 测试假设 WebUI 8090 | 预期无变更；`8090` 为正确默认 |
 | `inferencePresent` 消费者未知 | 重命名前全库 grep |
 | 客户端断开时 BackgroundTasks 清理 | 接受尽力而为；可选后续定期清扫 temp |
+| base↔instruct 切换时引擎重载 | 文档化延迟；仅模式变化时重载 |
+| 用户 prompt wav 路径无效 | 校验 `.wav`/`.mp3` 扩展名；Bridge 保存与 sidecar 合成时校验；英文错误 |
+| 无 instruct 权重却请求 emotion/方言 | 503 instruct_weights_missing |
+
+---
+
+## 7. 可执行性审查
+
+### 7.1 依赖可用性
+
+| 依赖 | 状态 | 说明 |
+|------|------|------|
+| 上游 `demo.synthesize` 参数 | **已验证**（AMAPVOICE/PilotTTS README） | instruct 模型支持 `emotion`、`language`、`prompt_wav` |
+| `pilot_tts_instruct.pt` | **安装后预期存在** | 安装器下载 base + instruct |
+| 副语言标签 | **内联于 text** | 无需单独 API 字段 |
+| 端口 4323 / 8090 | **已对齐** | 生产 API vs 测试 WebUI 不变 |
+| Speckit MCP | **仅模板** | 见 §7.4 |
+
+### 7.2 向后兼容
+
+*   省略 `promptWav`、`emotion`、`language` 保持当前仅 `{ text }` 行为。
+*   双路由别名不变；仅发 `text` 的 Bridge 客户端仍可用。
+*   无 instruct 权重时 emotion/方言请求显式失败，不静默回退。
+
+### 7.3 风险 / 阻塞项
+
+| 项 | 严重度 | 缓解 |
+|----|--------|------|
+| 会话中 base↔instruct 切换延迟 | 中 | `_engine_mode` 跟踪；仅不匹配时重载 |
+| 上游 `demo.synthesize` 签名漂移 | 低 | Phase 6 对照克隆 `upstream/demo.py` |
+| Windows `promptWav` 路径 | 低 | `pathlib` 校验 + `.wav`/`.mp3` 后缀；要求绝对路径 |
+| Phase 3 重构未完成 | 中 | 可与 Phase 6 并行；新字段英文错误 |
+
+### 7.4 Speckit MCP 验证结果
+
+在 `tts_upgrade` 分支调用 `project-0-ChattingCursor-spec-kit`：
+
+| 工具 | 结果 |
+|------|------|
+| `speckit_specify` | 仅返回模板指针（`commands/speckit.specify`） |
+| `speckit_plan` | 仅返回模板指针（`commands/speckit.plan`） |
+| `speckit_tasks` | 仅返回模板指针（`commands/speckit.tasks`） |
+
+**结论**：MCP 工具可用但不生成本地结构化产物（与先前会话一致）。最终文档由代码审计 + 上游 README 手工编写。可执行性经上游公开 API 与双检查点安装路径确认。

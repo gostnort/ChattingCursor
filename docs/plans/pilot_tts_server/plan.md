@@ -145,7 +145,7 @@ Upstream `demo.py` is a **git-cloned script**, not an installable Python package
 | Function | Expected signature | Sidecar caller | Arguments passed |
 |----------|-------------------|----------------|------------------|
 | `load_engine` | `load_engine(*, config_path: str, checkpoint: str) -> Any` | `load_gpu_engine()` | `config_path`: `configs/infer_pilot_tts.yaml` or `infer_pilot_tts_instruct.yaml`; `checkpoint`: absolute path to `pilot_tts.pt` or `pilot_tts_instruct.pt` under `weights_dir()` |
-| `synthesize` | `synthesize(engine, *, text: str, prompt_wav: str, output_path: str) -> None` | `synthesize()` route | `engine`: module-global `_engine`; `text`: trimmed user input (max 500 chars); `prompt_wav`: resolved reference wav; `output_path`: temp `.wav` for `FileResponse` |
+| `synthesize` | `synthesize(engine, *, text: str, prompt_wav: str, output_path: str, emotion: str \| None = None, language: str \| None = None) -> None` | `synthesize()` route | Base: text + prompt_wav only. Instruct: add `emotion` / `language` when non-empty after merge. Paralinguistic tags stay in `text`. |
 
 **Import sites** (only these two; no other `from demo import` in the sidecar):
 1. `load_gpu_engine()` — after `ensure_upstream_on_path()` and `os.chdir`, `from demo import load_engine`.
@@ -175,6 +175,154 @@ Options:
 | `pilot-tts-spawn.ts` | No change expected (`PILOT_TTS_AUTO_LOAD=0` already correct) |
 | `pilot-tts-lifecycle.ts` | Verify health probe tolerates English messages |
 
+### 3.9 Extension — Extended `SynthesizeRequest` (Phase 6)
+
+Current sidecar model (`tts_server.py`):
+
+```python
+class SynthesizeRequest(BaseModel):
+    text: str
+    promptWav: str | None = None
+    emotion: str | None = None
+    language: str | None = None
+```
+
+Example request (production API `:4323`):
+
+```json
+{
+  "text": "今天天气真好啊<|LAUGH|>我们去公园吧！",
+  "promptWav": "D:/voices/my_ref.wav",
+  "emotion": "happy",
+  "language": "zh-henan"
+}
+```
+
+Minimal backward-compatible request:
+
+```json
+{ "text": "Hello world" }
+```
+
+**Prompt wav resolution** (sidecar):
+
+1. `body.promptWav` if set, file exists, and suffix is `.wav` or `.mp3` (case-insensitive)
+2. `PILOT_TTS_PROMPT_WAV` env (same extension rule when validating user paths)
+3. Auto candidates under `upstream/` (`asset/prompt.wav`, `assert/prompt.wav`, `assets/prompt.wav`)
+
+**Upstream demo behavior**: PilotTTS inference accepts MP3 reference audio for voice cloning via `prompt_wav` (torchaudio/librosa decode), not WAV-only. Sidecar validation must allow both extensions on the transmission chain; auto-resolve defaults remain upstream `.wav` assets.
+
+**Validation** (Phase 6 sidecar + Bridge save):
+
+```python
+ALLOWED_PROMPT_SUFFIXES = {".wav", ".mp3"}
+
+def is_valid_prompt_path(path: Path) -> bool:
+    return path.is_file() and path.suffix.lower() in ALLOWED_PROMPT_SUFFIXES
+```
+
+Reject other extensions with English 400/503 JSON before synthesis.
+
+**Synthesis kwargs builder** (pseudocode):
+
+```python
+kwargs = {"text": text[:500], "prompt_wav": str(prompt), "output_path": out_path}
+if emotion:
+    kwargs["emotion"] = emotion
+if language:
+    kwargs["language"] = language
+synthesize(_engine, **kwargs)
+```
+
+### 3.10 Extension — Instruct vs Base Engine Selection
+
+| Condition | Checkpoint | Config YAML |
+|-----------|------------|-------------|
+| No `emotion`, no `language` (after defaults merge) | `pilot_tts.pt` (prefer) | `infer_pilot_tts.yaml` |
+| Any non-empty `emotion` or `language` | `pilot_tts_instruct.pt` (required) | `infer_pilot_tts_instruct.yaml` |
+| Base missing, instruct present | `pilot_tts_instruct.pt` | instruct yaml |
+
+`load_gpu_engine(force_instruct: bool)` tracks loaded mode in module-global `_engine_mode: "base" | "instruct"`. On `/synthesize`, if required mode ≠ loaded mode, reload engine before inference (accept one-time latency hit).
+
+If instruct requested but `pilot_tts_instruct.pt` absent → 503 `instruct_weights_missing`.
+
+Paralinguistic tags (`<|LAUGH|>`, etc.) do not force instruct by themselves in v1 — they pass through `text`; recommend instruct checkpoint when tags present (Bridge may set default emotion or document in UI).
+
+### 3.11 Extension — Bridge `/tts/synthesize` (Phase 7)
+
+`apps/bridge/src/routes/tts.ts` today:
+
+```typescript
+body: JSON.stringify({ text })
+```
+
+Target:
+
+```typescript
+const settings = await readSchedulerUserSettings();
+const merged = {
+  text,
+  promptWav: body.promptWav ?? settings.pilotTtsPromptWavPath || undefined,
+  emotion: body.emotion ?? settings.pilotTtsDefaultEmotion || undefined,
+  language: body.language ?? settings.pilotTtsDefaultLanguage || undefined,
+};
+// strip empty strings → omit keys
+body: JSON.stringify(merged)
+```
+
+Add validation: if merged `emotion`/`language` set and only base weights exist, return 503 before sidecar call.
+
+### 3.12 Extension — Settings Schema (Phase 7–8)
+
+Extend `SchedulerUserSettings` in `scheduler-settings.ts`:
+
+```typescript
+pilotTtsPromptWavPath: string;      // default ""
+pilotTtsDefaultEmotion: string;     // default ""
+pilotTtsDefaultLanguage: string;    // default ""
+```
+
+Mirror in `apps/web/src/api/bridge.ts` `SchedulerSettingsPayload`.
+
+Optional spawn injection (`pilot-tts-spawn.ts`):
+
+```typescript
+PILOT_TTS_PROMPT_WAV: settings.pilotTtsPromptWavPath || readEnv("PILOT_TTS_PROMPT_WAV") || "",
+```
+
+Per-request override still wins at synthesize time without respawn.
+
+### 3.13 Extension — Config Page → Read-Aloud Data Flow (Phase 8, Spec)
+
+```
+TtsSubPage (voice settings UI)
+    │ saveSchedulerSettings({ pilotTtsPromptWavPath, pilotTtsDefaultEmotion, pilotTtsDefaultLanguage })
+    ▼
+scheduler-settings.json (ChattingCursor home)
+    │
+    ├─► pilot-tts-spawn.ts (optional PILOT_TTS_PROMPT_WAV on start)
+    │
+    └─► useSpeech.ts toggleSpeak()
+            │ fetchSchedulerSettings() or cached defaults
+            │ POST /tts/synthesize { text, promptWav?, emotion?, language? }
+            ▼
+        Bridge tts.ts (merge defaults)
+            ▼
+        tts_server.py :4323
+            │ resolve prompt + engine mode
+            ▼
+        demo.synthesize(engine, ...)
+```
+
+`8090` WebUI (`upstream/webui.py`) remains manual test/debug; not on production read-aloud path.
+
+### 3.14 Extension — `useSpeech.ts` Integration
+
+*   Load TTS defaults once per hook init or per `toggleSpeak` (cache in ref to avoid extra round-trips).
+*   Include merged fields in `tryPilotTtsSynthesize` body.
+*   Do not inject paralinguistic tags automatically in v1 (user/editor responsibility); emotion/language from settings only.
+*   Browser `speechSynthesis` fallback unchanged when Pilot unavailable.
+
 ---
 
 ## 4. File Touch Map
@@ -186,8 +334,12 @@ Options:
 | 3 | `pilot_tts/server/tts_server.py` (errors, cleanup, imports, comments, auto-load/run.bat) |
 | 4 | `apps/bridge/src/services/pilot-tts-paths.ts`, `apps/bridge/src/routes/tts.ts`, tests |
 | 5 | Manual verification checklist |
+| 6 | `pilot_tts/server/tts_server.py` (extended request, engine mode, demo kwargs) |
+| 7 | `apps/bridge/src/routes/tts.ts`, `scheduler-settings.ts`, `pilot-tts-spawn.ts`, tests |
+| 8 | `apps/web/src/components/TtsSubPage.tsx`, `useSpeech.ts`, `api/bridge.ts` |
+| 9 | E2E verification (Bridge + sidecar + settings round-trip) |
 
-**Out of scope**: `install_backend.py` logic changes (already correct), upstream `demo.py` modifications, Web UI React changes.
+**Out of scope**: `install_backend.py` logic changes (already correct), upstream `demo.py` modifications, Web UI React changes beyond Phase 8 TTS settings fields.
 
 ---
 
@@ -200,6 +352,9 @@ Options:
 5. **Bridge spawn**: Start TTS from Web → sidecar on 4323, auto-load off until `/load`.
 6. **Ports**: `/tts/status` reports production API `4323` and optional WebUI `8090`.
 7. **run.bat api**: Launches `server/tts_server.py`, responds on 4323.
+8. **Extension**: `POST /synthesize` with `{ text, emotion: "happy" }` via Bridge when instruct weights installed.
+9. **Extension**: `{ text, promptWav: "<valid .wav or .mp3 path>" }` uses override reference audio.
+10. **Extension**: Settings saved in TtsSubPage appear in proxied synthesize without manual WebUI.
 
 ---
 
@@ -211,3 +366,49 @@ Options:
 | Bridge tests assume WebUI port 8090 | No change expected; `8090` is the correct default |
 | `inferencePresent` consumers unknown | Grep repo before rename |
 | BackgroundTasks cleanup on client disconnect | Accept best-effort; optional periodic temp sweep later |
+| Engine reload on base↔instruct switch | Document latency; reload only when mode changes |
+| Invalid user prompt wav path | Validate `.wav`/`.mp3` extension on save (Bridge) and synthesize (sidecar); English errors |
+| Emotion/dialect without instruct weights | 503 instruct_weights_missing; install plan already downloads both checkpoints |
+
+---
+
+## 7. Executability Review
+
+### 7.1 Dependencies Available
+
+| Dependency | Status | Notes |
+|------------|--------|-------|
+| Upstream `demo.synthesize` params | **Verified** (AMAPVOICE/PilotTTS README) | `emotion`, `language`, `prompt_wav` on instruct model |
+| `pilot_tts_instruct.pt` | **Expected after install** | Installer downloads both base + instruct |
+| Paralinguistic tags | **Text-inline** | No API extension needed beyond `text` |
+| Port model 4323 / 8090 | **Aligned** | Production API vs test WebUI unchanged |
+| Speckit MCP | **Template-only** | See §7.4 |
+
+### 7.2 Backward Compatibility
+
+*   Optional JSON fields — omitting `promptWav`, `emotion`, `language` preserves current `{ text }`-only behavior.
+*   Dual route aliases `/synthesize` and `/v1/synthesize` unchanged.
+*   Bridge clients that only send `text` continue to work; defaults applied only when configured in settings.
+*   Base model path preserved for voice-clone-only deployments lacking instruct weights (emotion/language requests fail explicitly).
+
+### 7.3 Risks / Blockers
+
+| Item | Severity | Mitigation |
+|------|----------|------------|
+| Engine reload latency when switching base↔instruct mid-session | Medium | Track `_engine_mode`; reload only on mismatch |
+| `demo.synthesize` signature drift in upstream | Low | Phase 6 verify against cloned `upstream/demo.py` |
+| Windows path validation for `promptWav` | Low | Use `pathlib.Path.is_file()` + `.wav`/`.mp3` suffix check; document absolute path requirement |
+| Phase 3 refactor incomplete (Chinese errors, temp cleanup) | Medium | Complete Phases 3–5 before or in parallel with Phase 6; extension adds English errors for new fields only |
+| No upstream clone in dev workspace | Low | README + GitHub API confirm contract; runtime verify post-install |
+
+### 7.4 Speckit MCP Validation Result
+
+Invoked `project-0-ChattingCursor-spec-kit` tools on branch `tts_upgrade`:
+
+| Tool | Result |
+|------|--------|
+| `speckit_specify` | Returned template pointer only (`commands/speckit.specify`) — no generated spec artifact |
+| `speckit_plan` | Returned template pointer only (`commands/speckit.plan`) |
+| `speckit_tasks` | Returned template pointer only (`commands/speckit.tasks`) |
+
+**Conclusion**: MCP validates tool availability but does not emit structured plan output in this workspace (consistent with prior session). Final spec/plan/tasks authored manually from codebase audit + upstream README. Executability confirmed via upstream public API documentation and existing install path for both checkpoints.

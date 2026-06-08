@@ -10,6 +10,8 @@ The ChattingCursor PilotTTS sidecar (`pilot_tts/server/tts_server.py`) is the **
 *   **No Silent Resource Leaks**: Temporary synthesis artifacts (`.wav` files) must be deleted after the response is sent. Disk growth from repeated `/synthesize` calls is unacceptable.
 *   **Explicit Lifecycle Control**: GPU preload behavior must be predictable. Bridge spawns with `PILOT_TTS_AUTO_LOAD=0` and triggers warmup via `POST /load`; manual `run.bat api` behavior must be documented and aligned.
 *   **Upstream Integration Honesty**: `demo.py` is imported lazily inside functions after `sys.path` injection — this is a **documented constitution exception** to the top-level-import rule because upstream is not installable as a package and depends on cwd-relative assets.
+*   **Config-to-API Chain Integrity**: User TTS preferences (prompt wav / 音色, emotion / 语气, language / 方言) flow **Web settings → Bridge merge → sidecar → demo.synthesize** without requiring the `8090` WebUI on the production read-aloud path. Persisted defaults must not break text-only clients.
+*   **Backward Compatibility for Synthesis**: Omitting optional synthesize fields (`promptWav`, `emotion`, `language`) MUST preserve pre-extension behavior: env/default prompt wav, base checkpoint when no instruct controls, same ports and routes.
 
 ---
 
@@ -31,7 +33,7 @@ The ChattingCursor PilotTTS sidecar (`pilot_tts/server/tts_server.py`) is the **
 | `PILOT_TTS_WEBUI_PORT` | `8090` | Reported optional test/debug WebUI port in `/health` |
 | `PILOT_TTS_UPSTREAM_DIR` | `<pilot_tts>/upstream` | Upstream clone root |
 | `PILOT_TTS_WEIGHTS_DIR` | `<upstream>/pretrained_models` | Model weights |
-| `PILOT_TTS_PROMPT_WAV` | (auto-resolve) | Reference speaker wav |
+| `PILOT_TTS_PROMPT_WAV` | (auto-resolve) | Default reference speaker audio (`.wav` or `.mp3`); overridable per request via `promptWav` |
 | `PILOT_TTS_RESERVED_VRAM_GB` | `3` | Reported VRAM reservation |
 | `PILOT_TTS_AUTO_LOAD` | `0` when spawned by Bridge; document `run.bat` behavior | GPU preload on startup |
 
@@ -63,7 +65,9 @@ Upstream `demo.py` lives in the git-cloned tree `pilot_tts/upstream/` (`.gitigno
 | Function | Expected signature | Import site |
 |----------|-------------------|-------------|
 | `load_engine` | `load_engine(*, config_path: str, checkpoint: str) -> Any` | `load_gpu_engine()` after steps 1–2 |
-| `synthesize` | `synthesize(engine, *, text: str, prompt_wav: str, output_path: str) -> None` | `synthesize()` handler after step 1 |
+| `synthesize` | `synthesize(engine, *, text, prompt_wav, output_path, emotion=None, language=None) -> None` | `synthesize()` handler after step 1 |
+
+Instruct-only kwargs (`emotion`, `language`) are passed only when non-empty. Paralinguistic tags (语调) remain in `text`. See `spec.md` FR-007–FR-013 for the full extension contract.
 
 Detailed call-site arguments are in `plan.md` §3.5. Inline Chinese comments before each lazy import block (Phase 3) must cite this section.
 
@@ -72,12 +76,15 @@ Detailed call-site arguments are in `plan.md` §3.5. Inline Chinese comments bef
 ## 3. Service Boundaries
 
 ```
-Web (TtsSubPage) ──► Bridge :4321 (/tts/*)
+Web (TtsSubPage) ──► scheduler-settings.json (promptWav, emotion, language defaults)
+       │
+       useSpeech ──► Bridge :4321 POST /tts/synthesize (merge defaults)
                          │
                          ├── spawn ──► tts_server.py :4323
                          │              ├── GET  /health, /v1/health
                          │              ├── POST /load, /v1/load
                          │              └── POST /synthesize, /v1/synthesize
+                         │                    body: { text, promptWav?, emotion?, language? }
                          │
                          └── spawn ──► upstream/webui.py :8090 (optional test/debug)
 ```
@@ -96,6 +103,7 @@ Web (TtsSubPage) ──► Bridge :4321 (/tts/*)
 | WebUI port | `8090` (override via `PILOT_TTS_WEBUI_PORT`; test/debug only — not production TTS path) |
 | Dual route aliases | `/health` + `/v1/health`, `/load` + `/v1/load`, `/synthesize` + `/v1/synthesize` |
 | Synthesize fallback JSON | `{ error, message, fallback: true }` on 503/500 |
+| Synthesize optional fields | `promptWav`, `emotion`, `language` optional; `text` required |
 | `run.bat api` entry | `server/tts_server.py` (not `upstream/api.py`) |
 
 ---
@@ -110,3 +118,4 @@ Modifications are complete when:
 4. `PILOT_TTS_AUTO_LOAD` behavior is consistent between Bridge spawn and documented `run.bat` usage.
 5. Bridge `isPilotTtsWeightsReady` gap is resolved or tracked in Phase 4 tasks.
 6. `docs/plans/pilot_tts_installation/plan.md` stale `api.py` references are corrected.
+7. Extension (when implemented): optional synthesize fields end-to-end from settings to `demo.synthesize` with instruct/base selection documented in `plan.md` §3.10.

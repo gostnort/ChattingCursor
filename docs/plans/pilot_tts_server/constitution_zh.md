@@ -10,6 +10,8 @@ ChattingCursor PilotTTS sidecar（`pilot_tts/server/tts_server.py`）是 GPU 预
 *   **禁止静默资源泄漏**：合成产生的临时 `.wav` 文件必须在响应发送后删除。 repeated `/synthesize` 不得导致磁盘持续增长。
 *   **显式生命周期控制**：GPU 预加载行为必须可预测。Bridge 以 `PILOT_TTS_AUTO_LOAD=0` 拉起并通过 `POST /load` 预热；手动 `run.bat api` 的行为须文档化并对齐。
 *   **上游集成诚实说明**：`demo.py` 在 `sys.path` 注入后于函数内惰性导入——这是对顶层 import 规则的**文档化章程例外**，因为上游不可作为 pip 包安装且依赖 cwd 相对路径资源。
+*   **配置到 API 链路完整性**：用户 TTS 偏好（prompt wav / 音色、emotion / 语气、language / 方言）经 **Web 设置 → Bridge 合并 → sidecar → demo.synthesize** 传递，生产朗读路径不依赖 `8090` WebUI。持久化默认不得破坏仅 `text` 的客户端。
+*   **合成向后兼容**：省略可选字段（`promptWav`、`emotion`、`language`）**必须**保持扩展前行为：env/默认 prompt wav、无 instruct 控制时用 base 检查点、相同端口与路由。
 
 ---
 
@@ -31,7 +33,7 @@ ChattingCursor PilotTTS sidecar（`pilot_tts/server/tts_server.py`）是 GPU 预
 | `PILOT_TTS_WEBUI_PORT` | `8090` | `/health` 中报告的可选测试/调试 WebUI 端口 |
 | `PILOT_TTS_UPSTREAM_DIR` | `<pilot_tts>/upstream` | 上游克隆根目录 |
 | `PILOT_TTS_WEIGHTS_DIR` | `<upstream>/pretrained_models` | 模型权重 |
-| `PILOT_TTS_PROMPT_WAV` | （自动解析） | 参考说话人 wav |
+| `PILOT_TTS_PROMPT_WAV` | （自动解析） | 默认参考说话人音频（`.wav` 或 `.mp3`）；可通过请求 `promptWav` 覆盖 |
 | `PILOT_TTS_RESERVED_VRAM_GB` | `3` | 报告的显存预留 |
 | `PILOT_TTS_AUTO_LOAD` | Bridge 拉起时为 `0`；须文档化 `run.bat` 行为 | 启动时是否预加载 GPU |
 
@@ -63,7 +65,9 @@ ChattingCursor PilotTTS sidecar（`pilot_tts/server/tts_server.py`）是 GPU 预
 | 函数 | 预期签名 | 导入位置 |
 |------|----------|----------|
 | `load_engine` | `load_engine(*, config_path: str, checkpoint: str) -> Any` | 步骤 1–2 之后的 `load_gpu_engine()` |
-| `synthesize` | `synthesize(engine, *, text: str, prompt_wav: str, output_path: str) -> None` | 步骤 1 之后的 `synthesize()` 处理器 |
+| `synthesize` | `synthesize(engine, *, text, prompt_wav, output_path, emotion=None, language=None) -> None` | 步骤 1 之后的 `synthesize()` 处理器 |
+
+仅当非空时传递 instruct 专用 kwargs（`emotion`、`language`）。副语言标签（语调）保留在 `text` 内。完整扩展契约见 `spec_zh.md` FR-007–FR-013。
 
 详细调用参数见 `plan.md` §3.5。Phase 3 在每个惰性 import 块前须添加引用本节的中文注释。
 
@@ -72,12 +76,15 @@ ChattingCursor PilotTTS sidecar（`pilot_tts/server/tts_server.py`）是 GPU 预
 ## 3. 服务边界
 
 ```
-Web (TtsSubPage) ──► Bridge :4321 (/tts/*)
+Web (TtsSubPage) ──► scheduler-settings.json（promptWav、emotion、language 默认）
+       │
+       useSpeech ──► Bridge :4321 POST /tts/synthesize（合并默认）
                          │
                          ├── spawn ──► tts_server.py :4323
                          │              ├── GET  /health, /v1/health
                          │              ├── POST /load, /v1/load
                          │              └── POST /synthesize, /v1/synthesize
+                         │                    body: { text, promptWav?, emotion?, language? }
                          │
                          └── spawn ──► upstream/webui.py :8090（可选测试/调试）
 ```
@@ -96,6 +103,7 @@ Web (TtsSubPage) ──► Bridge :4321 (/tts/*)
 | WebUI 端口 | `8090`（`PILOT_TTS_WEBUI_PORT` 可覆盖；仅测试/调试——非生产朗读路径） |
 | 双路由别名 | `/health` + `/v1/health`，`/load` + `/v1/load`，`/synthesize` + `/v1/synthesize` |
 | 合成降级 JSON | 503/500 时 `{ error, message, fallback: true }` |
+| 合成可选字段 | `promptWav`、`emotion`、`language` 可选；`text` 必填 |
 | `run.bat api` 入口 | `server/tts_server.py`（非 `upstream/api.py`） |
 
 ---
@@ -110,3 +118,4 @@ Web (TtsSubPage) ──► Bridge :4321 (/tts/*)
 4. `PILOT_TTS_AUTO_LOAD` 在 Bridge spawn 与文档化的 `run.bat` 用法间行为一致。
 5. Bridge `isPilotTtsWeightsReady` 缺口已解决或在 Phase 4 任务中跟踪。
 6. `docs/plans/pilot_tts_installation/plan.md` 中过时的 `api.py` 引用已更正。
+7. 扩展（实现后）：可选合成字段从设置到 `demo.synthesize` 端到端，`plan_zh.md` §3.10 文档化 instruct/base 选择。

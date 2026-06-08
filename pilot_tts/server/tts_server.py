@@ -3,12 +3,11 @@
 import os
 import sys
 import tempfile
-import time
 import traceback
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
@@ -44,12 +43,15 @@ def weights_dir() -> Path:
 
 
 def weights_ready() -> bool:
+    # 与 install_backend.verify_model_weights 对齐：检查点与 w2v-bert 编码器均需就绪
     root = weights_dir()
-    candidates = [
-        root / "pilot_tts.pt",
-        root / "pilot_tts_instruct.pt",
-    ]
-    return any(item.is_file() for item in candidates)
+    checkpoint_ok = (
+        (root / "pilot_tts.pt").is_file()
+        or (root / "pilot_tts_instruct.pt").is_file()
+    )
+    w2v_config = root / "w2v-bert-2.0" / "config.json"
+    w2v_ok = w2v_config.is_file() and w2v_config.stat().st_size > 0
+    return checkpoint_ok and w2v_ok
 
 
 def resolve_prompt_wav() -> Path | None:
@@ -67,6 +69,11 @@ def resolve_prompt_wav() -> Path | None:
         if candidate.is_file():
             return candidate
     return None
+
+
+def _cleanup_temp_wav(path: str) -> None:
+    # 合成响应发送后删除临时 wav 文件
+    Path(path).unlink(missing_ok=True)
 
 
 def reserved_vram_gb() -> float:
@@ -90,15 +97,16 @@ def load_gpu_engine() -> None:
         return
     _load_error = None
     if not weights_ready():
-        _load_error = "权重未安装"
+        _load_error = "Model weights are not installed"
         return
     prompt = resolve_prompt_wav()
     if prompt is None:
-        _load_error = "未找到 prompt.wav，请设置 PILOT_TTS_PROMPT_WAV"
+        _load_error = "prompt.wav not found; set PILOT_TTS_PROMPT_WAV"
         return
     try:
         ensure_upstream_on_path()
         os.chdir(str(upstream_dir()))
+        # 惰性导入 demo.load_engine：上游非 pip 包，须先注入 sys.path（章程 §2.4 例外）
         from demo import load_engine
         checkpoint = weights_dir() / "pilot_tts.pt"
         config_path = upstream_dir() / "configs" / "infer_pilot_tts.yaml"
@@ -133,9 +141,9 @@ async def health() -> dict[str, object]:
         "webuiPort": webui_port,
         "loadError": _load_error,
         "message": (
-            "PilotTTS 已在 GPU 预热"
+            "PilotTTS GPU engine is warm"
             if ready
-            else (_load_error or "请运行 pilot_tts/install.bat 并完成 /load")
+            else (_load_error or "Run pilot_tts/install.bat and POST /load")
         ),
     }
 
@@ -144,10 +152,10 @@ async def health() -> dict[str, object]:
 @app.post("/load")
 async def load_endpoint() -> dict[str, object]:
     if not weights_ready():
-        raise HTTPException(status_code=503, detail="权重未安装")
+        raise HTTPException(status_code=503, detail="Model weights are not installed")
     load_gpu_engine()
     if not _gpu_loaded:
-        raise HTTPException(status_code=503, detail=_load_error or "GPU 加载失败")
+        raise HTTPException(status_code=503, detail=_load_error or "GPU engine failed to load")
     return {
         "ok": True,
         "gpuLoaded": True,
@@ -157,16 +165,16 @@ async def load_endpoint() -> dict[str, object]:
 
 @app.post("/v1/synthesize")
 @app.post("/synthesize")
-async def synthesize(body: SynthesizeRequest):
+async def synthesize(body: SynthesizeRequest, background_tasks: BackgroundTasks):
     text = body.text.strip()
     if not text:
-        raise HTTPException(status_code=400, detail="text 不能为空")
+        raise HTTPException(status_code=400, detail="text must not be empty")
     if not weights_ready():
         return JSONResponse(
             status_code=503,
             content={
                 "error": "weights_missing",
-                "message": "PilotTTS 权重未安装",
+                "message": "PilotTTS model weights are not installed",
                 "fallback": True,
             },
         )
@@ -177,7 +185,7 @@ async def synthesize(body: SynthesizeRequest):
             status_code=503,
             content={
                 "error": "gpu_not_loaded",
-                "message": _load_error or "PilotTTS 未在 GPU 预热，请先 POST /load",
+                "message": _load_error or "PilotTTS GPU engine is not warm; POST /load first",
                 "fallback": True,
             },
         )
@@ -187,12 +195,14 @@ async def synthesize(body: SynthesizeRequest):
             status_code=503,
             content={
                 "error": "prompt_missing",
-                "message": "未找到 prompt.wav",
+                "message": "prompt.wav not found; set PILOT_TTS_PROMPT_WAV",
                 "fallback": True,
             },
         )
+    out_path: str | None = None
     try:
         ensure_upstream_on_path()
+        # 惰性导入 demo.synthesize：避免模块加载时拉取 GPU 依赖（章程 §2.4 例外）
         from demo import synthesize
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
             out_path = tmp.name
@@ -202,8 +212,11 @@ async def synthesize(body: SynthesizeRequest):
             prompt_wav=str(prompt),
             output_path=out_path,
         )
+        background_tasks.add_task(_cleanup_temp_wav, out_path)
         return FileResponse(out_path, media_type="audio/wav", filename="pilot.wav")
     except Exception as exc:
+        if out_path is not None:
+            _cleanup_temp_wav(out_path)
         return JSONResponse(
             status_code=500,
             content={
@@ -217,6 +230,7 @@ async def synthesize(body: SynthesizeRequest):
 def main() -> None:
     host = read_env("PILOT_TTS_HOST", DEFAULT_HOST)
     port = int(read_env("PILOT_TTS_PORT", str(DEFAULT_PORT)) or DEFAULT_PORT)
+    # Bridge spawn 与 run.bat api 设置 PILOT_TTS_AUTO_LOAD=0；直接 python 调用时默认仍为 1
     auto_load = read_env("PILOT_TTS_AUTO_LOAD", "1") not in ("0", "false", "no")
     if auto_load and weights_ready():
         load_gpu_engine()
