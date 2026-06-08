@@ -1,0 +1,35 @@
+# PilotTTS 推理依赖（Bridge 朗读 / WebUI）。
+# 不含 WeTextProcessing：其在 Windows 上会拉取 pynini（常需 GCC/OpenFst，MSVC 无法编译）。
+# 上游 CosyVoice 前端在缺少 ttsfrd 时使用 wetext（不依赖 pynini）。
+--extra-index-url https://download.pytorch.org/whl/cu121
+torch==2.5.1
+torchaudio==2.5.1
+transformers>=4.40.0,<=4.52.4
+setuptools<81
+onnxruntime
+numpy
+PyYAML
+tqdm
+openai-whisper
+modelscope
+HyperPyYAML
+gradio
+tiktoken
+pypinyin
+conformer
+einops
+soundfile
+inflect
+wetext
+omegaconf
+scipy
+diffusers
+hydra-core
+lightning
+gdown
+librosa
+matplotlib
+pyarrow
+pyworld
+x-transformers
+wget
