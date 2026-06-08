@@ -74,7 +74,13 @@ test("手动 install.bat 后能从 sidecar 旁路检测到 upstream/webui.py", (
     mkdirSync(join(upstream, "pretrained_models"), { recursive: true });
     writeFileSync(sidecar, "# sidecar\n", "utf8");
     writeFileSync(join(upstream, "webui.py"), "# webui\n", "utf8");
+    mkdirSync(join(upstream, "pretrained_models", "w2v-bert-2.0"), { recursive: true });
     writeFileSync(join(upstream, "pretrained_models", "pilot_tts.pt"), "x", "utf8");
+    writeFileSync(
+      join(upstream, "pretrained_models", "w2v-bert-2.0", "config.json"),
+      "{}",
+      "utf8",
+    );
     process.env.CHATTINGCURSOR_REPO_ROOT = join(tempRoot, "wrong-repo");
     process.env.PILOT_TTS_SERVER_SCRIPT = sidecar;
     delete process.env.PILOT_TTS_UPSTREAM_DIR;
@@ -102,6 +108,29 @@ test("手动 install.bat 后能从 sidecar 旁路检测到 upstream/webui.py", (
       delete process.env.PILOT_TTS_ROOT;
     } else {
       process.env.PILOT_TTS_ROOT = previousRoot;
+    }
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+
+test("isPilotTtsWeightsReady 在仅有检查点但缺少 w2v-bert 时返回 false", () => {
+  const tempRoot = mkdtempSync(join(tmpdir(), "pilot-w2v-"));
+  const previousWeights = process.env.PILOT_TTS_WEIGHTS_DIR;
+  try {
+    const weights = join(tempRoot, "pretrained_models");
+    mkdirSync(weights, { recursive: true });
+    writeFileSync(join(weights, "pilot_tts.pt"), "x", "utf8");
+    process.env.PILOT_TTS_WEIGHTS_DIR = weights;
+    assert.equal(isPilotTtsWeightsReady(), false);
+    mkdirSync(join(weights, "w2v-bert-2.0"), { recursive: true });
+    writeFileSync(join(weights, "w2v-bert-2.0", "config.json"), "{}", "utf8");
+    assert.equal(isPilotTtsWeightsReady(), true);
+  } finally {
+    if (previousWeights === undefined) {
+      delete process.env.PILOT_TTS_WEIGHTS_DIR;
+    } else {
+      process.env.PILOT_TTS_WEIGHTS_DIR = previousWeights;
     }
     rmSync(tempRoot, { recursive: true, force: true });
   }

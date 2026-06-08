@@ -341,3 +341,13 @@ TtsSubPage → saveSchedulerSettings → scheduler-settings.json
 | `speckit_tasks` | 仅返回模板指针（`commands/speckit.tasks`） |
 
 **结论**：MCP 工具可用但不生成本地结构化产物（与先前会话一致）。最终文档由代码审计 + 上游 README 手工编写。可执行性经上游公开 API 与双检查点安装路径确认。
+
+---
+
+## 8. 变更日志
+
+| 日期 | 阶段 | 变更 |
+|------|------|------|
+| 2026-06-08 | 4.1 | Bridge `isPilotTtsWeightsReady()` 现要求非空 `w2v-bert-2.0/config.json` 加检查点，与 sidecar `weights_ready()` 一致。 |
+| 2026-06-08 | 4.3 | **决策（方案 A）**：`/health` 新增 `demoPresent`（`demo.py` 存在）。`inferencePresent` 保留为 deprecated 别名并镜像 `demoPresent`（不再检查 `inference.py`）。Bridge `probePilotTtsHealth` 未变。 |
+| 2026-06-08 | 4.4 | **os.chdir 结果**：移除 `load_gpu_engine()` 中裸 `os.chdir`。仅当 `Path.cwd() != upstream_dir()` 时临时 chdir，并用 `try/finally` 恢复 cwd。Bridge spawn 已设 `cwd=upstream`，生产路径跳过 chdir；`run.bat api`（cwd=`pilot_tts/`）仅在 GPU 加载时临时 chdir。合成路径从不 chdir（绝对路径）。Windows GPU 加载未在 CI 重验（开发工作区无 upstream 克隆）。 |

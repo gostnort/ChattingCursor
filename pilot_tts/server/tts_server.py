@@ -103,16 +103,20 @@ def load_gpu_engine() -> None:
     if prompt is None:
         _load_error = "prompt.wav not found; set PILOT_TTS_PROMPT_WAV"
         return
+    upstream = upstream_dir()
+    needs_chdir = Path.cwd().resolve() != upstream.resolve()
+    previous_cwd = os.getcwd()
     try:
         ensure_upstream_on_path()
-        os.chdir(str(upstream_dir()))
+        if needs_chdir:
+            os.chdir(str(upstream))
         # 惰性导入 demo.load_engine：上游非 pip 包，须先注入 sys.path（章程 §2.4 例外）
         from demo import load_engine
         checkpoint = weights_dir() / "pilot_tts.pt"
-        config_path = upstream_dir() / "configs" / "infer_pilot_tts.yaml"
+        config_path = upstream / "configs" / "infer_pilot_tts.yaml"
         if not checkpoint.is_file():
             checkpoint = weights_dir() / "pilot_tts_instruct.pt"
-            config_path = upstream_dir() / "configs" / "infer_pilot_tts_instruct.yaml"
+            config_path = upstream / "configs" / "infer_pilot_tts_instruct.yaml"
         _engine = load_engine(
             config_path=str(config_path),
             checkpoint=str(checkpoint),
@@ -122,6 +126,9 @@ def load_gpu_engine() -> None:
         _gpu_loaded = False
         _engine = None
         _load_error = f"{exc}\n{traceback.format_exc()[-800:]}"
+    finally:
+        if needs_chdir:
+            os.chdir(previous_cwd)
 
 
 @app.get("/health")
@@ -130,13 +137,16 @@ async def health() -> dict[str, object]:
     ready = weights_ready() and _gpu_loaded
     api_port = int(read_env("PILOT_TTS_PORT", str(DEFAULT_PORT)) or DEFAULT_PORT)
     webui_port = int(read_env("PILOT_TTS_WEBUI_PORT", "8090") or "8090")
+    upstream = upstream_dir()
+    demo_present = (upstream / "demo.py").is_file()
     return {
         "status": "ready" if ready else "degraded",
         "weightsReady": weights_ready(),
         "gpuLoaded": _gpu_loaded,
         "estimatedVramGb": reserved_vram_gb() if _gpu_loaded else 0,
-        "upstreamPresent": (upstream_dir() / "webui.py").is_file(),
-        "inferencePresent": (upstream_dir() / "inference.py").is_file(),
+        "upstreamPresent": (upstream / "webui.py").is_file(),
+        "demoPresent": demo_present,
+        "inferencePresent": demo_present,
         "apiPort": api_port,
         "webuiPort": webui_port,
         "loadError": _load_error,

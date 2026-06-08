@@ -91,12 +91,13 @@
 
 ## Phase 4：Bridge 及相关集成
 
-### [ ] [Task 4.1] Bridge `isPilotTtsWeightsReady()` w2v-bert 一致性
+### [x] [Task 4.1] Bridge `isPilotTtsWeightsReady()` w2v-bert 一致性
 *   **描述**：扩展 `apps/bridge/src/services/pilot-tts-paths.ts` 中 `isPilotTtsWeightsReady()`，检查 `w2v-bert-2.0/config.json`，与 sidecar `weights_ready()` 一致。
 *   **前置条件**：Task 2.1。
 *   **验收标准**：
     *   Bridge 安装快照 `weightsReady` 与 sidecar `/health` 在部分/完整安装时一致。
     *   必要时更新 `pilot-tts-paths.test.ts`。
+*   **完成**：`isPilotTtsWeightsReady()` 检查检查点 + 非空 `w2v-bert-2.0/config.json`；新增部分安装测试。
 
 ### [x] [Task 4.2] Bridge 中 WebUI 默认端口 `8090`（已验证）
 *   **描述**：确认 `pilot-tts-paths.ts` 中 `resolvePilotTtsWebuiPort()` 默认保持 `8090`；`tts.ts` `ports.note` 引用 `8090` 表示可选测试/调试 WebUI。端口 `4324` 为过时误解——已从文档与脚本中移除。
@@ -105,19 +106,21 @@
     *   未设置 env 时 `/tts/status` 报告 `pilotWebUi: 8090`。
     *   状态 note 提及 `8090` 表示 WebUI、`4323` 表示生产 API。
 
-### [ ] [Task 4.3] 评估 `inferencePresent` 健康字段
+### [x] [Task 4.3] 评估 `inferencePresent` 健康字段
 *   **描述**：按 `plan.md` §3.7 决定是否在 `tts_server.py` `/health` 中新增 `demoPresent`、重命名或弃用 `inferencePresent`。
 *   **前置条件**：Task 2.2。
 *   **验收标准**：
     *   决策记录在计划变更或任务注释中。
     *   Bridge `probePilotTtsHealth` 不受影响或同步更新。
+*   **完成**：方案 A — 新增 `demoPresent`（`demo.py`）；保留 `inferencePresent` 作为 deprecated 别名并镜像 `demoPresent`。Bridge 探测未变（不读取两字段）。
 
-### [ ] [Task 4.4] 减少 `os.chdir` 依赖（P2）
+### [x] [Task 4.4] 减少 `os.chdir` 依赖（P2）
 *   **描述**：测试 `load_gpu_engine()` 不使用 `os.chdir`；若必需则限定作用域并恢复 cwd；文档化残留需求。
 *   **前置条件**：Task 3.5。
 *   **验收标准**：
     *   变更后 Windows 上 GPU 加载 + 合成成功。
     *   `plan.md` 记录结果。
+*   **完成**：移除裸 `os.chdir`；仅当 `cwd != upstream` 时临时 chdir 并在 `try/finally` 恢复。Bridge spawn（`cwd=upstream`）跳过 chdir；`run.bat api` 仅在加载时 chdir。
 
 ---
 

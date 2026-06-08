@@ -91,12 +91,13 @@ This task list follows the Speckit-style phase structure used in `docs/plans/pil
 
 ## Phase 4: Bridge & Related Integration
 
-### [ ] [Task 4.1] Bridge `isPilotTtsWeightsReady()` w2v-bert parity
+### [x] [Task 4.1] Bridge `isPilotTtsWeightsReady()` w2v-bert parity
 *   **Description**: Extend `apps/bridge/src/services/pilot-tts-paths.ts` `isPilotTtsWeightsReady()` to check `w2v-bert-2.0/config.json` like sidecar `weights_ready()`.
 *   **Prerequisites**: Task 2.1.
 *   **Acceptance Criteria**:
     *   Bridge install snapshot `weightsReady` matches sidecar `/health` for partial/full installs.
     *   Update `pilot-tts-paths.test.ts` if needed.
+*   **Done**: `isPilotTtsWeightsReady()` checks checkpoint + non-empty `w2v-bert-2.0/config.json`; test added for partial install.
 
 ### [x] [Task 4.2] WebUI port default `8090` in Bridge (verified)
 *   **Description**: Confirm `resolvePilotTtsWebuiPort()` default stays `8090` in `pilot-tts-paths.ts`; `tts.ts` `ports.note` references `8090` for optional test/debug WebUI. Port `4324` was a stale misunderstanding — removed from docs and scripts.
@@ -105,19 +106,21 @@ This task list follows the Speckit-style phase structure used in `docs/plans/pil
     *   `/tts/status` reports `pilotWebUi: 8090` when env unset.
     *   Status note mentions `8090` for WebUI and `4323` for production API.
 
-### [ ] [Task 4.3] Evaluate `inferencePresent` health field
+### [x] [Task 4.3] Evaluate `inferencePresent` health field
 *   **Description**: Per `plan.md` §3.7, decide whether to add `demoPresent`, rename, or deprecate `inferencePresent` in `tts_server.py` `/health` payload.
 *   **Prerequisites**: Task 2.2.
 *   **Acceptance Criteria**:
     *   Decision recorded in plan changelog or task comment.
     *   Bridge `probePilotTtsHealth` unaffected or updated consistently.
+*   **Done**: Option A — added `demoPresent` (`demo.py`); `inferencePresent` kept as deprecated alias mirroring `demoPresent`. Bridge probe unchanged (does not read either field).
 
-### [ ] [Task 4.4] Reduce `os.chdir` reliance (P2)
+### [x] [Task 4.4] Reduce `os.chdir` reliance (P2)
 *   **Description**: Test `load_gpu_engine()` without `os.chdir`; if required, scope with cwd restore; document residual need.
 *   **Prerequisites**: Task 3.5.
 *   **Acceptance Criteria**:
     *   GPU load + synthesize succeed on Windows after change.
     *   `plan.md` records outcome.
+*   **Done**: Removed bare `os.chdir`; conditional chdir only when `cwd != upstream` with `try/finally` restore. Bridge spawn (`cwd=upstream`) skips chdir; `run.bat api` still chdirs during load only.
 
 ---
 

@@ -412,3 +412,13 @@ Invoked `project-0-ChattingCursor-spec-kit` tools on branch `tts_upgrade`:
 | `speckit_tasks` | Returned template pointer only (`commands/speckit.tasks`) |
 
 **Conclusion**: MCP validates tool availability but does not emit structured plan output in this workspace (consistent with prior session). Final spec/plan/tasks authored manually from codebase audit + upstream README. Executability confirmed via upstream public API documentation and existing install path for both checkpoints.
+
+---
+
+## 8. Changelog
+
+| Date | Phase | Change |
+|------|-------|--------|
+| 2026-06-08 | 4.1 | Bridge `isPilotTtsWeightsReady()` now requires non-empty `w2v-bert-2.0/config.json` plus checkpoint, matching sidecar `weights_ready()`. |
+| 2026-06-08 | 4.3 | **Decision (Option A)**: `/health` adds `demoPresent` (`demo.py` exists). `inferencePresent` kept as deprecated alias mirroring `demoPresent` (no longer checks `inference.py`). Bridge `probePilotTtsHealth` unchanged. |
+| 2026-06-08 | 4.4 | **os.chdir outcome**: Removed process-wide bare `os.chdir` in `load_gpu_engine()`. Chdir runs only when `Path.cwd() != upstream_dir()`, wrapped in `try/finally` with cwd restore. Bridge spawn already sets `cwd=upstream` so production path skips chdir; `run.bat api` (cwd=`pilot_tts/`) still chdirs temporarily during GPU load. Synthesize path never chdirs (absolute paths). GPU load on Windows not re-verified in CI (no upstream clone in dev workspace). |

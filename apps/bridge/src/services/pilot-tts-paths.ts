@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 import { getRepoRootDir } from "../paths.js";
 
@@ -109,8 +109,18 @@ export function isPilotTtsUpstreamPresent(): boolean {
 
 export function isPilotTtsWeightsReady(): boolean {
   const weights = getPilotTtsWeightsDir();
-  return existsSync(path.join(weights, "pilot_tts.pt"))
+  const checkpointOk =
+    existsSync(path.join(weights, "pilot_tts.pt"))
     || existsSync(path.join(weights, "pilot_tts_instruct.pt"));
+  const w2vConfig = path.join(weights, "w2v-bert-2.0", "config.json");
+  if (!checkpointOk || !existsSync(w2vConfig)) {
+    return false;
+  }
+  try {
+    return statSync(w2vConfig).size > 0;
+  } catch {
+    return false;
+  }
 }
 
 
