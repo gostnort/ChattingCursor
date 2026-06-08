@@ -1,4 +1,4 @@
-# PilotTTS 安装核心控制器：环境预检、硬件检测与虚拟环境部署（Phase 1–2）
+# PilotTTS 安装核心控制器：环境预检、硬件检测、虚拟环境与依赖部署（Phase 1–3）
 param(
     [switch]$Reset,
     [switch]$SkipWeights
@@ -201,3 +201,13 @@ Write-InstallLog "=== Hardware detection complete (extra-index: $($torchConfig.T
 Write-InstallLog "=== PilotTTS Install: Virtual Environment ==="
 Ensure-VirtualEnvironment
 Write-InstallLog "=== Phase 2 foundational setup complete ==="
+Write-InstallLog "=== PilotTTS Install: Dependency Installation (Phase 3) ==="
+$backendScript = Join-Path $ScriptRoot "install_backend.py"
+$pythonExe = Join-Path $ScriptRoot ".venv\Scripts\python.exe"
+& $pythonExe $backendScript
+if ($LASTEXITCODE -ne 0) {
+    Write-Host ""
+    Write-Host "[ERROR] Phase 3 dependency installation failed." -ForegroundColor Red
+    exit 1
+}
+Write-InstallLog "=== Phase 3 dependency installation complete ==="

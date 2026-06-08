@@ -49,7 +49,7 @@ This task list strictly follows the Speckit specification, breaking down the tec
 
 ## Phase 3: User Story 1 (P1)
 
-### [Task 3.1] High-Availability, Compilation-Free Scientific and Inference Dependency Installation
+### [x] [Task 3.1] High-Availability, Compilation-Free Scientific and Inference Dependency Installation
 *   **Description**:
     *   In `install_backend.py`, based on the hardware parameters passed from Task 2.1, prioritize using `uv pip install` to deploy matching versions of `torch==2.5.1` and `torchaudio==2.5.1`.
     *   Implement high-availability `.whl` force installation for `pyworld`: first attempt standard installation; if that fails or triggers source compilation, immediately catch the exception and install via pre-compiled `.whl` files from a reliable backup download source (Christoph Gohlke's archive, or AliYun mirror matching `Windows-amd64-py310`), completely bypassing MSVC C++ compilation.
