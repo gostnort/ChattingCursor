@@ -108,7 +108,7 @@ function Start-ChromeProcess {
   }
 }
 
-function Ensure-ProjectReady {
+function Initialize-Project {
   if (-not (Test-Path "$Root\node_modules")) {
     Write-Step "First run detected, installing dependencies..."
     & "$PSScriptRoot\install-all.ps1" -SkipCloudflared
@@ -225,7 +225,7 @@ function Wait-WebReady {
 }
 
 
-function Ensure-WebRunning {
+function Confirm-WebRunning {
   $url = Get-LocalWebUrl
   if (Test-WebHealthy) {
     if (Test-PortInUse -Port $WebPort) {
@@ -305,7 +305,7 @@ function Stop-ChildProcesses {
 }
 
 
-function Ensure-HttpsPublicBridgeUrl([string]$Url) {
+function Get-HttpsPublicBridgeUrl([string]$Url) {
   $normalized = $Url.Trim().TrimEnd("/")
   if ($normalized -match '^https?://') {
     if ($normalized -match '^http://[a-z0-9-]+\.trycloudflare\.com') {
@@ -589,7 +589,7 @@ function Set-PublicBridgeUrlInTokenFile([string]$PublicUrl, [switch]$Force) {
   if ($script:TunnelUrlApplied -and -not $Force) {
     return $true
   }
-  $normalized = Ensure-HttpsPublicBridgeUrl $PublicUrl
+  $normalized = Get-HttpsPublicBridgeUrl $PublicUrl
   $body = @{ publicBridgeUrl = $normalized } | ConvertTo-Json
   try {
     $response = Invoke-RestMethod `
@@ -685,7 +685,7 @@ function Write-TunnelLine([string]$Line) {
 }
 
 
-function Poll-TunnelOutput {
+function Read-TunnelOutput {
   if (-not $script:TunnelProcess -or $script:TunnelProcess.HasExited) {
     return
   }
@@ -893,7 +893,7 @@ function Start-TunnelProcess {
 try {
   [Console]::TreatControlCAsInput = $false
   [Console]::CancelKeyPress.Add({
-    param($sender, $e)
+    param($eventSender, $e)
     $e.Cancel = $true
     $script:ShuttingDown = $true
     Write-Host ""
@@ -912,7 +912,7 @@ try {
   Write-Host "Stop: press Ctrl+C"
   Write-Host ""
 
-  Ensure-ProjectReady
+  Initialize-Project
 
   Start-ChromeProcess
 
@@ -954,7 +954,7 @@ try {
   }
 
   if ($WithWeb) {
-    if (-not (Ensure-WebRunning)) {
+    if (-not (Confirm-WebRunning)) {
       exit 1
     }
   }
