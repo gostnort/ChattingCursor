@@ -545,6 +545,9 @@ export type SchedulerSettingsPayload = {
   pilotTtsEnabled: boolean;
   pilotTtsApiEnabled: boolean;
   pilotTtsReservedVramGb: number;
+  pilotTtsPromptWavPath: string;
+  pilotTtsDefaultEmotion: string;
+  pilotTtsDefaultLanguage: string;
   defaultOfflineVlmRepo: string;
   offlineVlmEnabled: boolean;
 };

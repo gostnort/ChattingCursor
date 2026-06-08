@@ -12,6 +12,11 @@ import {
   stopPilotTts,
 } from "../api/bridge";
 import { formatBridgeFetchError, normalizeBridgeUrl } from "../bridgeSettings";
+import {
+  PILOT_TTS_DIALECT_OPTIONS,
+  PILOT_TTS_EMOTION_OPTIONS,
+  validatePilotTtsPromptWavPath,
+} from "../pilotTtsVoiceSettings";
 
 
 interface TtsSubPageProps {
@@ -80,6 +85,12 @@ export function TtsSubPage({ bridgeUrl }: TtsSubPageProps) {
   const [installBusy, setInstallBusy] = useState(false);
   const [configBusy, setConfigBusy] = useState(false);
   const [configError, setConfigError] = useState<string | null>(null);
+  const [promptWavPath, setPromptWavPath] = useState("");
+  const [defaultEmotion, setDefaultEmotion] = useState("");
+  const [defaultLanguage, setDefaultLanguage] = useState("");
+  const [voiceSettingsError, setVoiceSettingsError] = useState<string | null>(null);
+  const [voiceSaveToast, setVoiceSaveToast] = useState<string | null>(null);
+  const [voiceSettingsSaving, setVoiceSettingsSaving] = useState(false);
   const statusFailCountRef = useRef(0);
   const formatError = useCallback(
     (err: unknown): string => formatBridgeFetchError(normalizedBridgeUrl, err),
@@ -131,6 +142,9 @@ export function TtsSubPage({ bridgeUrl }: TtsSubPageProps) {
     try {
       const bundle = await fetchSchedulerSettings(normalizedBridgeUrl);
       setApiEnabledPref(bundle.settings.pilotTtsApiEnabled);
+      setPromptWavPath(bundle.settings.pilotTtsPromptWavPath ?? "");
+      setDefaultEmotion(bundle.settings.pilotTtsDefaultEmotion ?? "");
+      setDefaultLanguage(bundle.settings.pilotTtsDefaultLanguage ?? "");
     } catch {
       // 偏好读取失败时保持默认 false
     }
@@ -257,6 +271,31 @@ export function TtsSubPage({ bridgeUrl }: TtsSubPageProps) {
     const result = await saveSchedulerSettings(normalizedBridgeUrl, { pilotTtsApiEnabled: enabled });
     setApiEnabledPref(result.settings.pilotTtsApiEnabled);
   };
+  const handleSaveVoiceSettings = (): void => {
+    setVoiceSettingsError(null);
+    setVoiceSaveToast(null);
+    const pathError = validatePilotTtsPromptWavPath(promptWavPath);
+    if (pathError) {
+      setVoiceSettingsError(pathError);
+      return;
+    }
+    setVoiceSettingsSaving(true);
+    void saveSchedulerSettings(normalizedBridgeUrl, {
+      pilotTtsPromptWavPath: promptWavPath.trim(),
+      pilotTtsDefaultEmotion: defaultEmotion.trim(),
+      pilotTtsDefaultLanguage: defaultLanguage.trim(),
+    })
+      .then((result) => {
+        setPromptWavPath(result.settings.pilotTtsPromptWavPath ?? "");
+        setDefaultEmotion(result.settings.pilotTtsDefaultEmotion ?? "");
+        setDefaultLanguage(result.settings.pilotTtsDefaultLanguage ?? "");
+        setVoiceSaveToast("朗读默认设置已保存。");
+      })
+      .catch((err: unknown) => {
+        setVoiceSettingsError(formatError(err));
+      })
+      .finally(() => setVoiceSettingsSaving(false));
+  };
   const handleApiToggle = (enabled: boolean): void => {
     setApiToggleBusy(true);
     setPageError(null);
@@ -295,7 +334,7 @@ export function TtsSubPage({ bridgeUrl }: TtsSubPageProps) {
         setApiToggleBusy(false);
       });
   };
-  const busy = installBusy || apiToggleBusy;
+  const busy = installBusy || apiToggleBusy || voiceSettingsSaving;
   const installLabel = installStatusLabel({
     installPhase,
     upstreamInstalled,
@@ -367,6 +406,68 @@ export function TtsSubPage({ bridgeUrl }: TtsSubPageProps) {
         <li>{configUiStatus}</li>
       </ul>
       {healthHint && !pageError && <p className="config-hint">{healthHint}</p>}
+      <section className="tts-voice-settings" aria-labelledby="tts-voice-settings-heading">
+        <h3 id="tts-voice-settings-heading">朗读默认设置</h3>
+        <p className="config-hint">
+          以下设置用于聊天朗读（4323 API），保存后全应用生效。语气/方言需 instruct 权重；高级调参可用「打开 Pilot 配置」（8090 WebUI，可选）。
+        </p>
+        {voiceSettingsError && (
+          <p className="config-error" role="alert">{voiceSettingsError}</p>
+        )}
+        {voiceSaveToast && (
+          <p className="config-save-toast" role="status">{voiceSaveToast}</p>
+        )}
+        <label className="config-field" htmlFor="tts-prompt-wav-path">
+          <span className="config-field-label">默认音色参考音频（绝对路径，.wav 或 .mp3）</span>
+          <input
+            id="tts-prompt-wav-path"
+            type="text"
+            value={promptWavPath}
+            onChange={(event) => setPromptWavPath(event.target.value)}
+            placeholder="例如 C:\voice\ref.wav"
+            spellCheck={false}
+            disabled={bridgeReachable === false}
+          />
+        </label>
+        <label className="model-select local-models-select" htmlFor="tts-default-emotion">
+          <span className="model-select-label">默认语气</span>
+          <select
+            id="tts-default-emotion"
+            value={defaultEmotion}
+            onChange={(event) => setDefaultEmotion(event.target.value)}
+            disabled={bridgeReachable === false}
+          >
+            {PILOT_TTS_EMOTION_OPTIONS.map((option) => (
+              <option key={option.value || "default"} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="model-select local-models-select" htmlFor="tts-default-language">
+          <span className="model-select-label">默认方言</span>
+          <select
+            id="tts-default-language"
+            value={defaultLanguage}
+            onChange={(event) => setDefaultLanguage(event.target.value)}
+            disabled={bridgeReachable === false}
+          >
+            {PILOT_TTS_DIALECT_OPTIONS.map((option) => (
+              <option key={option.value || "default"} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          type="button"
+          className="btn-secondary local-models-btn"
+          disabled={busy || bridgeReachable === false}
+          onClick={handleSaveVoiceSettings}
+        >
+          {voiceSettingsSaving ? "保存中…" : "保存朗读默认"}
+        </button>
+      </section>
       {installProgress && (
         <div className="local-install-progress" role="status" aria-live="polite">
           {installBusy && <progress className="local-install-progress-bar" max={100} />}

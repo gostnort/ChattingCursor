@@ -243,12 +243,13 @@
 
 ## Phase 8：Web 配置 UI 与 `useSpeech` 集成
 
-### [ ] [Task 8.1] 扩展 Web `SchedulerSettingsPayload`
+### [x] [Task 8.1] 扩展 Web `SchedulerSettingsPayload`
 *   **描述**：更新 `apps/web/src/api/bridge.ts` 类型。
 *   **前置条件**：Task 7.1。
 *   **验收标准**：TypeScript 编译通过。
+*   **完成**：`SchedulerSettingsPayload` 增加 `pilotTtsPromptWavPath`、`pilotTtsDefaultEmotion`、`pilotTtsDefaultLanguage`。
 
-### [ ] [Task 8.2] TtsSubPage 音色/语气/方言 UI
+### [x] [Task 8.2] TtsSubPage 音色/语气/方言 UI
 *   **描述**：在 `TtsSubPage.tsx` 增加 prompt wav 路径、emotion 下拉、方言下拉；经 `saveSchedulerSettings` 保存。
 *   **前置条件**：Task 8.1。
 *   **验收标准**：
@@ -256,19 +257,22 @@
     *   刷新后回显。
     *   帮助文案说明 `8090` WebUI 为可选高级调试。
 *   **验证**：手动 UI；确认 `scheduler-settings.json`。
+*   **完成**：朗读默认设置区块：路径输入、语气/方言下拉、保存按钮；挂载时 `fetchSchedulerSettings` 回显。
 
-### [ ] [Task 8.3] `useSpeech.ts` 发送 TTS 默认
+### [x] [Task 8.3] `useSpeech.ts` 发送 TTS 默认
 *   **描述**：读取调度 TTS 默认并写入 `/tts/synthesize` body。
 *   **前置条件**：Task 7.2、8.1。
 *   **验收标准**：
     *   聊天朗读自动使用已保存设置。
     *   Pilot 不可用时浏览器 fallback 不变。
 *   **验证**：配置 happy + 自定义 wav 后触发朗读。
+*   **完成**：缓存调度默认；`buildPilotTtsSynthesizeBody` 合并进 synthesize POST。
 
-### [ ] [Task 8.4] Web 校验与文案
+### [x] [Task 8.4] Web 校验与文案
 *   **描述**：绝对路径客户端校验，后缀须为 `.wav` 或 `.mp3`；emotion/方言枚举与 FR-013 一致。
 *   **前置条件**：Task 8.2。
 *   **验收标准**：无效路径保存前提示（Web 中文 UI；API 仍英文）。
+*   **完成**：`pilotTtsVoiceSettings.ts` 含 FR-013 枚举与 `validatePilotTtsPromptWavPath`；TtsSubPage 保存前中文错误提示。
 
 ---
 

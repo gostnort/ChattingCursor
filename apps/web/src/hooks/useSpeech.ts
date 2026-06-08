@@ -1,4 +1,10 @@
 import { useCallback, useRef, useState } from "react";
+import { fetchSchedulerSettings } from "../api/bridge";
+import {
+  buildPilotTtsSynthesizeBody,
+  extractPilotTtsVoiceDefaults,
+  type PilotTtsVoiceDefaults,
+} from "../pilotTtsVoiceSettings";
 
 
 const TTS_CHUNK_BYTES = 1000;
@@ -65,12 +71,16 @@ async function isPilotTtsSynthAvailable(bridgeUrl: string): Promise<boolean> {
 }
 
 
-async function tryPilotTtsSynthesize(bridgeUrl: string, text: string): Promise<boolean> {
+async function tryPilotTtsSynthesize(
+  bridgeUrl: string,
+  text: string,
+  defaults: PilotTtsVoiceDefaults,
+): Promise<boolean> {
   try {
     const response = await fetch(`${bridgeUrl}/tts/synthesize`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify(buildPilotTtsSynthesizeBody(text, defaults)),
     });
     if (!response.ok) {
       return false;
@@ -97,7 +107,33 @@ export function useSpeech(bridgeUrl?: string) {
   const playStateRef = useRef<TtsPlayState | null>(null);
   const resumeOffsetRef = useRef(0);
   const stoppedByUserRef = useRef(false);
+  const ttsDefaultsRef = useRef<PilotTtsVoiceDefaults | null>(null);
+  const ttsDefaultsLoadingRef = useRef<Promise<PilotTtsVoiceDefaults> | null>(null);
   const [speakingKey, setSpeakingKey] = useState<string | null>(null);
+  const loadTtsDefaults = useCallback(async (url: string): Promise<PilotTtsVoiceDefaults> => {
+    if (ttsDefaultsRef.current) {
+      return ttsDefaultsRef.current;
+    }
+    if (ttsDefaultsLoadingRef.current) {
+      return ttsDefaultsLoadingRef.current;
+    }
+    const pending = fetchSchedulerSettings(url)
+      .then((bundle) => {
+        const defaults = extractPilotTtsVoiceDefaults(bundle.settings);
+        ttsDefaultsRef.current = defaults;
+        return defaults;
+      })
+      .catch(() => {
+        const empty: PilotTtsVoiceDefaults = { promptWavPath: "", emotion: "", language: "" };
+        ttsDefaultsRef.current = empty;
+        return empty;
+      })
+      .finally(() => {
+        ttsDefaultsLoadingRef.current = null;
+      });
+    ttsDefaultsLoadingRef.current = pending;
+    return pending;
+  }, []);
 
 
   const stop = useCallback((): void => {
@@ -192,7 +228,8 @@ export function useSpeech(bridgeUrl?: string) {
     if (bridgeUrl?.trim()) {
       void (async () => {
         const pilotCapable = await isPilotTtsSynthAvailable(bridgeUrl);
-        const pilotOk = pilotCapable && await tryPilotTtsSynthesize(bridgeUrl, ttsText);
+        const defaults = await loadTtsDefaults(bridgeUrl);
+        const pilotOk = pilotCapable && await tryPilotTtsSynthesize(bridgeUrl, ttsText, defaults);
         if (pilotOk) {
           setSpeakingKey(key);
           return;
@@ -227,7 +264,7 @@ export function useSpeech(bridgeUrl?: string) {
     resumeOffsetRef.current = resumeFromSameMessage;
     setSpeakingKey(key);
     speakChunk(key, lang);
-  }, [bridgeUrl, speakChunk, speakingKey, stop]);
+  }, [bridgeUrl, loadTtsDefaults, speakChunk, speakingKey, stop]);
 
 
   return { toggleSpeak, stop, speakingKey };

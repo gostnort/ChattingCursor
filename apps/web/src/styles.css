@@ -422,6 +422,23 @@ body {
   margin-top: 0.5rem;
 }
 
+.tts-voice-settings {
+  margin: 1rem 0;
+  padding-top: 0.75rem;
+  border-top: 1px solid #30363d;
+}
+
+.tts-voice-settings h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #e6edf3;
+}
+
+.tts-voice-settings .local-models-btn {
+  margin-top: 0.25rem;
+}
+
 .local-models-page .local-models-row {
   display: flex;
   gap: 0.5rem;

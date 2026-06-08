@@ -246,13 +246,14 @@ This task list follows the Speckit-style phase structure used in `docs/plans/pil
 
 ## Phase 8: Web Config UI & `useSpeech` Integration
 
-### [ ] [Task 8.1] Extend `SchedulerSettingsPayload` in Web API client
+### [x] [Task 8.1] Extend `SchedulerSettingsPayload` in Web API client
 *   **Description**: Update `apps/web/src/api/bridge.ts` types for new TTS settings fields.
 *   **Prerequisites**: Task 7.1.
 *   **Acceptance Criteria**:
     *   TypeScript compiles; `fetchSchedulerSettings` / `saveSchedulerSettings` typed.
+*   **Done**: `SchedulerSettingsPayload` extended with `pilotTtsPromptWavPath`, `pilotTtsDefaultEmotion`, `pilotTtsDefaultLanguage`.
 
-### [ ] [Task 8.2] TtsSubPage voice settings UI
+### [x] [Task 8.2] TtsSubPage voice settings UI
 *   **Description**: Add controls on `apps/web/src/components/TtsSubPage.tsx`: prompt wav path input, emotion dropdown (upstream tags), dialect dropdown. Save via `saveSchedulerSettings`.
 *   **Prerequisites**: Task 8.1.
 *   **Acceptance Criteria**:
@@ -260,20 +261,23 @@ This task list follows the Speckit-style phase structure used in `docs/plans/pil
     *   Values reload on page refresh.
     *   Help text links `8090` WebUI as optional advanced tuning.
 *   **Verification**: Manual UI test; confirm `scheduler-settings.json` updated.
+*   **Done**: Voice settings section with path input, emotion/dialect dropdowns, save button; loads on mount via `fetchSchedulerSettings`.
 
-### [ ] [Task 8.3] `useSpeech.ts` send TTS defaults
+### [x] [Task 8.3] `useSpeech.ts` send TTS defaults
 *   **Description**: Load scheduler TTS defaults; include in `POST /tts/synthesize` body from `tryPilotTtsSynthesize`.
 *   **Prerequisites**: Tasks 7.2, 8.1.
 *   **Acceptance Criteria**:
     *   Chat read-aloud uses saved emotion/language/prompt wav without extra user action.
     *   Browser fallback unchanged when Pilot unavailable.
 *   **Verification**: Configure happy + custom wav; trigger speak on chat message.
+*   **Done**: Cached `fetchSchedulerSettings` defaults; `buildPilotTtsSynthesizeBody` merges into synthesize POST.
 
-### [ ] [Task 8.4] Web UI copy and validation
+### [x] [Task 8.4] Web UI copy and validation
 *   **Description**: Client-side validation for absolute paths with `.wav` or `.mp3` suffix; emotion/dialect enum aligned with `spec.md` FR-013.
 *   **Prerequisites**: Task 8.2.
 *   **Acceptance Criteria**:
     *   Invalid path shows user-facing error before save (Chinese UI copy allowed in Web; API remains English).
+*   **Done**: `pilotTtsVoiceSettings.ts` with FR-013 enums and `validatePilotTtsPromptWavPath`; Chinese errors on TtsSubPage before save.
 
 ---
 
