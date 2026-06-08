@@ -14,7 +14,6 @@ import {
 } from "./google-serp-parse.js";
 import { extractReadabilityFromHtml, isLocalLlmModel } from "./local-llm-client.js";
 import {
-  ensureGemma4SidecarStarted,
   ensureLocalLlmReady,
   ensureLocalLlmSidecarStarted,
 } from "./local-llm-lifecycle.js";
@@ -25,9 +24,7 @@ import {
   maxLinksForWebSearchPass,
   planWebSearchRun,
   WEBSEARCH_LINKS_PER_SERP_PAGE,
-  WEBSEARCH_MAX_LINKS_PER_SERP_PAGE,
   WEBSEARCH_PASS_DEADLINE_MS,
-  WEBSEARCH_REPEAT_PASS_DEADLINE_MS,
   type WebSearchRunPlan,
 } from "./websearch-state.js";
 import {
@@ -43,12 +40,6 @@ const PAGE_TEXT_MAX_CHARS = 3500;
 const AGGREGATE_EXCERPT_MAX_CHARS = 30000;
 /** 结果页并发打开上限（每批打开后关闭再开下一批） */
 export const WEBSEARCH_CRAWL_BATCH_SIZE = 5;
-/** @deprecated 单次仅一阶段，预算见 resolveWebSearchPassByK */
-export const WEBSEARCH_GLOBAL_DEADLINE_MS = WEBSEARCH_REPEAT_PASS_DEADLINE_MS;
-export const WEBSEARCH_FIRST_PASS_DEADLINE_MS = WEBSEARCH_PASS_DEADLINE_MS;
-export const WEBSEARCH_SECOND_PASS_DEADLINE_MS = WEBSEARCH_REPEAT_PASS_DEADLINE_MS;
-
-
 /** Bridge stdout 日志（英文，便于排查 /websearch） */
 function logWebSearch(stage: string, details: Record<string, unknown>): void {
   console.info(`[websearch] ${stage}`, JSON.stringify(details));
@@ -293,7 +284,7 @@ async function buildPartialWebSearchResult(
   const maxLinks = pass ? maxLinksForWebSearchPass(pass) : 0;
   if (linksTruncated) {
     statusNotes.push(
-      `部分结果页未打开（上限：每 SERP 页 ${WEBSEARCH_MAX_LINKS_PER_SERP_PAGE} 条，单次合计 ${maxLinks} 条）。`,
+      `部分结果页未打开（单次合计 ${maxLinks} 条）。`,
     );
   }
   if (crawlQueue.length > 0) {
@@ -364,7 +355,13 @@ export async function openGoogleSearchInChrome(
     void ensureLocalLlmSidecarStarted(options.model).catch(() => undefined);
     modelReadyPromise = ensureLocalLlmReady(options.model).then(() => undefined);
   } else {
-    void ensureGemma4SidecarStarted().catch(() => undefined);
+    void import("./local-llm-store.js").then(async ({ listInstalledLocalLlmModels }) => {
+      const models = await listInstalledLocalLlmModels();
+      const first = models.find((item) => item.weightsReady);
+      if (first) {
+        await ensureLocalLlmSidecarStarted(first.id);
+      }
+    }).catch(() => undefined);
   }
   logWebSearch("state_loaded", {
     query: query.trim(),

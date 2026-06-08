@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 一键安装：Python venv（可选 crewAI）、Node 依赖、shared 构建、cloudflared
+# 一键安装：Node 依赖、shared 构建、cloudflared
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -40,17 +40,8 @@ ensure_pnpm() {
 
 ensure_python_venv() {
   if ! command -v python3 >/dev/null 2>&1; then
-    echo "未检测到 python3；跳过可选 crewAI venv（核心聊天不依赖 Python）。"
+    echo "未检测到 python3；跳过 local_llm 可选依赖（核心聊天不依赖 Python）。"
     return
-  fi
-  local venv_py="${ROOT}/.venv/bin/python"
-  if [[ ! -x "${venv_py}" ]]; then
-    log_step "创建 Python venv 并安装 requirements.txt（可选 crewAI）..."
-    python3 -m venv "${ROOT}/.venv"
-    "${venv_py}" -m pip install --upgrade pip
-    "${venv_py}" -m pip install -r "${ROOT}/requirements.txt"
-  else
-    echo "Python venv 已存在: ${ROOT}/.venv"
   fi
   if [[ -f "${ROOT}/local_llm/server/install.sh" ]]; then
     log_step "Installing local_llm inference deps (llama-cpp-python, fastapi, etc.)..."

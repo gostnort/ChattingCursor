@@ -11,16 +11,6 @@ export type GgufGroupOption = {
 };
 
 
-/** 去掉分片后缀得到分组键 */
-export function stripGgufShardSuffix(filename: string): string {
-  const normalized = filename.replace(/\\/g, "/");
-  if (!SHARD_SUFFIX.test(normalized)) {
-    return normalized.replace(/\.gguf$/i, "");
-  }
-  return normalized.replace(SHARD_SUFFIX, "");
-}
-
-
 /** 解析单个 GGUF 路径的分组键与展示名 */
 export function parseGgufFileGroup(filename: string): { groupKey: string; displayLabel: string; folderPrefix: string } {
   const normalized = filename.replace(/\\/g, "/");
@@ -36,12 +26,6 @@ export function parseGgufFileGroup(filename: string): { groupKey: string; displa
   const groupKey = `${folderPrefix}${stem}`;
   const displayLabel = groupKey;
   return { groupKey, displayLabel, folderPrefix };
-}
-
-
-/** 判断文件是否属于同一 GGUF 分组 */
-export function ggufFileMatchesGroup(filename: string, groupKey: string): boolean {
-  return parseGgufFileGroup(filename).groupKey === groupKey;
 }
 
 

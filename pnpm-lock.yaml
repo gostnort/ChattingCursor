@@ -102,16 +102,6 @@ importers:
         specifier: ^5.8.2
         version: 5.9.3
 
-  packages/evaluator:
-    dependencies:
-      '@chatting-cursor/shared':
-        specifier: workspace:*
-        version: link:../shared
-    devDependencies:
-      typescript:
-        specifier: ^5.8.2
-        version: 5.9.3
-
   packages/shared:
     dependencies:
       zod:

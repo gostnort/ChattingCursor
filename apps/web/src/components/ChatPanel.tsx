@@ -203,7 +203,7 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
   const runInFlightRef = useRef(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const { toggleSpeak, speakingKey } = useSpeech();
+  const { toggleSpeak, speakingKey } = useSpeech(bridgeUrl);
   const compressedModels = useMemo(() => compressModelOptions(models), [models]);
   const offlineDisplayAuthors = useMemo(
     () => buildModelDisplayAuthorListFromModelIds(models.map((item) => item.id)),
@@ -262,6 +262,7 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
   }, []);
 
 
+  /** 离开离线或切换离线模型：/local-llm/stop 经 Bridge 调用 releaseOfflineStack（LLM+VLM） */
   const unloadOfflineSidecar = useCallback(async (): Promise<void> => {
     resetOfflineLoadState();
     if (!bridgeUrl) {
@@ -697,7 +698,7 @@ export function ChatPanel({ bridgeUrl, bridgeToken }: ChatPanelProps) {
     if (isOfflineModelId(previous)) {
       persistOfflineModelContext(previous);
     }
-    if (isOfflineModelId(previous) && !isOfflineModelId(value)) {
+    if (isOfflineModelId(previous) && (!isOfflineModelId(value) || previous !== value)) {
       void unloadOfflineSidecar();
     }
     setSelectedModel(value);

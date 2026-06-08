@@ -286,15 +286,6 @@ export function resetPortSettings(): { bridgePort: number; webPort: number } {
 }
 
 
-/** 当前保存值是否与默认端口一致 */
-export function isDefaultPortSettings(): boolean {
-  if (isGitHubPages()) {
-    return getBridgePort() === DEFAULT_BRIDGE_PORT;
-  }
-  return getBridgePort() === DEFAULT_BRIDGE_PORT && getWebPort() === DEFAULT_WEB_PORT;
-}
-
-
 /** 构建本地开发前端 URL；GitHub Pages 不使用 */
 export function buildWebDevUrl(port: number = getWebPort()): string {
   return `http://${BRIDGE_HOST}:${port}/ChattingCursor/`;

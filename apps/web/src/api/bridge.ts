@@ -6,7 +6,6 @@ import type {
   ChatCancelResponse,
   ChatImageUploadResponse,
   ChatAnalyzeImageResponse,
-  HistorySearchResponse,
   LatestRunResponse,
   RunFinalTextResponse,
   LocalConfigResponse,
@@ -46,7 +45,14 @@ export interface BridgeHealthResponse {
   };
   webSearchAvailable?: boolean;
   publicBridgeUrl?: string;
-  gemma4?: LocalConfigResponse["gemma4"];
+  localLlm?: LocalConfigResponse["localLlm"];
+  scheduler?: {
+    blocked: boolean;
+    blockReason?: string;
+    offlineLlm: { modelId: string | null; nGpuLayers: number | null };
+    offlineVlm: { boundModelId: string | null; loaded: boolean };
+    pilotTts: { enabled: boolean; status: string; reservedVramGb: number; usedVramGb?: number };
+  };
   timestamp: string;
 }
 
@@ -116,19 +122,6 @@ export async function fetchModels(bridgeUrl: string, token?: string): Promise<Mo
     throw new Error(await readErrorDetail(response, `获取模型列表失败 (${response.status})`));
   }
   return response.json() as Promise<ModelsResponse>;
-}
-
-
-/** 搜索本地历史 */
-export async function searchHistory(bridgeUrl: string, query: string, token?: string): Promise<HistorySearchResponse> {
-  const params = new URLSearchParams({ q: query });
-  const response = await fetch(`${bridgeUrl}/history/search?${params.toString()}`, {
-    headers: buildAuthHeaders(token),
-  });
-  if (!response.ok) {
-    throw new Error(await readErrorDetail(response, `搜索历史失败 (${response.status})`));
-  }
-  return response.json() as Promise<HistorySearchResponse>;
 }
 
 
@@ -536,17 +529,6 @@ export async function fetchBridgeHealth(bridgeUrl: string): Promise<BridgeHealth
 }
 
 
-/** 判断 Bridge URL 是否指向本机 */
-export function isLocalBridgeUrl(bridgeUrl: string): boolean {
-  try {
-    const url = new URL(bridgeUrl);
-    return url.hostname === "127.0.0.1" || url.hostname === "localhost";
-  } catch {
-    return false;
-  }
-}
-
-
 /** 获取本地配置（仅 localhost Bridge） */
 export async function fetchLocalConfig(bridgeUrl: string, token?: string): Promise<LocalConfigResponse> {
   const response = await fetch(`${bridgeUrl}/local/config`, {
@@ -556,6 +538,65 @@ export async function fetchLocalConfig(bridgeUrl: string, token?: string): Promi
     throw new Error(await readErrorDetail(response, `本地配置不可用 (${response.status})`));
   }
   return response.json() as Promise<LocalConfigResponse>;
+}
+
+
+export type SchedulerSettingsPayload = {
+  pilotTtsEnabled: boolean;
+  pilotTtsApiEnabled: boolean;
+  pilotTtsReservedVramGb: number;
+  defaultOfflineVlmRepo: string;
+  offlineVlmEnabled: boolean;
+};
+
+
+/** 读取三路调度配置（仅本机 Bridge） */
+export async function fetchSchedulerSettings(
+  bridgeUrl: string,
+  token?: string,
+): Promise<{
+  settings: SchedulerSettingsPayload;
+  scheduler: NonNullable<BridgeHealthResponse["scheduler"]> & { blocked?: boolean; blockReason?: string };
+}> {
+  const response = await fetch(`${bridgeUrl}/local/scheduler-settings`, {
+    headers: buildAuthHeaders(token),
+  });
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, `调度配置不可用 (${response.status})`));
+  }
+  return response.json() as Promise<{
+    settings: SchedulerSettingsPayload;
+    scheduler: NonNullable<BridgeHealthResponse["scheduler"]> & { blocked?: boolean; blockReason?: string };
+  }>;
+}
+
+
+/** 保存三路调度配置并重新 planStartup */
+export async function saveSchedulerSettings(
+  bridgeUrl: string,
+  patch: Partial<SchedulerSettingsPayload>,
+  token?: string,
+): Promise<{
+  settings: SchedulerSettingsPayload;
+  plan: { ok: boolean; reason?: string };
+  scheduler: { blocked?: boolean; blockReason?: string };
+}> {
+  const response = await fetch(`${bridgeUrl}/local/scheduler-settings`, {
+    method: "POST",
+    headers: {
+      ...buildAuthHeaders(token),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(patch),
+  });
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, `保存调度配置失败 (${response.status})`));
+  }
+  return response.json() as Promise<{
+    settings: SchedulerSettingsPayload;
+    plan: { ok: boolean; reason?: string };
+    scheduler: { blocked?: boolean; blockReason?: string };
+  }>;
 }
 
 
@@ -878,6 +919,193 @@ export async function fetchLocalLlmInstallStatus(
 }
 
 
+export type OfflineVisionSettings = {
+  enabled: boolean;
+  selectedModelId: string | null;
+  defaultRepoId: string;
+  defaultAuthor: string;
+  installed: Array<{ id: string; label: string; repoId: string; weightsReady: boolean }>;
+};
+
+
+/** 离线视觉设置 */
+export async function fetchOfflineVisionSettings(bridgeUrl: string): Promise<OfflineVisionSettings> {
+  const response = await fetch(`${bridgeUrl}/local-vlm/settings`);
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, `获取视觉设置失败 (${response.status})`));
+  }
+  return response.json() as Promise<OfflineVisionSettings>;
+}
+
+
+/** 更新离线视觉设置 */
+export async function patchOfflineVisionSettings(
+  bridgeUrl: string,
+  body: { enabled?: boolean; selectedModelId?: string | null },
+): Promise<OfflineVisionSettings> {
+  const response = await fetch(`${bridgeUrl}/local-vlm/settings`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, `保存视觉设置失败 (${response.status})`));
+  }
+  return response.json() as Promise<OfflineVisionSettings>;
+}
+
+
+export async function fetchLocalVlmAuthors(bridgeUrl: string): Promise<{ authors: string[] }> {
+  const response = await fetch(`${bridgeUrl}/local-vlm/authors`);
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, `获取视觉作者列表失败 (${response.status})`));
+  }
+  return response.json() as Promise<{ authors: string[] }>;
+}
+
+
+export async function addLocalVlmAuthor(bridgeUrl: string, author: string): Promise<{ authors: string[] }> {
+  const response = await fetch(`${bridgeUrl}/local-vlm/authors`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ author }),
+  });
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, `添加视觉作者失败 (${response.status})`));
+  }
+  return response.json() as Promise<{ authors: string[] }>;
+}
+
+
+export async function fetchLocalVlmHfModels(
+  bridgeUrl: string,
+  author: string,
+): Promise<{ author: string; models: HfModelSummary[] }> {
+  const params = new URLSearchParams({ author });
+  const response = await fetch(`${bridgeUrl}/local-vlm/hf/models?${params.toString()}`);
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, `获取视觉 HF 仓库失败 (${response.status})`));
+  }
+  return response.json() as Promise<{ author: string; models: HfModelSummary[] }>;
+}
+
+
+export async function fetchLocalVlmHfFiles(
+  bridgeUrl: string,
+  repoId: string,
+): Promise<{ repoId: string; groups: GgufGroupOption[] }> {
+  const params = new URLSearchParams({ repo_id: repoId });
+  const response = await fetch(`${bridgeUrl}/local-vlm/hf/files?${params.toString()}`);
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, `获取视觉 GGUF 分组失败 (${response.status})`));
+  }
+  return response.json() as Promise<{ repoId: string; groups: GgufGroupOption[] }>;
+}
+
+
+export async function installLocalVlmModel(
+  bridgeUrl: string,
+  body: {
+    author: string;
+    repoId: string;
+    ggufGroupKey?: string;
+    filenames?: string[];
+    displayName?: string;
+  },
+): Promise<{ jobId: string }> {
+  const response = await fetch(`${bridgeUrl}/local-vlm/install`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, `视觉模型安装失败 (${response.status})`));
+  }
+  return response.json() as Promise<{ jobId: string }>;
+}
+
+
+export async function fetchLocalVlmInstallStatus(
+  bridgeUrl: string,
+  jobId: string,
+): Promise<LocalLlmInstallStatus> {
+  const response = await fetch(`${bridgeUrl}/local-vlm/install/${encodeURIComponent(jobId)}`);
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, `视觉安装状态不可用 (${response.status})`));
+  }
+  return response.json() as Promise<LocalLlmInstallStatus>;
+}
+
+
+export async function deleteLocalVlmModel(
+  bridgeUrl: string,
+  modelId: string,
+): Promise<{ ok: boolean; deleted?: boolean }> {
+  const url = `${bridgeUrl}/local-vlm/installed/${localLlmModelIdToRoutePath(modelId)}`;
+  const response = await fetch(url, { method: "DELETE" });
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, `删除视觉模型失败 (${response.status})`));
+  }
+  return response.json() as Promise<{ ok: boolean; deleted?: boolean }>;
+}
+
+
+/** 停止朗读 API 与配置 WebUI 进程 */
+export async function stopPilotTts(bridgeUrl: string): Promise<{ ok: boolean }> {
+  const response = await fetch(`${bridgeUrl}/tts/stop`, { method: "POST" });
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, `停止朗读服务失败 (${response.status})`));
+  }
+  return response.json() as Promise<{ ok: boolean }>;
+}
+
+
+/** 启动 PilotTTS 朗读 API（仅等待 sidecar 就绪，GPU 预热在后台进行） */
+export async function startPilotTts(
+  bridgeUrl: string,
+): Promise<{
+  ok: boolean;
+  warming?: boolean;
+  pilotStatus: string;
+  weightsReady: boolean;
+  gpuLoaded?: boolean;
+  message?: string;
+  apiUrl?: string;
+}> {
+  const response = await fetch(`${bridgeUrl}/tts/start`, {
+    method: "POST",
+    signal: AbortSignal.timeout(60_000),
+  });
+  const raw = await response.text();
+  let body: {
+    ok?: boolean;
+    warming?: boolean;
+    pilotStatus?: string;
+    weightsReady?: boolean;
+    gpuLoaded?: boolean;
+    message?: string;
+    apiUrl?: string;
+  } = {};
+  try {
+    body = JSON.parse(raw) as typeof body;
+  } catch {
+    body = { message: raw || undefined };
+  }
+  if (!response.ok) {
+    throw new Error(body.message ?? `启动朗读服务失败 (${response.status})`);
+  }
+  return {
+    ok: body.ok === true,
+    warming: body.warming === true,
+    pilotStatus: body.pilotStatus ?? "unknown",
+    weightsReady: body.weightsReady === true,
+    gpuLoaded: body.gpuLoaded,
+    message: body.message,
+    apiUrl: body.apiUrl,
+  };
+}
+
+
 /** 已安装模型列表 */
 export async function fetchLocalLlmInstalled(bridgeUrl: string): Promise<{ models: InstalledLocalModel[] }> {
   const response = await fetch(`${bridgeUrl}/local-llm/installed`);
@@ -933,10 +1161,128 @@ export async function patchLocalLlmDefaultPrompt(
 }
 
 
+/** 获取语音 / 朗读服务状态 */
+export async function fetchTtsStatus(
+  bridgeUrl: string,
+): Promise<{
+  pilotStatus: string;
+  installPhase?: string;
+  webUiUrl: string;
+  baseUrl?: string;
+  webUiActive: boolean;
+  installPresent: boolean;
+  upstreamInstalled: boolean;
+  needsRepair?: boolean;
+  sidecarActive: boolean;
+  weightsReady: boolean;
+  gpuLoaded: boolean;
+  gpuWarming?: boolean;
+  loadError?: string;
+  healthMessage?: string;
+  ports?: { note?: string };
+}> {
+  const response = await fetch(`${bridgeUrl}/tts/status`, {
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, `获取 TTS 状态失败 (${response.status})`));
+  }
+  return response.json() as Promise<{
+    pilotStatus: string;
+    installPhase?: string;
+    webUiUrl: string;
+    baseUrl?: string;
+    webUiActive: boolean;
+    installPresent: boolean;
+    upstreamInstalled: boolean;
+    needsRepair?: boolean;
+    sidecarActive: boolean;
+    weightsReady: boolean;
+    gpuLoaded: boolean;
+    gpuWarming?: boolean;
+    loadError?: string;
+    healthMessage?: string;
+    ports?: { note?: string };
+  }>;
+}
+
+
+export async function repairPilotTtsInstall(bridgeUrl: string): Promise<{ jobId: string; message?: string }> {
+  const response = await fetch(`${bridgeUrl}/tts/repair`, { method: "POST" });
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, `启动修复安装失败 (${response.status})`));
+  }
+  return response.json() as Promise<{ jobId: string; message?: string }>;
+}
+
+
+export async function startPilotTtsInstall(bridgeUrl: string, options?: { reset?: boolean }): Promise<{ jobId: string }> {
+  const response = await fetch(`${bridgeUrl}/tts/install`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(options ?? {}),
+  });
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, `启动安装失败 (${response.status})`));
+  }
+  return response.json() as Promise<{ jobId: string }>;
+}
+
+
+export async function fetchPilotTtsInstallStatus(
+  bridgeUrl: string,
+  jobId: string,
+): Promise<{ jobId: string; state: string; progress: string; error?: string }> {
+  const response = await fetch(`${bridgeUrl}/tts/install/${encodeURIComponent(jobId)}`);
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, `查询安装进度失败 (${response.status})`));
+  }
+  return response.json() as Promise<{ jobId: string; state: string; progress: string; error?: string }>;
+}
+
+
+export async function startPilotTtsWebui(
+  bridgeUrl: string,
+): Promise<{ ok: boolean; webUiUrl: string; message?: string }> {
+  const response = await fetch(`${bridgeUrl}/tts/webui/start`, {
+    method: "POST",
+    signal: AbortSignal.timeout(300_000),
+  });
+  const payload = await response.json().catch(() => ({})) as {
+    ok?: boolean;
+    webUiUrl?: string;
+    message?: string;
+  };
+  if (!response.ok) {
+    throw new Error(
+      payload.message?.trim()
+      || await readErrorDetail(response, `启动配置界面失败 (${response.status})`),
+    );
+  }
+  if (payload.ok === false) {
+    throw new Error(payload.message?.trim() || "配置界面未能启动");
+  }
+  return {
+    ok: true,
+    webUiUrl: payload.webUiUrl ?? "",
+    message: payload.message,
+  };
+}
+
+
+export async function stopPilotTtsWebui(bridgeUrl: string): Promise<{ ok: boolean; message?: string }> {
+  const response = await fetch(`${bridgeUrl}/tts/webui/stop`, { method: "POST" });
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, `关闭配置界面失败 (${response.status})`));
+  }
+  return response.json() as Promise<{ ok: boolean; message?: string }>;
+}
+
+
 /** 停止本地 LLM sidecar，释放 VRAM（已停止时不报错） */
 export async function stopLocalLlmSidecar(
   bridgeUrl: string,
-): Promise<{ ok: boolean; unloaded: boolean }> {
+): Promise<{ ok: boolean; unloaded: boolean; llmUnloaded?: boolean; vlmUnloaded?: boolean }> {
   const response = await fetch(`${bridgeUrl}/local-llm/stop`, { method: "POST" });
   if (!response.ok) {
     throw new Error(await readErrorDetail(response, `停止本地模型失败 (${response.status})`));

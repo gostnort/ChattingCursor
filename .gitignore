@@ -18,14 +18,10 @@ coverage/
 __pycache__/
 */__pycache__/
 *.py[cod]
-# Gemma4 本地权重（勿提交 GitHub；可保留 .gitkeep）
-Gemma4/llm_source/**
-!Gemma4/llm_source/.gitkeep
-Gemma4/offload/
-*/content/**
+.cursor/
 
 # local_llm 仅跟踪 server/ 推理代码；权重、registry、安装任务等勿提交
-local_llm/**
+local_llm/** 
 !local_llm/server/
 !local_llm/server/**
 local_llm/server/__pycache__/
@@ -33,7 +29,19 @@ local_llm/server/**/*.py[cod]
 
 # 仓库内 Bridge 运行时数据（安装任务等）
 .chattingcursor/
+local_vlm/**
+!local_vlm/server/
+!local_vlm/server/**
+local_vlm/server/__pycache__/
+local_vlm/server/**/*.py[cod]
 
-# main 分支不提�?crewAI 参考代码；with-crewai 分支已移除此规则
-crewAI/
-configs/crews/
+pilot_tts/**
+!pilot_tts/server/
+!pilot_tts/server/**
+!pilot_tts/install.bat
+!pilot_tts/install.py
+!pilot_tts/requirements-inference.txt
+!pilot_tts/README.md
+pilot_tts/.venv/
+pilot_tts/upstream/
+pilot_tts/.install-logs/

@@ -83,10 +83,18 @@ def should_recreate_venv(creator: Path) -> bool:
     return True
 
 
+def rmtree_onerror(func, path, exc_info):
+    import stat
+    if not os.access(path, os.W_OK):
+        os.chmod(path, stat.S_IWUSR)
+        func(path)
+    else:
+        raise
+
 def remove_venv() -> None:
     if VENV_DIR.exists():
         log(f"[warn] 删除旧虚拟环境：{VENV_DIR}")
-        shutil.rmtree(VENV_DIR, ignore_errors=True)
+        shutil.rmtree(VENV_DIR, onerror=rmtree_onerror)
 
 
 def ensure_venv() -> Path:
@@ -108,7 +116,7 @@ def ensure_upstream_clone() -> Path:
         return UPSTREAM
     if UPSTREAM.exists():
         log(f"[warn] 删除不完整的 upstream：{UPSTREAM}")
-        shutil.rmtree(UPSTREAM, ignore_errors=True)
+        shutil.rmtree(UPSTREAM, onerror=rmtree_onerror)
     run_checked(["git", "clone", "--depth", "1", REPO_URL, str(UPSTREAM)])
     if not (UPSTREAM / "webui.py").is_file():
         raise RuntimeError("克隆完成但未找到 webui.py，请检查网络或 GitHub 可用性。")
@@ -183,13 +191,32 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="跳过 Hugging Face 权重下载（仅安装代码与依赖）",
     )
+    parser.add_argument(
+        "--reset",
+        action="store_true",
+        help="重置安装（删除现有的 .venv 和 upstream 目录）",
+    )
     return parser.parse_args()
 
+
+def check_environment() -> None:
+    try:
+        subprocess.check_call(["git", "--version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        raise RuntimeError("未找到 git 命令，请先安装 Git 并添加到环境变量。")
 
 def main() -> int:
     args = parse_args()
     try:
         log("=== PilotTTS 安装：GitHub 上游 + Hugging Face 权重 ===")
+        check_environment()
+        if args.reset:
+            log("=== 重置安装：清理旧目录 ===")
+            remove_venv()
+            if UPSTREAM.exists():
+                log(f"[warn] 删除上游目录：{UPSTREAM}")
+                shutil.rmtree(UPSTREAM, onerror=rmtree_onerror)
+            
         python = ensure_venv()
         upstream = ensure_upstream_clone()
         log("=== 安装 Python 依赖（可能较久）===")

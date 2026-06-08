@@ -16,7 +16,18 @@ import {
 import { historyStore } from "../services/history-store.js";
 import { tokenRotationService } from "../services/token-rotation.js";
 import { getCloudflareTunnelConfigPath } from "../paths.js";
-import { getGemma4HealthStatus } from "../services/gemma4-lifecycle.js";
+import { getLocalLlmHealthStatus } from "../services/local-llm-lifecycle.js";
+import {
+  getAllocationState,
+  planStartup,
+} from "../services/resource-scheduler.js";
+import {
+  readSchedulerUserSettings,
+  writeSchedulerUserSettings,
+} from "../services/scheduler-settings.js";
+import {
+  setPilotTtsReservedVramGb,
+} from "../services/pilot-tts-lifecycle.js";
 
 
 /** 注册本地配置与历史浏览路由 */
@@ -34,12 +45,40 @@ export async function registerLocalRoutes(app: FastifyInstance): Promise<void> {
   });
 
 
+  app.get("/local/scheduler-settings", async (_request, reply) => {
+    const settings = await readSchedulerUserSettings();
+    return reply.send({
+      settings,
+      scheduler: getAllocationState(),
+    });
+  });
+
+
+  app.post("/local/scheduler-settings", async (request, reply) => {
+    const body = (request.body ?? {}) as {
+      pilotTtsEnabled?: boolean;
+      pilotTtsApiEnabled?: boolean;
+      pilotTtsReservedVramGb?: number;
+      defaultOfflineVlmRepo?: string;
+      offlineVlmEnabled?: boolean;
+    };
+    const settings = await writeSchedulerUserSettings(body);
+    setPilotTtsReservedVramGb(settings.pilotTtsReservedVramGb);
+    const plan = await planStartup({ pilotTtsEnabled: settings.pilotTtsEnabled });
+    return reply.send({
+      settings,
+      plan,
+      scheduler: getAllocationState(),
+    });
+  });
+
+
   app.get("/local/config", async (_request, reply) => {
     const config = loadConfig();
-    const [cli, models, gemma4] = await Promise.all([
+    const [cli, models, localLlm] = await Promise.all([
       probeCursorCli(),
       listCursorModels(),
-      getGemma4HealthStatus(),
+      getLocalLlmHealthStatus(),
     ]);
     const defaultModel = models.models.find((item) => item.isDefault)?.id ?? models.models[0]?.id ?? "";
     return reply.send({
@@ -55,7 +94,7 @@ export async function registerLocalRoutes(app: FastifyInstance): Promise<void> {
       defaultModel,
       modelsSource: models.source,
       cli,
-      gemma4,
+      localLlm,
       timestamp: new Date().toISOString(),
     });
   });

@@ -3,7 +3,7 @@ export type AppMode = "chat" | "local";
 
 
 /** 本地模式子页 */
-export type LocalSub = "config" | "cli" | "knowledge" | "models";
+export type LocalSub = "config" | "cli" | "knowledge" | "models" | "tts";
 
 
 export interface AppRoute {
@@ -44,6 +44,9 @@ export function parseRoute(pathname: string, hash: string): AppRoute {
   if (/\/local\/models\/?$/i.test(normalized)) {
     return { mode: "local", localSub: "models" };
   }
+  if (/\/local\/tts\/?$/i.test(normalized)) {
+    return { mode: "local", localSub: "tts" };
+  }
   return { mode: "chat", localSub: "config" };
 }
 
@@ -62,7 +65,7 @@ export function buildPath(route: AppRoute): string {
 export function normalizeLocation(route: AppRoute): void {
   const path = window.location.pathname.replace(/\/+$/, "") || "/";
   const isLegacy = path.endsWith("/config") || path.endsWith("/terminal");
-  const hasHashRoute = /^#?\/?local\/(config|cli|knowledge|models)/i.test(window.location.hash);
+  const hasHashRoute = /^#?\/?local\/(config|cli|knowledge|models|tts)/i.test(window.location.hash);
   if (isLegacy || hasHashRoute) {
     window.history.replaceState(null, "", buildPath(route) + window.location.search);
   }

@@ -73,6 +73,8 @@ export async function ensureOfflineModelReady(modelId: string): Promise<OfflineW
     throw new Error(`未知离线模型：${modelId}`);
   }
   if (runtime === "local-llm") {
+    const { assertOfflineSchedulerAllows } = await import("./resource-scheduler.js");
+    assertOfflineSchedulerAllows("预热离线模型");
     await ensureLocalLlmSidecarStarted(modelId);
     return getOfflineModelSnapshot(modelId);
   }

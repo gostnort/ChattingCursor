@@ -5,6 +5,7 @@ import {
 } from "./assistantBubbleSettings";
 import { getUserBubbleBackground, setUserBubbleBackground } from "./userBubbleSettings";
 import { fetchLocalTokenFile } from "./api/bridge";
+import { ensurePilotTtsAutoStartedOnce } from "./pilotTtsAutoStart";
 import {
   getBridgeToken,
   getBridgeUrl,
@@ -105,6 +106,14 @@ export default function App() {
       cancelled = true;
     };
   }, [normalizedBridgeUrl]);
+
+
+  useEffect(() => {
+    if (!isLocalBridgeUrl(normalizedBridgeUrl)) {
+      return;
+    }
+    void ensurePilotTtsAutoStartedOnce(normalizedBridgeUrl, bridgeToken);
+  }, [normalizedBridgeUrl, bridgeToken]);
 
 
   useEffect(() => {

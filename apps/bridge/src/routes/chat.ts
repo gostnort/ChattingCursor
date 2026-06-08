@@ -20,6 +20,12 @@ import {
 } from "../services/local-llm-client.js";
 import { probeLocalLlmLoadState } from "../services/local-llm-lifecycle.js";
 import { analyzeUploadedImage, buildImageForwardPrompt } from "../services/image-analysis-service.js";
+import {
+  buildOfflineVisionHandoffText,
+  shouldUseOfflineVisionHandoff,
+  summarizeEmbeddingVector,
+} from "../services/offline-vision-handoff.js";
+import { embedOfflineImage, ensureOfflineVlmReady } from "../services/offline-vlm-client.js";
 import { readStoredImage, saveUploadedImage } from "../services/image-store.js";
 import { loadConfig, resolveCorsOrigin } from "../config.js";
 import { requireRemoteToken } from "../middleware/auth.js";
@@ -243,7 +249,16 @@ function scheduleLocalLlmRun(options: {
     timestamp: startedAt,
     data: { source: "offline_local_llm", status: "loading" },
   });
-  void ensureLocalLlmSidecarStarted(modelId).catch(() => undefined);
+  void ensureLocalLlmSidecarStarted(modelId).catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    runStore.appendEvent(runId, {
+      runId,
+      type: "error",
+      timestamp: new Date().toISOString(),
+      text: formatLocalLlmError(message),
+      data: { source: "offline_local_llm", status: "start_failed" },
+    });
+  });
   const loadPollTimer = setInterval(() => {
     void probeLocalLlmLoadState().then((probe) => {
       if (probe.state === "error") {
@@ -285,10 +300,23 @@ function scheduleLocalLlmRun(options: {
   void (async () => {
     try {
       const session = sessionStore.getOrCreate(sessionId);
+      let effectivePrompt = prompt;
+      let effectiveImageDataUrl = imageDataUrl;
+      if (imageDataUrl && await shouldUseOfflineVisionHandoff(true, modelId)) {
+        effectivePrompt = await buildOfflineVisionHandoffText({
+          offlineLlmModelId: modelId,
+          imageDataUrl,
+          fileName: "chat-image",
+          messages: session.messages,
+          userIntent: prompt,
+          signal: abortController.signal,
+        });
+        effectiveImageDataUrl = undefined;
+      }
       const messages = await buildLocalLlmMessages({
-        prompt,
+        prompt: effectivePrompt,
         history: session.messages,
-        imageDataUrl,
+        imageDataUrl: effectiveImageDataUrl,
         bridgeOrigin,
         modelId,
       });
@@ -330,7 +358,7 @@ function scheduleLocalLlmRun(options: {
 }
 
 
-/** 在会话中记录用户消息后启动 cursor-agent CLI run */
+/** 在会话中记录用户消息后启动 cursor-agent CLI run（〇-B：不经离线调度器，与离线栈无关） */
 function scheduleCursorCliRun(options: {
   runId: string;
   sessionId: string;
@@ -465,13 +493,6 @@ export async function registerChatRoutes(app: FastifyInstance): Promise<void> {
       models: [...localModels, ...separator, ...cursorModels],
       source: result.source,
     });
-  });
-
-
-  app.get("/history/search", async (request, reply) => {
-    const query = (request.query as { q?: string }).q ?? "";
-    const hits = await historyStore.search(query);
-    return reply.send({ query, hits });
   });
 
 
@@ -788,15 +809,35 @@ export async function registerChatRoutes(app: FastifyInstance): Promise<void> {
       let analysisText = "";
       try {
         const imageDataUrl = await imageFileToDataUrl(stored.absolutePath, stored.mimeType);
-        scheduleLocalLlmRun({
-          runId,
-          sessionId: session.sessionId,
-          prompt: userPrompt,
-          modelId: model,
-          modelLabel,
-          imageDataUrl,
-        });
-        analysisText = "（由本地模型多模态理解图片）";
+        if (await shouldUseOfflineVisionHandoff(true, model)) {
+          await ensureOfflineVlmReady(model);
+          const vector = await embedOfflineImage(imageDataUrl, userPrompt);
+          analysisText = summarizeEmbeddingVector(vector, userIntent);
+          const forwardPrompt = await buildOfflineVisionHandoffText({
+            offlineLlmModelId: model,
+            imageDataUrl,
+            fileName: fileName ?? imageId,
+            messages: session.messages,
+            userIntent,
+          });
+          scheduleLocalLlmRun({
+            runId,
+            sessionId: session.sessionId,
+            prompt: forwardPrompt,
+            modelId: model,
+            modelLabel,
+          });
+        } else {
+          scheduleLocalLlmRun({
+            runId,
+            sessionId: session.sessionId,
+            prompt: userPrompt,
+            modelId: model,
+            modelLabel,
+            imageDataUrl,
+          });
+          analysisText = "（离线视觉未启用，图片未送入本地模型）";
+        }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         return reply.status(502).send({ error: "analysis_failed", message });

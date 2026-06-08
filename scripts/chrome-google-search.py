@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""通过 Chrome 9222 在 Google 打开搜索（供 CLI / crew 复用，bridge 主路径为 TypeScript）。"""
+"""通过 Chrome 9222 在 Google 打开搜索（CLI 辅助；Bridge 主路径为 TypeScript）。"""
 import argparse
 import json
 import sys
@@ -52,7 +52,7 @@ def inspect_chrome_endpoint() -> dict[str, Any]:
     }
 
 
-def open_google_search(query: str, snapshot: bool) -> dict[str, Any]:
+def open_google_search(query: str) -> dict[str, Any]:
     endpoint = resolve_chrome_endpoint()
     search_url = build_google_search_url(query)
     chrome = inspect_chrome_endpoint()
@@ -73,43 +73,25 @@ def open_google_search(query: str, snapshot: bool) -> dict[str, Any]:
             "searchUrl": search_url,
             "message": str(exc),
         }
-    payload: dict[str, Any] = {
+    return {
         "ok": True,
         "endpoint": endpoint,
         "searchUrl": search_url,
         "pageUrl": created.get("url") if isinstance(created, dict) else search_url,
         "targetId": created.get("id") if isinstance(created, dict) else None,
     }
-    if snapshot:
-        try:
-            import importlib.util
-            run_crew_path = REPO_ROOT / "scripts" / "run-crew.py"
-            spec = importlib.util.spec_from_file_location("run_crew_module", run_crew_path)
-            if spec and spec.loader:
-                module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(module)
-                summary_raw = module.capture_page_summary(search_url)
-                summary = json.loads(summary_raw)
-                if summary.get("available"):
-                    payload["title"] = summary.get("title")
-                    payload["excerpt"] = summary.get("text")
-                    payload["pageUrl"] = summary.get("url", payload["pageUrl"])
-        except Exception as exc:
-            payload["message"] = f"已打开标签，Playwright 摘录失败：{exc}"
-    return payload
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="在 Chrome 9222 中打开 Google 搜索。")
     parser.add_argument("--query", required=True, help="搜索关键词。")
-    parser.add_argument("--snapshot", action="store_true", help="用 Playwright 读取页面摘录。")
     parser.add_argument("--inspect", action="store_true", help="仅检测 Chrome 9222。")
     args = parser.parse_args()
     try:
         if args.inspect:
             print(json.dumps(inspect_chrome_endpoint(), ensure_ascii=False))
             return 0
-        print(json.dumps(open_google_search(args.query, args.snapshot), ensure_ascii=False))
+        print(json.dumps(open_google_search(args.query), ensure_ascii=False))
         return 0
     except Exception as exc:
         print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))

@@ -45,7 +45,3 @@ export function saveCloudflareTunnelSettings(settings: CloudflareTunnelLocalSett
   localStorage.setItem(CLOUDFLARE_TUNNEL_STORAGE_KEY, JSON.stringify(settings));
 }
 
-
-export function clearCloudflareTunnelSettings(): void {
-  localStorage.removeItem(CLOUDFLARE_TUNNEL_STORAGE_KEY);
-}

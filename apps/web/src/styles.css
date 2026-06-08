@@ -350,6 +350,78 @@ body {
 
 
 
+.local-models-page-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1.25rem;
+  margin-bottom: 1rem;
+}
+
+.local-models-page-header h2 {
+  margin: 0;
+}
+
+.local-models-page-vision-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+  cursor: pointer;
+  font-size: 0.95rem;
+  color: #c9d1d9;
+  user-select: none;
+}
+
+.local-models-page-vision-toggle input {
+  width: 1rem;
+  height: 1rem;
+  accent-color: #388bfd;
+  cursor: pointer;
+}
+
+.tts-page .tts-page-header {
+  margin-bottom: 0.5rem;
+}
+
+.tts-status-list {
+  list-style: none;
+  margin: 0.75rem 0 1rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  color: #c9d1d9;
+  font-size: 0.95rem;
+}
+
+.tts-webui-toggle {
+  margin: 0.75rem 0 0.25rem;
+}
+
+.tts-config-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+  margin: 1rem 0 0.5rem;
+}
+
+.tts-config-btn.btn-primary {
+  min-width: 11rem;
+  padding: 0.6rem 1rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.tts-config-hint {
+  margin: 0;
+}
+
+.tts-page .local-models-row {
+  margin-top: 0.5rem;
+}
+
 .local-models-page .local-models-row {
   display: flex;
   gap: 0.5rem;

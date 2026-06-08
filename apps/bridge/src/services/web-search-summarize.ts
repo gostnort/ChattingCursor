@@ -9,9 +9,7 @@ import { completeLocalLlmChat, isLocalLlmModel } from "./local-llm-client.js";
 import { ensureLocalLlmReady } from "./local-llm-lifecycle.js";
 import { wrapCursorCliPrompt } from "./cli-conversation-guard.js";
 import {
-  loadWebSearchRunResults,
   saveWebSearchRunResults,
-  webSearchPersistedRunToContext,
   type WebSearchPersistedRun,
 } from "./web-search-results-store.js";
 
@@ -214,16 +212,6 @@ export function buildWebSearchSynthesisUnavailableMessage(
     "Could not synthesize an answer with the selected model.",
     "Ensure the local LLM is loaded, Cursor Agent CLI is available, or CURSOR_API_KEY is set, then retry /websearch.",
   ].join(" ");
-}
-
-/** 将各页摘要格式化为最终综合阶段的 aggregateExcerpt */
-export function formatPageSummariesForAggregate(summaries: WebSearchPageSummary[]): string {
-  if (summaries.length === 0) {
-    return "";
-  }
-  return summaries
-    .map((entry) => `### ${entry.title}\n${entry.url}\n${entry.summary}`)
-    .join("\n\n");
 }
 
 /** 联网综合单次 LLM 调用的超时（本地模型需数分钟，Cursor/SDK 保持 90s） */
@@ -440,37 +428,6 @@ export function buildSummarizeModelProvider(
   };
 }
 
-/** 用会话所选模型生成搜索摘要或最终回答 */
-export async function summarizeWebSearchWithActiveModel(
-  context: WebSearchSummarizeContext,
-  options: {
-    model?: string;
-    workspace?: string;
-    signal?: AbortSignal;
-    searchSummary?: string;
-    material?: string;
-    phase?: "search_summary" | "final_answer";
-  } = {},
-): Promise<string | undefined> {
-  const { model, workspace, signal } = options;
-  const provider = buildSummarizeModelProvider(model, workspace, signal);
-  const timeoutMs = resolveWebSearchSummarizeTimeoutMs(model);
-  if (options.phase === "search_summary") {
-    return summarizeWebSearchMaterialWithProvider(
-      context,
-      provider,
-      options.material ?? context.aggregateExcerpt,
-      timeoutMs,
-    );
-  }
-  return summarizeWebSearchWithProvider(
-    context,
-    provider,
-    options.searchSummary ?? context.aggregateExcerpt,
-    timeoutMs,
-  );
-}
-
 function resolveSearchSummaryMaterial(context: WebSearchSummarizeContext): string {
   const pages = context.crawledPages ?? [];
   if (pages.length > 0) {
@@ -506,25 +463,6 @@ export async function persistWebSearchCrawlResults(
     pagesCrawled: context.pagesCrawled,
     searchTimedOut: options.searchTimedOut ?? false,
   });
-}
-
-
-/** 从持久化记录运行综合阶段（Phase B–D） */
-export async function runWebSearchSynthesisFromPersisted(
-  runId: string,
-  options: {
-    model?: string;
-    workspace?: string;
-    signal?: AbortSignal;
-    synthesisDeadlineMs?: number;
-    provider?: WebSearchSummarizeProvider;
-  } = {},
-): Promise<string | undefined> {
-  const record = await loadWebSearchRunResults(runId);
-  if (!record) {
-    return undefined;
-  }
-  return runWebSearchPipeline(webSearchPersistedRunToContext(record), options);
 }
 
 
@@ -582,26 +520,6 @@ export async function runWebSearchPipeline(
       sourceKind: "web",
     },
     options,
-  );
-}
-
-/** @deprecated 仅 SDK；请用 summarizeWebSearchWithActiveModel */
-export async function maybeSummarizeWebSearchWithSdk(
-  query: string,
-  extractedText: string,
-  structuredBullets: string,
-  userIntent?: string,
-): Promise<string | undefined> {
-  return runWebSearchPipeline(
-    {
-      query,
-      userIntent,
-      aggregateExcerpt: extractedText,
-      structuredBullets,
-      pagesQueued: 0,
-      pagesCrawled: 0,
-    },
-    { skipModelReady: true },
   );
 }
 

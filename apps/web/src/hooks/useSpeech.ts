@@ -49,8 +49,50 @@ function fullTextByteLength(fullText: string): number {
 }
 
 
-/** 浏览器朗读：按字节分段，上一段 onend 后再播下一段 */
-export function useSpeech() {
+async function isPilotTtsSynthAvailable(bridgeUrl: string): Promise<boolean> {
+  try {
+    const response = await fetch(`${bridgeUrl}/tts/capability`, {
+      signal: AbortSignal.timeout(4000),
+    });
+    if (!response.ok) {
+      return false;
+    }
+    const payload = await response.json() as { pilotSynthAvailable?: boolean };
+    return payload.pilotSynthAvailable === true;
+  } catch {
+    return false;
+  }
+}
+
+
+async function tryPilotTtsSynthesize(bridgeUrl: string, text: string): Promise<boolean> {
+  try {
+    const response = await fetch(`${bridgeUrl}/tts/synthesize`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+    if (!response.ok) {
+      return false;
+    }
+    const contentType = response.headers.get("content-type") ?? "";
+    if (!contentType.includes("audio")) {
+      return false;
+    }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    await audio.play();
+    audio.onended = () => URL.revokeObjectURL(url);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+
+/** 浏览器朗读；可选 Bridge PilotTTS，失败回退 speechSynthesis */
+export function useSpeech(bridgeUrl?: string) {
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const playStateRef = useRef<TtsPlayState | null>(null);
   const resumeOffsetRef = useRef(0);
@@ -140,11 +182,37 @@ export function useSpeech() {
 
   const toggleSpeak = useCallback((key: string, text: string, lang = "zh-CN"): void => {
     const ttsText = sanitizeTextForTts(text);
-    if (!ttsText.trim() || typeof window === "undefined" || !window.speechSynthesis) {
+    if (!ttsText.trim()) {
       return;
     }
     if (speakingKey === key) {
       stop();
+      return;
+    }
+    if (bridgeUrl?.trim()) {
+      void (async () => {
+        const pilotCapable = await isPilotTtsSynthAvailable(bridgeUrl);
+        const pilotOk = pilotCapable && await tryPilotTtsSynthesize(bridgeUrl, ttsText);
+        if (pilotOk) {
+          setSpeakingKey(key);
+          return;
+        }
+        if (typeof window === "undefined" || !window.speechSynthesis) {
+          return;
+        }
+        window.speechSynthesis.cancel();
+        playStateRef.current = {
+          key,
+          fullText: ttsText,
+          byteOffset: 0,
+        };
+        resumeOffsetRef.current = 0;
+        setSpeakingKey(key);
+        speakChunk(key, lang);
+      })();
+      return;
+    }
+    if (typeof window === "undefined" || !window.speechSynthesis) {
       return;
     }
     window.speechSynthesis.cancel();
@@ -159,7 +227,7 @@ export function useSpeech() {
     resumeOffsetRef.current = resumeFromSameMessage;
     setSpeakingKey(key);
     speakChunk(key, lang);
-  }, [speakChunk, speakingKey, stop]);
+  }, [bridgeUrl, speakChunk, speakingKey, stop]);
 
 
   return { toggleSpeak, stop, speakingKey };

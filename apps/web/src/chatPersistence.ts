@@ -19,12 +19,6 @@ export interface OfflineModelChatSnapshot {
 }
 
 
-/** 离线模型快照在 offlineChatContexts 中的键：完整 model id，如 local-llm/unsloth/gemma-4-E4B-it-GGUF */
-export function offlineModelContextKey(modelId: string): string {
-  return modelId;
-}
-
-
 function parseChatMessages(raw: unknown): ChatMessage[] {
   if (!Array.isArray(raw)) {
     return [];

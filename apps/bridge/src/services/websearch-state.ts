@@ -15,22 +15,6 @@ export const WEBSEARCH_PASS_DEADLINE_MS = 60_000;
 /** 同会话第 2 次相同查询的抓取预算（毫秒） */
 export const WEBSEARCH_REPEAT_PASS_DEADLINE_MS = 120_000;
 
-/** @deprecated 使用 WEBSEARCH_PASS_DEADLINE_MS */
-export const WEBSEARCH_FIRST_PASS_DEADLINE_MS = WEBSEARCH_PASS_DEADLINE_MS;
-
-/** @deprecated 使用 WEBSEARCH_REPEAT_PASS_DEADLINE_MS */
-export const WEBSEARCH_SECOND_PASS_DEADLINE_MS = WEBSEARCH_REPEAT_PASS_DEADLINE_MS;
-
-/** @deprecated 单次仅一阶段 */
-export const WEBSEARCH_FIRST_PASS_PAGE_COUNT = 3;
-
-/** @deprecated 单次仅一阶段 */
-export const WEBSEARCH_SECOND_PASS_PAGE_COUNT = 7;
-
-/** @deprecated 使用 WEBSEARCH_LINKS_PER_SERP_PAGE */
-export const WEBSEARCH_MAX_LINKS_PER_SERP_PAGE = WEBSEARCH_LINKS_PER_SERP_PAGE;
-
-
 export interface WebSearchPassPlan {
   offsets: number[];
   /** 是否随机选取每页链接 */
@@ -134,31 +118,6 @@ export function resolveWebSearchPassByK(k: number): WebSearchRunPlan {
     ],
     isRepeat: passK > 1,
     passK,
-  };
-}
-
-
-/** @deprecated 使用 resolveWebSearchPassByK；保留供旧测试引用 */
-export function resolveSerpStartOffsets(lastStartOffset: number | undefined): WebSearchRunPlan {
-  if (lastStartOffset === undefined) {
-    return resolveWebSearchPassByK(1);
-  }
-  const lastPage = googleStartOffsetToPageNumber(lastStartOffset);
-  const startPage = lastPage + 1;
-  const pageCount = 3;
-  const offsets = buildSerpOffsetsFromPageRange(startPage, pageCount);
-  return {
-    passes: [
-      {
-        offsets,
-        randomLinkSelection: true,
-        deadlineMs: WEBSEARCH_PASS_DEADLINE_MS,
-        minPage: startPage,
-        maxPage: startPage + pageCount - 1,
-      },
-    ],
-    isRepeat: true,
-    passK: 0,
   };
 }
 

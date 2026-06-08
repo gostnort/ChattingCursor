@@ -1,42 +1,5 @@
 import { z } from "zod";
 
-/** Agent 配置（借鉴 crewAI Agent 概念） */
-export const agentSpecSchema = z.object({
-  id: z.string().min(1),
-  role: z.string().min(1),
-  goal: z.string().min(1),
-  backstory: z.string().optional(),
-  model: z.string().optional(),
-});
-
-export type AgentSpec = z.infer<typeof agentSpecSchema>;
-
-
-/** Task 配置 */
-export const taskSpecSchema = z.object({
-  id: z.string().min(1),
-  agentId: z.string().min(1),
-  description: z.string().min(1),
-  expectedOutput: z.string().optional(),
-  contextTaskIds: z.array(z.string()).optional(),
-});
-
-export type TaskSpec = z.infer<typeof taskSpecSchema>;
-
-
-/** Crew 编排配置 */
-export const crewProcessSchema = z.enum(["sequential", "hierarchical"]);
-
-export const crewSpecSchema = z.object({
-  name: z.string().min(1),
-  process: crewProcessSchema.default("sequential"),
-  agents: z.array(agentSpecSchema).min(1),
-  tasks: z.array(taskSpecSchema).min(1),
-});
-
-export type CrewSpec = z.infer<typeof crewSpecSchema>;
-
-
 /** 聊天消息 */
 export const chatMessageSchema = z.object({
   id: z.string().min(1),
@@ -277,7 +240,7 @@ export const localConfigResponseSchema = z.object({
     message: z.string().optional(),
     fallbackFromNative: z.boolean().optional(),
   }),
-  gemma4: z
+  localLlm: z
     .object({
       managed: z.boolean(),
       baseUrl: z.string(),
@@ -422,59 +385,6 @@ export const localHistoryContentResponseSchema = z.object({
 });
 
 export type LocalHistoryContentResponse = z.infer<typeof localHistoryContentResponseSchema>;
-
-
-/** GET /crews/status 响应体 */
-export const crewStatusResponseSchema = z.object({
-  python: z.object({
-    available: z.boolean(),
-    command: z.string().optional(),
-    message: z.string().optional(),
-  }),
-  crewai: z.object({
-    installed: z.boolean(),
-    version: z.string().optional(),
-    message: z.string().optional(),
-  }),
-  chrome: z.object({
-    available: z.boolean(),
-    endpoint: z.string(),
-    pages: z.number().int().nonnegative().optional(),
-    message: z.string().optional(),
-  }),
-  exampleConfig: z.object({
-    valid: z.boolean(),
-    path: z.string().optional(),
-    name: z.string().optional(),
-    message: z.string().optional(),
-  }),
-  scriptPath: z.string().optional(),
-  timestamp: z.string().datetime(),
-});
-
-export type CrewStatusResponse = z.infer<typeof crewStatusResponseSchema>;
-
-
-/** POST /crews/run 请求体 */
-export const crewRunRequestSchema = z.object({
-  crew: z.string().min(1).default("example"),
-  inputs: z.record(z.string()).default({}),
-  dryRun: z.boolean().default(true),
-});
-
-export type CrewRunRequest = z.infer<typeof crewRunRequestSchema>;
-
-
-/** POST /crews/run 响应体 */
-export const crewRunResponseSchema = z.object({
-  crew: z.string().min(1),
-  dryRun: z.boolean(),
-  exitCode: z.number().int(),
-  output: z.string(),
-  parsed: z.record(z.unknown()).optional(),
-});
-
-export type CrewRunResponse = z.infer<typeof crewRunResponseSchema>;
 
 
 /** 知识库 wiki 节点 */

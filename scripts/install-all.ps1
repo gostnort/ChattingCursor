@@ -39,17 +39,8 @@ function Ensure-Pnpm {
 function Ensure-PythonVenv {
   $python = Get-Command python -ErrorAction SilentlyContinue
   if (-not $python) {
-    Write-Host "未检测到 Python；跳过可选 crewAI venv（核心聊天不依赖 Python）。"
+    Write-Host "未检测到 Python；跳过 local_llm 可选依赖（核心聊天不依赖 Python）。"
     return
-  }
-  $venvPython = Join-Path $Root ".venv\Scripts\python.exe"
-  if (-not (Test-Path -LiteralPath $venvPython)) {
-    Write-Step "创建 Python venv 并安装 requirements.txt（可选 crewAI）..."
-    & python -m venv (Join-Path $Root ".venv")
-    & $venvPython -m pip install --upgrade pip
-    & $venvPython -m pip install -r (Join-Path $Root "requirements.txt")
-  } else {
-    Write-Host "Python venv 已存在: $(Join-Path $Root '.venv')"
   }
   $localLlmInstall = Join-Path $Root "local_llm\server\install.bat"
   if (Test-Path -LiteralPath $localLlmInstall) {

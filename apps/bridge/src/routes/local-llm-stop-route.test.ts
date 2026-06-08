@@ -13,9 +13,33 @@ test("POST /local-llm/stop 空闲时返回 ok 且 unloaded 为 false", async () 
     remoteAddress: "127.0.0.1",
   });
   assert.equal(response.statusCode, 200);
-  const body = response.json() as { ok: boolean; unloaded: boolean };
+  const body = response.json() as { ok: boolean; unloaded: boolean; llmUnloaded: boolean; vlmUnloaded: boolean };
   assert.equal(body.ok, true);
   assert.equal(body.unloaded, false);
+  assert.equal(body.llmUnloaded, false);
+  assert.equal(body.vlmUnloaded, false);
+  await app.close();
+});
+
+
+test("POST /local-llm/stop 响应含 unloaded 与 llm/vlm 卸载字段", async () => {
+  const app = Fastify({ logger: false });
+  await registerLocalLlmRoutes(app);
+  const response = await app.inject({
+    method: "POST",
+    url: "/local-llm/stop",
+    remoteAddress: "127.0.0.1",
+  });
+  assert.equal(response.statusCode, 200);
+  const body = response.json() as {
+    ok: boolean;
+    unloaded: boolean;
+    llmUnloaded: boolean;
+    vlmUnloaded: boolean;
+  };
+  assert.equal(body.ok, true);
+  assert.equal(typeof body.unloaded, "boolean");
+  assert.equal(body.unloaded, body.llmUnloaded || body.vlmUnloaded);
   await app.close();
 });
 

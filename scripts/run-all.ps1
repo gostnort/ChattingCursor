@@ -98,6 +98,16 @@ function Test-CloudflaredInstalled {
 }
 
 
+function Start-ChromeProcess {
+  Write-Step "Starting Google Chrome with remote debugging port 9222..."
+  try {
+    Start-Process -FilePath "chrome" -ArgumentList "--remote-debugging-port=9222", "--no-first-run", "--no-default-browser-check", "--disable-fre", "http://127.0.0.1:$WebPort/ChattingCursor/" -ErrorAction Stop
+    Write-Ok "Chrome started in background."
+  } catch {
+    Write-Host "Could not start chrome automatically. You may need to start it manually: chrome --remote-debugging-port=9222 --no-first-run --no-default-browser-check --disable-fre http://127.0.0.1:$WebPort/ChattingCursor/"
+  }
+}
+
 function Ensure-ProjectReady {
   if (-not (Test-Path "$Root\node_modules")) {
     Write-Step "First run detected, installing dependencies..."
@@ -120,15 +130,7 @@ function Ensure-ProjectReady {
       exit $LASTEXITCODE
     }
   }
-  if (-not (Test-Path "$Root\packages\orchestrator\dist")) {
-    Write-Step "Building orchestrator (Bridge dependency)..."
-    pnpm --filter @chatting-cursor/orchestrator build
-    if ($LASTEXITCODE -ne 0) {
-      exit $LASTEXITCODE
-    }
-  }
 }
-
 
 function Resolve-PnpmExe {
   $cmd = Get-Command pnpm.cmd -ErrorAction SilentlyContinue
@@ -912,6 +914,8 @@ try {
 
   Ensure-ProjectReady
 
+  Start-ChromeProcess
+
   if (-not (Test-CloudflaredInstalled)) {
     Write-Fail "cloudflared not found. Run install.bat first."
     exit 1
@@ -945,7 +949,7 @@ try {
   Restore-ServicePidsAfterBridgeTokenWrite
 
   if ($WithQualityWatch) {
-    Write-Step "Starting quality watcher (typecheck/lint + crew dry-run)..."
+    Write-Step "Starting quality watcher (typecheck/lint)..."
     $null = Start-QualityWatchProcess
   }
 

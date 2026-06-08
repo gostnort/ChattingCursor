@@ -10,7 +10,6 @@ export default tseslint.config(
       "**/node_modules/**",
       ".venv/**",
       ".test-screenshots/**",
-      "crewAI/**",
       "scripts/**",
     ],
   },

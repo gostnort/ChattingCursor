@@ -17,8 +17,8 @@ import {
 import {
   forceStopLocalLlmSidecar,
   getActiveLocalLlmModelId,
-  stopManagedLocalLlm,
 } from "../services/local-llm-lifecycle.js";
+import { releaseOfflineStack } from "../services/resource-scheduler.js";
 
 
 function readStringField(body: unknown, key: string): string {
@@ -141,8 +141,13 @@ export async function registerLocalLlmRoutes(app: FastifyInstance): Promise<void
 
   app.post("/local-llm/stop", async (_request, reply) => {
     const wasRunning = getActiveLocalLlmModelId() !== null;
-    await stopManagedLocalLlm();
-    return reply.send({ ok: true, unloaded: wasRunning });
+    const stack = await releaseOfflineStack();
+    return reply.send({
+      ok: true,
+      unloaded: wasRunning || stack.llmUnloaded || stack.vlmUnloaded,
+      llmUnloaded: stack.llmUnloaded,
+      vlmUnloaded: stack.vlmUnloaded,
+    });
   });
 
 

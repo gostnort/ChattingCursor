@@ -3,6 +3,9 @@ chcp 65001 >nul 2>&1
 cd /d "%~dp0"
 rem 未设置时由 Resolve-CursorCliMode.ps1 探测 native / wsl（不强制 native）
 
+echo Starting Google Chrome with remote debugging port 9222...
+start chrome --remote-debugging-port=9222 --no-first-run --no-default-browser-check --disable-fre "http://127.0.0.1:43210/ChattingCursor/"
+
 where powershell >nul 2>&1
 if errorlevel 1 (
   echo PowerShell not found.

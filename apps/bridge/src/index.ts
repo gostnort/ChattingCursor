@@ -10,7 +10,11 @@ import { registerLocalRoutes } from "./routes/local.js";
 import { registerKnowledgeRoutes } from "./routes/knowledge.js";
 import { registerOfflineRoutes } from "./routes/offline.js";
 import { registerLocalLlmRoutes } from "./routes/local-llm.js";
+import { registerTtsRoutes } from "./routes/tts.js";
+import { registerLocalVlmRoutes } from "./routes/local-vlm.js";
 import { maybeWarmLocalLlmOnBridgeStart, stopManagedLocalLlm, getLocalLlmHealthStatus } from "./services/local-llm-lifecycle.js";
+import { getResourceSchedulerSnapshot, initializeResourceSchedulerOnBridgeStart } from "./services/resource-scheduler.js";
+import { releasePilotTtsLane } from "./services/pilot-tts-lifecycle.js";
 import { runLocalLlmStartupMaintenance } from "./services/local-llm-store.js";
 import { tokenRotationService } from "./services/token-rotation.js";
 
@@ -39,12 +43,13 @@ async function main(): Promise<void> {
       inspectChromeEndpoint(),
       getLocalLlmHealthStatus(),
     ]);
+    const scheduler = getResourceSchedulerSnapshot();
     return {
       status: "ok",
       cli,
       chrome,
       localLlm,
-      gemma4: localLlm,
+      scheduler,
       webSearchAvailable: chrome.available,
       publicBridgeUrl: tokenRotationService.getPublicBridgeUrl(),
       timestamp: new Date().toISOString(),
@@ -56,11 +61,19 @@ async function main(): Promise<void> {
   await registerKnowledgeRoutes(app);
   await registerOfflineRoutes(app);
   await registerLocalLlmRoutes(app);
+  await registerTtsRoutes(app);
+  await registerLocalVlmRoutes(app);
   await app.listen({ host: config.host, port: config.port });
   app.log.info(`Bridge 运行于 http://${config.host}:${config.port}`);
   void runLocalLlmStartupMaintenance();
+  void initializeResourceSchedulerOnBridgeStart().catch((error: unknown) => {
+    app.log.warn({ err: error }, "资源调度器初始化失败");
+  });
   void maybeWarmLocalLlmOnBridgeStart();
   const shutdown = async (): Promise<void> => {
+    const { releaseOfflineStack } = await import("./services/resource-scheduler.js");
+    await releaseOfflineStack();
+    await releasePilotTtsLane();
     await stopManagedLocalLlm();
     await app.close();
     process.exit(0);

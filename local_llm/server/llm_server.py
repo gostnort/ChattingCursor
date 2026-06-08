@@ -45,6 +45,7 @@ class ReadabilityRequest(BaseModel):
 
 app = FastAPI(title="ChattingCursor Local LLM Sidecar", version="2.1.0")
 _load_lock = threading.Lock()
+_inference_lock = asyncio.Lock()
 _llm: Any | None = None
 _load_state = "idle"
 _load_error: str | None = None
@@ -502,8 +503,22 @@ async def _run_chat_completion(completion_kwargs: dict[str, Any]) -> dict[str, A
     return await asyncio.to_thread(_llm.create_chat_completion, **completion_kwargs)
 
 
+async def _wait_chat_task(task: asyncio.Task[dict[str, Any]], request: Request) -> dict[str, Any]:
+    while not task.done():
+        if await request.is_disconnected():
+            task.cancel()
+            interrupt = getattr(_llm, "interrupt", None)
+            if callable(interrupt):
+                interrupt()
+            raise HTTPException(status_code=499, detail="客户端已断开，生成已取消")
+        await asyncio.sleep(0.05)
+    return await task
+
+
 @app.post("/v1/chat/completions")
 async def chat_completions(body: ChatCompletionRequest, request: Request) -> dict[str, Any]:
+    if _inference_lock.locked():
+        raise HTTPException(status_code=503, detail="推理繁忙，请稍后重试")
     await ensure_model_loaded()
     if _llm is None:
         raise HTTPException(status_code=503, detail="模型未加载")
@@ -519,22 +534,22 @@ async def chat_completions(body: ChatCompletionRequest, request: Request) -> dic
     if body.temperature is not None:
         completion_kwargs["temperature"] = body.temperature
     started = time.time()
-    task = asyncio.create_task(_run_chat_completion(completion_kwargs))
-    try:
-        while not task.done():
-            if await request.is_disconnected():
-                task.cancel()
-                interrupt = getattr(_llm, "interrupt", None)
-                if callable(interrupt):
-                    interrupt()
-                raise HTTPException(status_code=499, detail="客户端已断开，生成已取消")
-            await asyncio.sleep(0.05)
-        result = await task
-    except asyncio.CancelledError:
-        interrupt = getattr(_llm, "interrupt", None)
-        if callable(interrupt):
-            interrupt()
-        raise HTTPException(status_code=499, detail="生成已取消") from None
+    inference_timeout = parse_int_env("LOCAL_LLM_INFERENCE_TIMEOUT_SEC", "GEMMA4_INFERENCE_TIMEOUT_SEC", 600)
+    async with _inference_lock:
+        task = asyncio.create_task(_run_chat_completion(completion_kwargs))
+        try:
+            result = await asyncio.wait_for(_wait_chat_task(task, request), timeout=inference_timeout)
+        except asyncio.TimeoutError as exc:
+            task.cancel()
+            interrupt = getattr(_llm, "interrupt", None)
+            if callable(interrupt):
+                interrupt()
+            raise HTTPException(status_code=504, detail="推理超时，请切换模型或稍后重试") from exc
+        except asyncio.CancelledError:
+            interrupt = getattr(_llm, "interrupt", None)
+            if callable(interrupt):
+                interrupt()
+            raise HTTPException(status_code=499, detail="生成已取消") from None
     choice = result.get("choices", [{}])[0]
     message = choice.get("message", {})
     content = message.get("content", "")

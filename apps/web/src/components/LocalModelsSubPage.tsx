@@ -9,23 +9,27 @@ import {
   fetchLocalLlmHfModels,
   fetchLocalLlmInstalled,
   fetchLocalLlmInstallStatus,
+  fetchSchedulerSettings,
   installLocalLlmModel,
   patchLocalLlmDefaultPrompt,
+  saveSchedulerSettings,
   type GgufGroupOption,
   type HfModelSummary,
   type InstalledLocalModel,
 } from "../api/bridge";
 import { formatBridgeFetchError, normalizeBridgeUrl } from "../bridgeSettings";
 import { buildPath } from "../routing";
+import { LocalVisionModelsSection } from "./LocalVisionModelsSection";
 
 
 interface LocalModelsSubPageProps {
   bridgeUrl: string;
+  bridgeToken: string;
 }
 
 
 /** 本地模型管理：HF 浏览、安装、删除、defaultPrompt */
-export function LocalModelsSubPage({ bridgeUrl }: LocalModelsSubPageProps) {
+export function LocalModelsSubPage({ bridgeUrl, bridgeToken }: LocalModelsSubPageProps) {
   const normalizedBridgeUrl = useMemo(() => normalizeBridgeUrl(bridgeUrl), [bridgeUrl]);
   const configPath = useMemo(() => buildPath({ mode: "local", localSub: "config" }), []);
   const [authors, setAuthors] = useState<string[]>([]);
@@ -50,6 +54,10 @@ export function LocalModelsSubPage({ bridgeUrl }: LocalModelsSubPageProps) {
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; label: string } | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [bridgeReachable, setBridgeReachable] = useState<boolean | null>(null);
+  const [offlineVlmEnabled, setOfflineVlmEnabled] = useState(false);
+  const [defaultOfflineVlmRepo, setDefaultOfflineVlmRepo] = useState("Rizwan313/Qwen3-VL-Embedding-2B-GGUF");
+  const [schedulerLoading, setSchedulerLoading] = useState(true);
+  const [visionToggleBusy, setVisionToggleBusy] = useState(false);
 
 
   const formatError = useCallback(
@@ -176,6 +184,51 @@ export function LocalModelsSubPage({ bridgeUrl }: LocalModelsSubPageProps) {
     setBridgeReachable(null);
     void pingBridge().catch(() => setBridgeReachable(false));
   }, [pingBridge]);
+
+
+  useEffect(() => {
+    let cancelled = false;
+    setSchedulerLoading(true);
+    void fetchSchedulerSettings(normalizedBridgeUrl, bridgeToken)
+      .then((bundle) => {
+        if (cancelled) {
+          return;
+        }
+        setOfflineVlmEnabled(bundle.settings.offlineVlmEnabled);
+        setDefaultOfflineVlmRepo(bundle.settings.defaultOfflineVlmRepo);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setOfflineVlmEnabled(false);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setSchedulerLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [bridgeToken, normalizedBridgeUrl]);
+
+
+  const handleVisionModeToggle = async (next: boolean): Promise<void> => {
+    const previous = offlineVlmEnabled;
+    setOfflineVlmEnabled(next);
+    setVisionToggleBusy(true);
+    setError(null);
+    try {
+      const result = await saveSchedulerSettings(normalizedBridgeUrl, { offlineVlmEnabled: next }, bridgeToken);
+      setOfflineVlmEnabled(result.settings.offlineVlmEnabled);
+      setDefaultOfflineVlmRepo(result.settings.defaultOfflineVlmRepo);
+    } catch (err: unknown) {
+      setOfflineVlmEnabled(previous);
+      setError(formatError(err));
+    } finally {
+      setVisionToggleBusy(false);
+    }
+  };
 
 
   useEffect(() => {
@@ -409,7 +462,25 @@ export function LocalModelsSubPage({ bridgeUrl }: LocalModelsSubPageProps) {
 
   return (
     <div className="local-sub-panel local-models-page">
-      <h2>本地模型</h2>
+      <div className="local-models-page-header">
+        <h2>本地模型</h2>
+        <label className="local-models-page-vision-toggle">
+          <input
+            type="checkbox"
+            checked={offlineVlmEnabled}
+            onChange={(event) => void handleVisionModeToggle(event.target.checked)}
+            disabled={schedulerLoading || visionToggleBusy}
+          />
+          视觉模型
+        </label>
+      </div>
+      {offlineVlmEnabled ? (
+        <LocalVisionModelsSection
+          bridgeUrl={normalizedBridgeUrl}
+          defaultOfflineVlmRepo={defaultOfflineVlmRepo}
+        />
+      ) : (
+        <>
       <p className="config-hint">从 Hugging Face 浏览并安装 GGUF；先选仓库，再选量化/分片，点击 + 仅下载所选分组。</p>
       {bridgeReachable === false && (
         <p className="config-error" role="alert">
@@ -572,7 +643,9 @@ export function LocalModelsSubPage({ bridgeUrl }: LocalModelsSubPageProps) {
         </button>
       </section>
 
-      {deleteConfirm && (
+        </>
+      )}
+      {!offlineVlmEnabled && deleteConfirm && (
         <div
           className="local-models-delete-overlay"
           role="presentation"

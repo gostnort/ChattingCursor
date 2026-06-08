@@ -26,9 +26,6 @@ export function isLocalLlmHfInferenceEnabled(): boolean {
 }
 
 
-export const isGemma4HfInferenceEnabled = isLocalLlmHfInferenceEnabled;
-
-
 /** 本地加载失败时是否回退到 HF Inference API */
 export function isLocalLlmHfInferenceFallbackEnabled(): boolean {
   const flag = process.env.LOCAL_LLM_HF_INFERENCE_FALLBACK?.trim()
@@ -36,9 +33,6 @@ export function isLocalLlmHfInferenceFallbackEnabled(): boolean {
     ?? "";
   return flag === "1" || flag.toLowerCase() === "true";
 }
-
-
-export const isGemma4HfInferenceFallbackEnabled = isLocalLlmHfInferenceFallbackEnabled;
 
 
 /** HF Inference OpenAI 兼容 chat/completions 地址 */
@@ -50,9 +44,6 @@ export function resolveLocalLlmHfInferenceChatUrl(): string {
   }
   return "https://router.huggingface.co/v1/chat/completions";
 }
-
-
-export const resolveGemma4HfInferenceChatUrl = resolveLocalLlmHfInferenceChatUrl;
 
 
 async function resolveImageUrl(imageUrl: string, bridgeOrigin: string): Promise<string | null> {
@@ -77,6 +68,16 @@ async function resolveImageUrl(imageUrl: string, bridgeOrigin: string): Promise<
     }
   }
   return null;
+}
+
+
+async function releaseOfflineStackOnInferenceFault(): Promise<void> {
+  try {
+    const { releaseOfflineStack } = await import("./resource-scheduler.js");
+    await releaseOfflineStack();
+  } catch {
+    // 故障恢复卸载失败时由用户手动释放
+  }
 }
 
 
@@ -139,9 +140,6 @@ export async function buildLocalLlmMessages(options: {
 }
 
 
-export const buildGemma4Messages = buildLocalLlmMessages;
-
-
 function extractChatCompletionText(payload: {
   choices?: Array<{ message?: { content?: string | Array<{ text?: string }> } }>;
 }): string {
@@ -194,10 +192,16 @@ async function completeLocalLlmChatLocal(
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
+    if (message.includes("Timeout") || message.includes("超时") || message.includes("aborted")) {
+      await releaseOfflineStackOnInferenceFault();
+    }
     throw new Error(formatLocalLlmError(`${baseUrl}/chat/completions 请求失败：${message}`));
   }
   if (!response.ok) {
     const body = await response.text();
+    if (response.status === 503 || response.status === 504 || body.includes("超时") || body.includes("繁忙")) {
+      await releaseOfflineStackOnInferenceFault();
+    }
     throw new Error(formatLocalLlmError(`本地 LLM API ${response.status}: ${body.slice(0, 500)}`));
   }
   const payload = await response.json() as {
@@ -255,14 +259,6 @@ export async function completeLocalLlmChatViaHfInference(
 }
 
 
-export const completeGemma4ChatViaHfInference = async (messages: OpenAiMessage[]): Promise<string> => {
-  const { listInstalledLocalLlmModels } = await import("./local-llm-store.js");
-  const models = await listInstalledLocalLlmModels();
-  const modelId = models[0]?.id ?? "local-llm";
-  return completeLocalLlmChatViaHfInference(modelId, messages);
-};
-
-
 /** 调用本地 LLM（默认 sidecar；可选 HF Inference 或失败回退） */
 export async function completeLocalLlmChat(
   modelId: string,
@@ -285,17 +281,6 @@ export async function completeLocalLlmChat(
     console.warn(`[local-llm] 本地推理失败，回退 HF Inference: ${detail}`);
     return completeLocalLlmChatViaHfInference(modelId, messages);
   }
-}
-
-
-export async function completeGemma4Chat(messages: OpenAiMessage[]): Promise<string> {
-  const { listInstalledLocalLlmModels } = await import("./local-llm-store.js");
-  const models = await listInstalledLocalLlmModels();
-  const modelId = models[0]?.id;
-  if (!modelId) {
-    throw new Error("未找到已安装的本地模型");
-  }
-  return completeLocalLlmChat(modelId, messages);
 }
 
 
@@ -346,5 +331,3 @@ export function isLocalLlmModel(modelId: string | undefined): boolean {
   return isOfflineModelId(modelId);
 }
 
-
-export const isGemma4Model = isLocalLlmModel;

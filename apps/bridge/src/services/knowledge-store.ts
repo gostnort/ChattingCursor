@@ -204,18 +204,6 @@ export async function uploadKnowledgeMarkdown(
 }
 
 
-/** 更新节点标签（不改 markdown） */
-export async function setKnowledgeNodeTags(nodeId: string, tags: string[]): Promise<KnowledgeNode> {
-  const index = await loadIndex();
-  if (!index.nodes[nodeId]) {
-    throw new Error("节点不存在");
-  }
-  index.nodes[nodeId].tags = normalizeTags(tags);
-  await saveIndex(index);
-  return toApiNode(index.nodes[nodeId]);
-}
-
-
 /** 列出知识库中所有不重复标签 */
 export async function listAllKnowledgeTags(): Promise<string[]> {
   const index = await loadIndex();

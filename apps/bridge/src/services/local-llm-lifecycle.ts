@@ -6,6 +6,7 @@ import path from "node:path";
 import { formatLocalLlmError } from "@chatting-cursor/shared";
 import { getLocalLlmServerScriptPath, getRepoRootDir } from "../paths.js";
 import { findInstalledLocalLlmModel, inspectModelWeightsReady } from "./local-llm-store.js";
+import { resolveScheduledLlmNGpuLayersEnv } from "./scheduler-state.js";
 
 
 export type LocalLlmWeightsStatus = "ready" | "missing" | "incomplete";
@@ -66,10 +67,6 @@ export function setLocalLlmSpawnRunnerForTests(runner: SpawnRunner | null): void
 }
 
 
-/** 兼容 Gemma4 测试别名 */
-export const setGemma4SpawnRunnerForTests = setLocalLlmSpawnRunnerForTests;
-
-
 function readEnv(name: string, legacy?: string): string {
   const value = process.env[name]?.trim();
   if (value) {
@@ -92,9 +89,6 @@ export function isLocalLlmManaged(): boolean {
 }
 
 
-export const isGemma4Managed = isLocalLlmManaged;
-
-
 /** 解析 OpenAI 兼容 API 根路径（含 /v1） */
 export function resolveLocalLlmApiBaseUrl(): string {
   const custom = readEnv("LOCAL_LLM_API_BASE_URL", "GEMMA4_API_BASE_URL");
@@ -105,9 +99,6 @@ export function resolveLocalLlmApiBaseUrl(): string {
   const port = Number(readEnv("LOCAL_LLM_PORT", "GEMMA4_PORT") || DEFAULT_PORT);
   return `http://${host}:${port}/v1`;
 }
-
-
-export const resolveGemma4ApiBaseUrl = resolveLocalLlmApiBaseUrl;
 
 
 function resolveHostPort(): { host: string; port: number } {
@@ -141,14 +132,6 @@ export async function inspectLocalLlmWeights(modelDir: string, filenames: string
   }
   const ready = await inspectModelWeightsReady(modelDir, filenames);
   return ready ? "ready" : "incomplete";
-}
-
-
-export async function inspectGemma4Weights(modelDir?: string): Promise<LocalLlmWeightsStatus> {
-  if (!modelDir) {
-    return "missing";
-  }
-  return inspectLocalLlmWeights(modelDir, []);
 }
 
 
@@ -223,16 +206,10 @@ export async function probeLocalLlmLoadState(
 }
 
 
-export const probeGemma4LoadState = probeLocalLlmLoadState;
-
-
 export async function probeLocalLlmApiHealth(baseUrl = resolveLocalLlmApiBaseUrl()): Promise<boolean> {
   const probe = await probeLocalLlmLoadState(baseUrl);
   return probe.state === "ready";
 }
-
-
-export const probeGemma4ApiHealth = probeLocalLlmApiHealth;
 
 
 function listLocalLlmPythonCandidates(): string[] {
@@ -304,9 +281,6 @@ export function resolveLocalLlmPythonExecutable(): string {
 }
 
 
-export const resolveGemma4PythonExecutable = resolveLocalLlmPythonExecutable;
-
-
 /** 解析 llama-cpp-python 运行时 DLL 目录（CUDA/cuBLAS 等） */
 export function resolveLlamaRuntimePathEntries(pythonExecutable?: string): string[] {
   const executable = pythonExecutable ?? resolveLocalLlmPythonExecutable();
@@ -360,9 +334,6 @@ export function resolveLocalLlmServerLaunch(): { command: string; args: string[]
 }
 
 
-export const resolveGemma4ServerLaunch = resolveLocalLlmServerLaunch;
-
-
 /** 为 sidecar 子进程合并环境变量 */
 export function buildLocalLlmServerEnv(options: {
   modelDir: string;
@@ -371,7 +342,8 @@ export function buildLocalLlmServerEnv(options: {
   port: number;
 }): NodeJS.ProcessEnv {
   const nCtx = readEnv("LOCAL_LLM_N_CTX", "GEMMA4_N_CTX") || "8192";
-  const nGpuLayers = readEnv("LOCAL_LLM_N_GPU_LAYERS", "GEMMA4_N_GPU_LAYERS");
+  const scheduledLayers = resolveScheduledLlmNGpuLayersEnv();
+  const nGpuLayers = scheduledLayers ?? readEnv("LOCAL_LLM_N_GPU_LAYERS", "GEMMA4_N_GPU_LAYERS");
   const maxNew = readEnv("LOCAL_LLM_MAX_NEW_TOKENS", "GEMMA4_MAX_NEW_TOKENS") || "1024";
   const deferLoad = readEnv("LOCAL_LLM_DEFER_MODEL_LOAD", "GEMMA4_DEFER_MODEL_LOAD") || "1";
   const pythonExecutable = resolveLocalLlmPythonExecutable();
@@ -399,12 +371,6 @@ export function buildLocalLlmServerEnv(options: {
     env.GEMMA4_N_GPU_LAYERS = nGpuLayers;
   }
   return env;
-}
-
-
-export function buildGemma4ServerEnv(modelDir: string, host: string, port: number): NodeJS.ProcessEnv {
-  const modelId = readEnv("GEMMA4_MODEL_ID") || "local-llm";
-  return buildLocalLlmServerEnv({ modelDir, modelId, host, port });
 }
 
 
@@ -666,6 +632,10 @@ async function spawnManagedServer(modelId: string): Promise<void> {
 
 /** 确保 sidecar 进程已启动（不等待 GGUF 加载） */
 export async function ensureLocalLlmSidecarStarted(modelId: string): Promise<void> {
+  const { assertOfflineSchedulerAllows, planOfflineLlmLoad } = await import("./resource-scheduler.js");
+  assertOfflineSchedulerAllows("启动离线推理服务");
+  const preflight = await preflightLocalLlmModel(modelId);
+  planOfflineLlmLoad(modelId, preflight.ggufGb);
   const baseUrl = resolveLocalLlmApiBaseUrl();
   const probe = await probeLocalLlmLoadState(baseUrl);
   if (probe.state !== "down" && activeModelId === modelId) {
@@ -682,17 +652,6 @@ export async function ensureLocalLlmSidecarStarted(modelId: string): Promise<voi
     });
   }
   await spawnPromise;
-}
-
-
-export async function ensureGemma4SidecarStarted(): Promise<void> {
-  const { listInstalledLocalLlmModels } = await import("./local-llm-store.js");
-  const models = await listInstalledLocalLlmModels();
-  const first = models.find((item) => item.weightsReady);
-  if (!first) {
-    throw new Error(`未找到可用本地模型权重。${README_HINT}`);
-  }
-  await ensureLocalLlmSidecarStarted(first.id);
 }
 
 
@@ -715,22 +674,18 @@ export async function ensureLocalLlmReady(modelId: string): Promise<void> {
 }
 
 
-export async function ensureGemma4Ready(): Promise<void> {
-  const { listInstalledLocalLlmModels } = await import("./local-llm-store.js");
-  const models = await listInstalledLocalLlmModels();
-  const first = models.find((item) => item.weightsReady);
-  if (!first) {
-    throw new Error(`未找到可用本地模型权重。${README_HINT}`);
-  }
-  await ensureLocalLlmReady(first.id);
+/** Bridge 退出时停止托管子进程 */
+/** 重置 spawn 状态，避免调度停摆 */
+export function resetLocalLlmSpawnState(): void {
+  spawnPromise = null;
 }
 
 
-/** Bridge 退出时停止托管子进程 */
 export async function stopManagedLocalLlm(): Promise<void> {
   const child = managedChild;
   managedChild = null;
   activeModelId = null;
+  resetLocalLlmSpawnState();
   if (!child || child.exitCode !== null) {
     return;
   }
@@ -751,7 +706,7 @@ export async function stopManagedLocalLlm(): Promise<void> {
 
 
 /** 强制结束占用 sidecar 端口的进程（含 Bridge 未跟踪的外部启动） */
-function killProcessListeningOnPort(port: number): boolean {
+export function killProcessListeningOnPort(port: number): boolean {
   if (process.platform === "win32") {
     const netstat = spawnSync("netstat", ["-ano"], { encoding: "utf8", windowsHide: true });
     const portToken = `:${port}`;
@@ -800,6 +755,7 @@ export function getActiveLocalLlmModelId(): string | null {
 /** 删除模型前：停止托管 sidecar 并清理端口占用，Windows 额外等待文件锁释放 */
 export async function forceStopLocalLlmSidecar(): Promise<{ unloaded: boolean }> {
   const hadManaged = managedChild !== null && managedChild.exitCode === null;
+  resetLocalLlmSpawnState();
   await stopManagedLocalLlm();
   const { port } = resolveHostPort();
   const killedPort = killProcessListeningOnPort(port);
@@ -810,9 +766,6 @@ export async function forceStopLocalLlmSidecar(): Promise<{ unloaded: boolean }>
   }
   return { unloaded };
 }
-
-
-export const stopManagedGemma4 = stopManagedLocalLlm;
 
 
 /** 若指定模型正在 sidecar 中加载则停止 */
@@ -877,11 +830,6 @@ export async function getLocalLlmHealthStatus(modelId?: string): Promise<LocalLl
 }
 
 
-export async function getGemma4HealthStatus(): Promise<LocalLlmHealthStatus> {
-  return getLocalLlmHealthStatus(activeModelId ?? undefined);
-}
-
-
 /** Bridge 启动时可选预热 */
 export async function maybeWarmLocalLlmOnBridgeStart(): Promise<void> {
   const flag = readEnv("LOCAL_LLM_AUTO_START_ON_BRIDGE", "GEMMA4_AUTO_START_ON_BRIDGE");
@@ -906,5 +854,3 @@ export async function maybeWarmLocalLlmOnBridgeStart(): Promise<void> {
   }
 }
 
-
-export const maybeWarmGemma4OnBridgeStart = maybeWarmLocalLlmOnBridgeStart;

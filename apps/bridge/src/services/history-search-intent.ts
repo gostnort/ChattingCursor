@@ -197,23 +197,3 @@ export function mergeHistorySearchHits(
   return merged;
 }
 
-
-/** 将历史搜索结果格式化为 assistant 回复文本 */
-export function formatHistorySearchReply(
-  query: string,
-  hits: Array<{ file: string; snippet: string; line?: number }>,
-): string {
-  if (hits.length === 0) {
-    return `在本地历史（近 7 天）中未找到与「${query}」相关的内容。`;
-  }
-  const lines = [
-    `在本地历史（近 7 天）中找到 ${hits.length} 条与「${query}」相关的片段：`,
-    "",
-  ];
-  for (const [index, hit] of hits.entries()) {
-    lines.push(`${index + 1}. ${hit.file}${hit.line ? `:${hit.line}` : ""}`);
-    lines.push(hit.snippet);
-    lines.push("");
-  }
-  return lines.join("\n").trimEnd();
-}

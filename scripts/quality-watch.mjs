@@ -1,8 +1,7 @@
 #!/usr/bin/env node
-/** 监听代码变更与 CLI 结束，自动 typecheck/lint 并可选触发 crew 质量评审 */
+/** 监听代码变更与 CLI 结束，自动 typecheck/lint */
 import process from "node:process";
 import { spawn } from "node:child_process";
-import { readFile } from "node:fs/promises";
 import { watch } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,7 +12,6 @@ const REPO_ROOT = path.resolve(__dirname, "..");
 const DEFAULT_BRIDGE_URL = "http://127.0.0.1:4321";
 const DEFAULT_DEBOUNCE_MS = 3000;
 const DEFAULT_CLI_POLL_MS = 2000;
-const DEFAULT_CREW = "example";
 const WATCH_DIRS = ["apps", "packages", "scripts", "configs"];
 const IGNORE_DIR_NAMES = new Set([
   "node_modules",
@@ -43,10 +41,6 @@ const QUALITY_COMMANDS = [
 const bridgeUrl = (process.env.BRIDGE_URL ?? DEFAULT_BRIDGE_URL).replace(/\/$/, "");
 const debounceMs = Number.parseInt(process.env.QUALITY_WATCH_DEBOUNCE_MS ?? "", 10) || DEFAULT_DEBOUNCE_MS;
 const cliPollMs = Number.parseInt(process.env.QUALITY_WATCH_CLI_POLL_MS ?? "", 10) || DEFAULT_CLI_POLL_MS;
-const crewName = process.env.QUALITY_WATCH_CREW?.trim() || DEFAULT_CREW;
-const args = new Set(process.argv.slice(2));
-const withCrew = !args.has("--no-crew");
-const crewDryRun = !args.has("--crew-execute");
 let debounceTimer = null;
 let running = false;
 let pending = false;
@@ -54,17 +48,15 @@ let lastSeenRunKey = "";
 
 
 function printUsage() {
-  console.log("Usage: pnpm quality:watch [--no-crew] [--crew-execute]");
+  console.log("Usage: pnpm quality:watch");
   console.log("");
   console.log("Watches repo source changes and CLI run completion, then runs typecheck/lint.");
-  console.log("When Bridge is up, optionally POST /crews/run for crew quality review (dry-run by default).");
   console.log("");
   console.log(`Repo root: ${REPO_ROOT}`);
   console.log(`Bridge URL: ${bridgeUrl}`);
   console.log(`Debounce: ${debounceMs}ms`);
-  console.log(`Crew review: ${withCrew ? (crewDryRun ? "dry-run" : "execute") : "disabled"}`);
   console.log("");
-  console.log("Environment: BRIDGE_URL, QUALITY_WATCH_DEBOUNCE_MS, QUALITY_WATCH_CLI_POLL_MS, QUALITY_WATCH_CREW");
+  console.log("Environment: BRIDGE_URL, QUALITY_WATCH_DEBOUNCE_MS, QUALITY_WATCH_CLI_POLL_MS");
 }
 
 
@@ -109,71 +101,6 @@ function runCommand(command, commandArgs, label) {
 }
 
 
-async function loadCrewInputs() {
-  const inputsPath = path.join(REPO_ROOT, "configs", "crews", "example-inputs.json");
-  try {
-    const raw = await readFile(inputsPath, "utf8");
-    const parsed = JSON.parse(raw);
-    if (typeof parsed !== "object" || parsed === null) {
-      return { repo_root: REPO_ROOT };
-    }
-    return {
-      ...parsed,
-      repo_root: REPO_ROOT,
-    };
-  } catch {
-    return { repo_root: REPO_ROOT };
-  }
-}
-
-
-async function runCrewReview(qualityPassed) {
-  if (!withCrew) {
-    return;
-  }
-  if (!qualityPassed) {
-    console.log("[quality-watch] Skipping crew review because quality checks failed.");
-    return;
-  }
-  try {
-    const statusResp = await fetch(`${bridgeUrl}/crews/status`);
-    if (!statusResp.ok) {
-      console.log(`[quality-watch] Bridge crew status unavailable (${statusResp.status}); skip crew review.`);
-      return;
-    }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.log(`[quality-watch] Bridge not reachable (${message}); skip crew review.`);
-    return;
-  }
-  const inputs = await loadCrewInputs();
-  console.log(`\n[quality-watch] Triggering crew review via POST /crews/run (${crewDryRun ? "dry-run" : "execute"})...`);
-  try {
-    const response = await fetch(`${bridgeUrl}/crews/run`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        crew: crewName,
-        inputs,
-        dryRun: crewDryRun,
-      }),
-    });
-    const bodyText = await response.text();
-    if (!response.ok) {
-      console.error(`[quality-watch] Crew review failed (${response.status}): ${bodyText}`);
-      return;
-    }
-    console.log("[quality-watch] Crew review completed.");
-    if (bodyText.trim()) {
-      console.log(bodyText);
-    }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(`[quality-watch] Crew review request failed: ${message}`);
-  }
-}
-
-
 async function runQualityCycle(reason) {
   if (running) {
     pending = true;
@@ -198,7 +125,6 @@ async function runQualityCycle(reason) {
   } else {
     console.log("[quality-watch] Quality checks failed.");
   }
-  await runCrewReview(passed);
   console.log(`[quality-watch] === Quality cycle finished (${reason}) ===\n`);
   running = false;
   if (pending) {

@@ -5,6 +5,10 @@ import { fileURLToPath } from "node:url";
 
 /** 用户数据根目录（与历史记录同级） */
 export function getChattingCursorHomeDir(): string {
+  const override = process.env.CHATTINGCURSOR_HOME?.trim();
+  if (override) {
+    return override;
+  }
   return path.join(os.homedir(), ".chattingcursor");
 }
 
@@ -149,6 +153,26 @@ export function getLocalLlmInstallJobsDir(): string {
 }
 
 
+/** local_vlm 根目录（视觉模型权重与 registry） */
+export function getLocalVlmRootDir(): string {
+  const override = process.env.CHATTINGCURSOR_LOCAL_VLM_DIR?.trim();
+  if (override) {
+    return override;
+  }
+  return path.join(getRepoRootDir(), "local_vlm");
+}
+
+
+/** local_vlm sidecar 脚本路径 */
+export function getLocalVlmServerScriptPath(): string {
+  const override = process.env.LOCAL_VLM_SERVER_SCRIPT?.trim();
+  if (override) {
+    return override;
+  }
+  return path.join(getRepoRootDir(), "local_vlm", "server", "vlm_server.py");
+}
+
+
 /** local_llm sidecar 脚本路径 */
 export function getLocalLlmServerScriptPath(): string {
   const override = process.env.LOCAL_LLM_SERVER_SCRIPT?.trim()
@@ -169,14 +193,3 @@ export function getKnowledgeDir(): string {
   return path.join(getRepoRootDir(), "Knowledge");
 }
 
-
-/** @deprecated 使用 getLocalLlmRootDir */
-export function getGemma4ModelDir(): string {
-  return getLocalLlmRootDir();
-}
-
-
-/** @deprecated 使用 getLocalLlmServerScriptPath */
-export function getGemma4ServerScriptPath(): string {
-  return getLocalLlmServerScriptPath();
-}

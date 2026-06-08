@@ -2,6 +2,10 @@ import type { FastifyInstance } from "fastify";
 import { formatLocalLlmError, offlineWarmupRequestSchema } from "@chatting-cursor/shared";
 import { requireRemoteToken } from "../middleware/auth.js";
 import { ensureOfflineModelReady, getOfflineModelSnapshot } from "../services/offline-runtime.js";
+import {
+  getResourceSchedulerSnapshot,
+  releaseOfflineStack,
+} from "../services/resource-scheduler.js";
 
 
 /** 注册离线模型预热与健康查询路由 */
@@ -24,6 +28,17 @@ export async function registerOfflineRoutes(app: FastifyInstance): Promise<void>
     }
     const snapshot = await getOfflineModelSnapshot(modelId);
     return reply.send(snapshot);
+  });
+
+
+  app.get("/offline/scheduler", async (_request, reply) => {
+    return reply.send(getResourceSchedulerSnapshot());
+  });
+
+
+  app.post("/offline/release-stack", async (_request, reply) => {
+    const stack = await releaseOfflineStack();
+    return reply.send({ ok: true, ...stack });
   });
 
 

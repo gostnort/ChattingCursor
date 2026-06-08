@@ -118,6 +118,22 @@ web_healthy() {
 }
 
 
+start_chrome() {
+  log_step "Starting Google Chrome with remote debugging port 9222..."
+  if command -v google-chrome >/dev/null 2>&1; then
+    google-chrome --remote-debugging-port=9222 --no-first-run --no-default-browser-check --disable-fre "http://127.0.0.1:${WEB_PORT}/ChattingCursor/" >/dev/null 2>&1 &
+    log_ok "Chrome started in background."
+  elif command -v google-chrome-stable >/dev/null 2>&1; then
+    google-chrome-stable --remote-debugging-port=9222 --no-first-run --no-default-browser-check --disable-fre "http://127.0.0.1:${WEB_PORT}/ChattingCursor/" >/dev/null 2>&1 &
+    log_ok "Chrome started in background."
+  elif [[ "$OSTYPE" == "darwin"* ]]; then
+    /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222 --no-first-run --no-default-browser-check --disable-fre "http://127.0.0.1:${WEB_PORT}/ChattingCursor/" >/dev/null 2>&1 &
+    log_ok "Chrome started in background."
+  else
+    echo "Could not find chrome executable. You may need to start it manually."
+  fi
+}
+
 ensure_project_ready() {
   if [[ ! -d "${ROOT}/node_modules" ]]; then
     log_step "首次运行，安装依赖..."
@@ -640,6 +656,8 @@ echo "停止: Ctrl+C"
 echo ""
 
 ensure_project_ready
+
+start_chrome
 
 CLOUDFLARED="$(resolve_cloudflared || true)"
 if [[ -z "${CLOUDFLARED}" ]]; then

@@ -136,10 +136,6 @@ export const GOOGLE_PAGE_HTML_CAPTURE_EXPRESSION = `(() => ({
 }))()`;
 
 
-/** @deprecated 使用 GOOGLE_PAGE_HTML_CAPTURE_EXPRESSION + /readability */
-export const GOOGLE_PAGE_MAIN_TEXT_EXPRESSION = GOOGLE_PAGE_HTML_CAPTURE_EXPRESSION;
-
-
 /** 根据 URL 与正文判断 Google 同意页 / 验证码 */
 export function detectGoogleAccessBlock(pageUrl: string, bodyText: string): GoogleAccessBlock | null {
   const probe = `${bodyText}\n${pageUrl}`;
@@ -368,50 +364,3 @@ export function buildStructuredSerpSummary(query: string, snapshot: GoogleSerpSn
     : "Could not parse search results from the page; check the Chrome tab.";
 }
 
-
-/** 由 SERP 条目与已抓取页面正文生成规则摘要（不依赖 cursor-agent） */
-export function buildSynthesizedSearchSummary(
-  query: string,
-  items: GoogleSerpItem[],
-  pages: CrawledPageText[],
-  userIntent?: string,
-): string {
-  const zh = resolveWebSearchReplyLanguage(query, userIntent);
-  const bullets: string[] = [];
-  const seen = new Set<string>();
-  const pushBullet = (line: string): void => {
-    const key = line.slice(0, 80);
-    if (seen.has(key)) {
-      return;
-    }
-    seen.add(key);
-    bullets.push(line);
-  };
-  for (const item of items.slice(0, 6)) {
-    const snippet = (item.snippet ?? "").replace(/\s+/g, " ").trim();
-    if (snippet) {
-      pushBullet(`- ${item.title}：${snippet.slice(0, 140)}`);
-    } else {
-      pushBullet(`- ${item.title}`);
-    }
-    if (bullets.length >= 6) {
-      break;
-    }
-  }
-  for (const page of pages.slice(0, 3)) {
-    const lead = page.text.replace(/\s+/g, " ").trim();
-    if (!lead) {
-      continue;
-    }
-    pushBullet(`- ${page.title}：${lead.slice(0, 160)}${lead.length > 160 ? "…" : ""}`);
-    if (bullets.length >= 8) {
-      break;
-    }
-  }
-  if (bullets.length === 0) {
-    return zh
-      ? "（未能生成摘要，请查看下方结果列表或 Chrome 标签页。）"
-      : "(No summary could be built; see result list or Chrome tab.)";
-  }
-  return bullets.join("\n");
-}

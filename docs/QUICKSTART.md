@@ -47,7 +47,7 @@ http://127.0.0.1:43210/ChattingCursor/
 | 模式 | URL（开发） | 说明 |
 |------|-------------|------|
 | 聊天 | `http://127.0.0.1:43210/ChattingCursor/` | 默认首页 |
-| 本地 · 配置 | `http://127.0.0.1:43210/ChattingCursor/local/config` | Bridge/历史/crewAI |
+| 本地 · 配置 | `http://127.0.0.1:43210/ChattingCursor/local/config` | Bridge/历史/调度 |
 | 本地 · CLI输出 | `http://127.0.0.1:43210/ChattingCursor/local/cli` | Web 查看 CLI 原始输出 |
 
 也可用 hash：`#local/config`、`#local/cli`（首次打开会规范化为 pathname）。
@@ -113,7 +113,6 @@ http://127.0.0.1:43210/ChattingCursor/local/cli
 | 历史目录 | 默认 `~/.chattingcursor/history/` |
 | 保留天数 | 7 天，过期文件自动删除 |
 | CLI 实时反馈 | 说明 + 切换到 CLI输出 子页 / `pnpm cli:watch` |
-| crewAI 编排 | Python / crewAI / Chrome 9222 状态、示例 YAML 是否可 dry-run |
 | 对话历史列表 | **只读**浏览近 7 天内全部 `*.txt` 会话文件 |
 
 ### 对应 Bridge API（仅本机）
@@ -125,43 +124,8 @@ http://127.0.0.1:43210/ChattingCursor/local/cli
 | POST | `/auth/verify` | 校验当天 token |
 | GET | `/local/history` | 列出全部历史文件 |
 | GET | `/local/history/:file` | 读取单个历史文件全文 |
-| GET | `/crews/status` | crewAI / Python / Chrome 9222 / 示例配置状态 |
-| POST | `/crews/run` | 运行 crew（默认 dry-run） |
 
 **安全限制**：`/local/*` 仅接受来自 `127.0.0.1` / `localhost` 的请求；前端也要求 Bridge URL 为本机地址。
-
----
-
-## crewAI 最小配置（with-crewai 分支）
-
-当前为 **最小可运行集成**，非完整多 Agent 产品化：
-
-1. **依赖**（一次性）：
-
-```powershell
-cd e:\my_github\ChattingCursor
-pnpm crew:setup
-```
-
-或手动：`python -m venv .venv` 后 `pip install -r requirements.txt`
-
-2. **Dry-run 示例**（不调用 LLM，校验 `configs/crews/example.yaml`）：
-
-```powershell
-pnpm crew:run
-```
-
-3. **Bridge API**：
-
-```powershell
-curl -X POST http://127.0.0.1:4321/crews/run -H "Content-Type: application/json" -d "{\"crew\":\"example\",\"inputs\":{\"repo_root\":\"E:\\\\my_github\\\\ChattingCursor\",\"local_url\":\"http://127.0.0.1:43210/ChattingCursor/\",\"pages_url\":\"https://gostnort.github.io/ChattingCursor/\",\"acceptance_criteria\":\"页面能恢复历史对话\"},\"dryRun\":true}"
-```
-
-4. **真实执行**（需 LLM API Key，如 `OPENAI_API_KEY`）：`dryRun: false` 或 `python scripts/run-crew.py --config configs/crews/example.yaml --execute`
-
-5. **编排层**：`packages/orchestrator` 加载 YAML 并调用 `scripts/run-crew.py`；完整 Chat 流程接入 crew 仍在后续阶段。
-
-本地 **配置** 子页会显示 crewAI 状态（Python 是否可用、crewai 是否安装、Chrome 9222 是否连通、example.yaml 是否有效）。
 
 ---
 
@@ -181,7 +145,7 @@ curl -X POST http://127.0.0.1:4321/crews/run -H "Content-Type: application/json"
 |------|------|------|
 | Bridge | **4321** | 本地 API，封装 Cursor CLI |
 | Web | **43210** | Vite 开发服务器 |
-| Chrome 9222 | **9222** | 联网搜索 / crew 检查用；需手动启动 Chrome 远程调试（见上文） |
+| Chrome 9222 | **9222** | 联网搜索用；需手动启动 Chrome 远程调试（见上文） |
 
 ---
 
@@ -202,9 +166,6 @@ curl -X POST http://127.0.0.1:4321/crews/run -H "Content-Type: application/json"
 
 **想看 cursor-agent 原始输出？**
 - 聊天页**没有** CLI 面板；请用 `pnpm cli:watch <runId>` 或 **本地 → CLI输出**（`/ChattingCursor/local/cli`）
-
-**crewAI 显示未安装？**
-- 运行 `pnpm crew:setup` 或 `pip install -r requirements.txt`
 
 **首次使用需安装依赖：**
 

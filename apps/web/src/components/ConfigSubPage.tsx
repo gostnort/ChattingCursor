@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import type { AuthStatusResponse, HistorySessionSummary, LocalConfigResponse } from "@chatting-cursor/shared";
+import type {
+  AuthStatusResponse,
+  HistorySessionSummary,
+  LocalConfigResponse,
+} from "@chatting-cursor/shared";
 import type { AssistantBubbleColorKey, AssistantBubbleColors } from "../assistantBubbleSettings";
 import { normalizeHexColor } from "../assistantBubbleSettings";
 import {
@@ -20,6 +24,7 @@ import {
 } from "../platformPaths";
 import { MAX_TEXT_SIZE_PX, MIN_TEXT_SIZE_PX } from "../textSizeSettings";
 import {
+  type BridgeHealthResponse,
   fetchAuthStatus,
   fetchCloudflareTunnelConfig,
 
@@ -27,7 +32,9 @@ import {
   fetchHistoryList,
   fetchLocalConfig,
   fetchLocalTokenFile,
+  fetchSchedulerSettings,
   saveCloudflareTunnelConfig,
+  saveSchedulerSettings,
   updateTokenDirectory,
   verifyBridgeToken,
 } from "../api/bridge";
@@ -37,6 +44,42 @@ import {
   type CloudflareTunnelLocalSettings,
 } from "../cloudflareTunnelSettings";
 import { parseTodayTokenFromContent } from "../tokenFile";
+type SchedulerLaneSnapshot = NonNullable<BridgeHealthResponse["scheduler"]>;
+
+
+function applySchedulerLaneSnapshot(
+  scheduler: SchedulerLaneSnapshot,
+  setters: {
+    setLanePilotStatus: (value: string) => void;
+    setLaneLlmSummary: (value: string) => void;
+    setLaneVlmSummary: (value: string) => void;
+    setSchedulerBlocked: (value: boolean) => void;
+    setSchedulerMessage: (value: string | null) => void;
+  },
+): void {
+  const pilot = scheduler.pilotTts;
+  setters.setLanePilotStatus(
+    `${pilot.enabled ? "启用" : "禁用"} · ${pilot.status} · 预留 ${pilot.reservedVramGb} GB`,
+  );
+  const llm = scheduler.offlineLlm;
+  setters.setLaneLlmSummary(
+    llm.modelId
+      ? `${llm.modelId} · GPU 层 ${llm.nGpuLayers ?? "?"}`
+      : "未加载",
+  );
+  const vlm = scheduler.offlineVlm;
+  setters.setLaneVlmSummary(
+    vlm.loaded
+      ? `已加载${vlm.boundModelId ? ` (${vlm.boundModelId})` : ""}`
+      : vlm.boundModelId
+        ? `已绑定未加载 (${vlm.boundModelId})`
+        : "未绑定",
+  );
+  setters.setSchedulerBlocked(Boolean(scheduler.blocked));
+  setters.setSchedulerMessage(scheduler.blockReason ?? null);
+}
+
+
 interface ConfigSubPageProps {
   assistantBubbleColors: AssistantBubbleColors;
   userBubbleBackground: string;
@@ -106,6 +149,16 @@ export function ConfigSubPage({
   const onGitHubPages = isGitHubPages();
   const [authStatus, setAuthStatus] = useState<AuthStatusResponse | null>(null);
   const [localConfig, setLocalConfig] = useState<LocalConfigResponse | null>(null);
+  const [pilotTtsEnabled, setPilotTtsEnabled] = useState(true);
+  const [pilotReservedGb, setPilotReservedGb] = useState("3");
+  const [offlineVlmEnabled, setOfflineVlmEnabled] = useState(true);
+  const [defaultVlmRepo, setDefaultVlmRepo] = useState("Rizwan313/Qwen3-VL-Embedding-2B-GGUF");
+  const [schedulerBlocked, setSchedulerBlocked] = useState(false);
+  const [schedulerMessage, setSchedulerMessage] = useState<string | null>(null);
+  const [schedulerSaving, setSchedulerSaving] = useState(false);
+  const [lanePilotStatus, setLanePilotStatus] = useState("—");
+  const [laneLlmSummary, setLaneLlmSummary] = useState("未加载");
+  const [laneVlmSummary, setLaneVlmSummary] = useState("未绑定");
 
   const [sessions, setSessions] = useState<HistorySessionSummary[]>([]);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
@@ -190,18 +243,18 @@ export function ConfigSubPage({
         setAuthStatus(auth);
         if (!isLocalBridgeUrl(normalizedBridgeUrl)) {
           setLocalConfig(null);
-
           setSessions([]);
           setSelectedFile(null);
           setHistoryContent("");
           setLoading(false);
           return;
         }
-        const [config, history, tokenFile, tunnelConfig] = await Promise.all([
+        const [config, history, tokenFile, tunnelConfig, schedulerBundle] = await Promise.all([
           fetchLocalConfig(normalizedBridgeUrl, bridgeToken),
           fetchHistoryList(normalizedBridgeUrl, bridgeToken),
           fetchLocalTokenFile(normalizedBridgeUrl, bridgeToken).catch(() => null),
           fetchCloudflareTunnelConfig(normalizedBridgeUrl, bridgeToken).catch(() => null),
+          fetchSchedulerSettings(normalizedBridgeUrl, bridgeToken).catch(() => null),
         ]);
         if (cancelled) {
           return;
@@ -209,6 +262,19 @@ export function ConfigSubPage({
         setLocalConfig(config);
         setTokenDirectoryInput(config.tokenFilePath.replace(new RegExp(`[\\\\/]${config.tokenFilePath.split(/[\\\\/]/).pop() ?? ""}$`), ""));
         setSessions(history.sessions);
+        if (schedulerBundle) {
+          setPilotTtsEnabled(schedulerBundle.settings.pilotTtsEnabled);
+          setPilotReservedGb(String(schedulerBundle.settings.pilotTtsReservedVramGb));
+          setOfflineVlmEnabled(schedulerBundle.settings.offlineVlmEnabled);
+          setDefaultVlmRepo(schedulerBundle.settings.defaultOfflineVlmRepo);
+          applySchedulerLaneSnapshot(schedulerBundle.scheduler, {
+            setLanePilotStatus,
+            setLaneLlmSummary,
+            setLaneVlmSummary,
+            setSchedulerBlocked,
+            setSchedulerMessage,
+          });
+        }
 
         if (tunnelConfig) {
           const merged: CloudflareTunnelLocalSettings = {
@@ -527,11 +593,111 @@ export function ConfigSubPage({
           <p className="config-hint">
             在「本地模型」页从 Hugging Face 安装 GGUF，并在聊天页选择 <code>author/model</code> 使用。
           </p>
-          {localConfig?.gemma4 && (
+          {localConfig?.localLlm && (
             <p className="config-hint">
-              Sidecar：{localConfig.gemma4.running ? "运行中" : localConfig.gemma4.spawning ? "启动中…" : "未运行"}
-              {localConfig.gemma4.message ? ` — ${localConfig.gemma4.message}` : ""}
+              Sidecar：{localConfig.localLlm.running ? "运行中" : localConfig.localLlm.spawning ? "启动中…" : "未运行"}
+              {localConfig.localLlm.message ? ` — ${localConfig.localLlm.message}` : ""}
             </p>
+          )}
+        </section>
+      )}
+
+      {isLocalBridgeUrl(normalizedBridgeUrl) && (
+        <section className="config-section">
+          <h2>三路调度（〇-B）</h2>
+          <p className="config-hint">
+            车道 1 PilotTTS：{lanePilotStatus}
+            <br />
+            车道 2 离线 LLM：{laneLlmSummary}
+            <br />
+            车道 3 离线 VLM（RAM）：{laneVlmSummary}
+            <br />
+            CLI 在线对话不经此调度。
+          </p>
+          <label className="config-field">
+            <span className="config-field-label">启用 PilotTTS（车道 1，占显存）</span>
+            <input
+              type="checkbox"
+              checked={pilotTtsEnabled}
+              onChange={(event) => setPilotTtsEnabled(event.target.checked)}
+            />
+          </label>
+          <label className="config-field" htmlFor="pilot-reserved-vram">
+            <span className="config-field-label">PilotTTS 预留显存（GB）</span>
+            <input
+              id="pilot-reserved-vram"
+              type="number"
+              min={1}
+              max={24}
+              step={0.5}
+              value={pilotReservedGb}
+              onChange={(event) => setPilotReservedGb(event.target.value)}
+            />
+          </label>
+          <label className="config-field">
+            <span className="config-field-label">启用离线视觉 VLM（车道 3，仅 RAM）</span>
+            <input
+              type="checkbox"
+              checked={offlineVlmEnabled}
+              onChange={(event) => setOfflineVlmEnabled(event.target.checked)}
+            />
+          </label>
+          <label className="config-field" htmlFor="default-vlm-repo">
+            <span className="config-field-label">默认离线 VLM 仓库</span>
+            <input
+              id="default-vlm-repo"
+              type="text"
+              value={defaultVlmRepo}
+              onChange={(event) => setDefaultVlmRepo(event.target.value)}
+              spellCheck={false}
+            />
+          </label>
+          <button
+            type="button"
+            className="config-primary-button"
+            disabled={schedulerSaving}
+            onClick={() => {
+              const reserved = Number.parseFloat(pilotReservedGb);
+              if (!Number.isFinite(reserved) || reserved <= 0) {
+                setError("PilotTTS 预留显存须为正数。");
+                return;
+              }
+              setSchedulerSaving(true);
+              void saveSchedulerSettings(normalizedBridgeUrl, {
+                pilotTtsEnabled,
+                pilotTtsReservedVramGb: reserved,
+                offlineVlmEnabled,
+                defaultOfflineVlmRepo: defaultVlmRepo.trim(),
+              }, bridgeToken).then((result) => {
+                const snapshot = result.scheduler as SchedulerLaneSnapshot | undefined;
+                if (snapshot?.pilotTts) {
+                  applySchedulerLaneSnapshot(snapshot, {
+                    setLanePilotStatus,
+                    setLaneLlmSummary,
+                    setLaneVlmSummary,
+                    setSchedulerBlocked,
+                    setSchedulerMessage,
+                  });
+                } else {
+                  setSchedulerBlocked(Boolean(result.scheduler.blocked));
+                  setSchedulerMessage(result.scheduler.blockReason ?? result.plan.reason ?? null);
+                }
+                setSaveMessage(result.plan.ok ? "调度配置已保存。" : "已保存，但离线能力被阻塞。");
+              }).catch((saveError: unknown) => {
+                const message = saveError instanceof Error ? saveError.message : String(saveError);
+                setError(message);
+              }).finally(() => {
+                setSchedulerSaving(false);
+              });
+            }}
+          >
+            {schedulerSaving ? "保存中…" : "保存调度配置"}
+          </button>
+          {schedulerBlocked && (
+            <p className="config-error">{schedulerMessage ?? "资源调度阻塞离线路径。"}</p>
+          )}
+          {!schedulerBlocked && schedulerMessage && (
+            <p className="config-hint">{schedulerMessage}</p>
           )}
         </section>
       )}

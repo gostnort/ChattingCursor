@@ -1,7 +1,4 @@
 export type {
-  AgentSpec,
-  TaskSpec,
-  CrewSpec,
   ChatMessage,
   RunEvent,
   RunEventType,
@@ -34,9 +31,6 @@ export type {
   HistorySessionSummary,
   LocalHistoryListResponse,
   LocalHistoryContentResponse,
-  CrewStatusResponse,
-  CrewRunRequest,
-  CrewRunResponse,
   KnowledgeNode,
   KnowledgeTreeResponse,
   KnowledgeCreateNodeRequest,
@@ -82,10 +76,6 @@ export {
 export { compareAlphaDescNumeric, sortAlphaDescNumeric } from "./alpha-desc-numeric-sort.js";
 
 export {
-  agentSpecSchema,
-  taskSpecSchema,
-  crewSpecSchema,
-  crewProcessSchema,
   chatMessageSchema,
   runEventSchema,
   runEventTypeSchema,
@@ -118,9 +108,6 @@ export {
   historySessionSummarySchema,
   localHistoryListResponseSchema,
   localHistoryContentResponseSchema,
-  crewStatusResponseSchema,
-  crewRunRequestSchema,
-  crewRunResponseSchema,
   knowledgeNodeSchema,
   knowledgeTreeResponseSchema,
   knowledgeCreateNodeRequestSchema,

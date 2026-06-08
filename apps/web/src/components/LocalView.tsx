@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import type { AssistantBubbleColors } from "../assistantBubbleSettings";
 import { normalizeBridgeUrl } from "../bridgeSettings";
 import type { LocalSub } from "../routing";
@@ -6,6 +6,8 @@ import { CliOutputSubPage } from "./CliOutputSubPage";
 import { ConfigSubPage } from "./ConfigSubPage";
 import { KnowledgeWikiPage } from "./KnowledgeWikiPage";
 import { LocalModelsSubPage } from "./LocalModelsSubPage";
+import { ensurePilotTtsAutoStartedOnce } from "../pilotTtsAutoStart";
+import { TtsSubPage } from "./TtsSubPage";
 
 
 interface LocalViewProps {
@@ -42,6 +44,9 @@ export function LocalView({
   onLocalSubChange,
 }: LocalViewProps) {
   const normalizedBridgeUrl = useMemo(() => normalizeBridgeUrl(bridgeUrl), [bridgeUrl]);
+  useEffect(() => {
+    void ensurePilotTtsAutoStartedOnce(normalizedBridgeUrl, bridgeToken);
+  }, [normalizedBridgeUrl, bridgeToken]);
   return (
     <section id="local-view" className="app-view local-view" aria-label="本地">
       <nav className="local-sub-nav" aria-label="本地子页">
@@ -77,6 +82,14 @@ export function LocalView({
         >
           CLI输出
         </button>
+        <button
+          type="button"
+          className={localSub === "tts" ? "local-sub-active" : ""}
+          aria-current={localSub === "tts" ? "page" : undefined}
+          onClick={() => onLocalSubChange("tts")}
+        >
+          语音
+        </button>
       </nav>
       <main className={`local-sub-main${localSub === "knowledge" ? " local-sub-main-knowledge" : ""}`}>
         {localSub === "config" && (
@@ -102,12 +115,15 @@ export function LocalView({
           <KnowledgeWikiPage bridgeUrl={normalizedBridgeUrl} bridgeToken={bridgeToken} />
         )}
         {localSub === "models" && (
-          <LocalModelsSubPage bridgeUrl={normalizedBridgeUrl} />
+          <LocalModelsSubPage bridgeUrl={normalizedBridgeUrl} bridgeToken={bridgeToken} />
         )}
         {localSub === "cli" && (
           <div id="local-cli" className="local-sub-panel cli-page">
             <CliOutputSubPage bridgeUrl={normalizedBridgeUrl} bridgeToken={bridgeToken} />
           </div>
+        )}
+        {localSub === "tts" && (
+          <TtsSubPage bridgeUrl={normalizedBridgeUrl} />
         )}
       </main>
     </section>

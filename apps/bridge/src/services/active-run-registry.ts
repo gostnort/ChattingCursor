@@ -29,3 +29,16 @@ export function cancelActiveRun(runId: string): boolean {
 export function hasActiveRun(runId: string): boolean {
   return activeRuns.has(runId);
 }
+
+
+/** 切换离线模型或释放离线栈时取消全部活跃 run */
+export function cancelAllActiveRuns(): void {
+  for (const [runId, cancel] of activeRuns.entries()) {
+    try {
+      cancel();
+    } catch {
+      // 忽略单个 run 取消失败
+    }
+    activeRuns.delete(runId);
+  }
+}

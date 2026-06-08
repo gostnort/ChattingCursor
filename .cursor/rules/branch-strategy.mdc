@@ -1,28 +1,21 @@
 ﻿---
-description: Branch policy for main vs crewAI reference code
+description: Branch policy for main vs feature work
 alwaysApply: false
 ---
 
-# Branch and crewAI reference policy
+# Branch policy
 
 ## main branch
 
-- **main at v0.2+ carries no crewAI application code** (no `configs/crews/`, `packages/orchestrator/`, bridge `/crews` routes, or `crewAI/` tree on this branch).
 - Use for releases, GitHub Pages, and external collaboration.
+- Core chat does not depend on Python orchestration tooling.
 
-## dev / feature branches (e.g. `with-crewai`)
+## dev / feature branches
 
-When building multi-agent orchestration:
+When building new features:
 
 1. Branch from main: `git checkout -b dev`
-2. Adjust `.gitignore` if you need to commit the reference tree (comment or remove the `crewAI/` line)
-3. Optionally commit local `crewAI/` on that branch (large)
-
-## Why
-
-- main stays small without 3000+ reference files
-- Feature branches can mirror crewAI Agent / Task / Crew / Event patterns in TypeScript
-- ChattingCursor does **not** require the crewAI Python runtime for core chat; it is optional tooling on feature branches only
+2. Keep changes focused; merge back to main when stable.
 
 ## Deletion note
 
