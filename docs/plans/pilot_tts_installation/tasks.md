@@ -63,7 +63,7 @@ This task list strictly follows the Speckit specification, breaking down the tec
 
 ## Phase 4: User Story 2 (P2)
 
-### [Task 4.1] Resilient `upstream` Cloning & Incremental Redirecting with 15-Second Timeout
+### [x] [Task 4.1] Resilient `upstream` Cloning & Incremental Redirecting with 15-Second Timeout
 *   **Description**:
     *   In `install_backend.py`, check and ensure the `upstream` directory is automatically created.
     *   Implement resilient incremental synchronization and fallback cloning logic:
@@ -78,7 +78,7 @@ This task list strictly follows the Speckit specification, breaking down the tec
 *   **Prerequisites**: Task 2.2
 *   **Parallel Opportunities**: Can run in parallel with Phase 3 (dependency installation) since cloning code does not depend on the Python environment.
 
-### [Task 4.2] Hugging Face Mirror Injection and High-Availability Model Weight Download
+### [x] [Task 4.2] Hugging Face Mirror Injection and High-Availability Model Weight Download
 *   **Description**:
     *   Automatically configure `os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"` in the installation process.
     *   Write a Python script to call `snapshot_download` to silently and concurrently pull `AmapVoice/PilotTTS` and `facebook/w2v-bert-2.0`.
