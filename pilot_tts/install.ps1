@@ -293,7 +293,7 @@ Write-InstallLog "=== Backend installation complete ==="
 Write-InstallLog ""
 Write-InstallLog "=== PilotTTS deployment ready ==="
 Write-InstallLog "API:  http://127.0.0.1:4323  (run.bat api)"
-Write-InstallLog "WebUI: http://127.0.0.1:4324  (run.bat)"
+Write-InstallLog "WebUI: http://127.0.0.1:8090  (run.bat, test/debug only)"
 if (-not (Test-NonInteractiveInstall)) {
     Write-InstallLog ""
     Write-InstallLog "Installation complete. Run run.bat to start the WebUI."

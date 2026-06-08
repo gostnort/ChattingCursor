@@ -119,26 +119,26 @@ This task list strictly follows the Speckit specification, breaking down the tec
 ### [x] [Task 5.3] Reconstruct and Deploy `run.bat`
 *   **Description**:
     *   Create/overwrite `run.bat` to activate the `.venv` virtual environment and launch the service.
-    *   Unify ports: support launching the WebUI service on port `4324` and the API service on port `4323` (instead of the old `8090`).
+    *   Unify ports: production API on `4323` (`server/tts_server.py`); optional test/debug WebUI on `8090`.
     *   Verify the existence of `.venv` and `upstream` before running, giving clear error messages if missing.
 *   **Acceptance Criteria**:
-    *   Running `run.bat` successfully launches the WebUI on port `4324` or the API service on port `4323` using the isolated `.venv` Python interpreter.
+    *   Running `run.bat` successfully launches the WebUI on port `8090` or the API service on port `4323` using the isolated `.venv` Python interpreter.
 *   **Prerequisites**: Task 2.2, Task 4.1
 
 ### [x] [Task 5.4] Reconstruct and Deploy `shutdown.bat`
 *   **Description**:
-    *   Create/overwrite `shutdown.bat` to terminate processes listening on ports `4323` (API) and `4324` (WebUI).
+    *   Create/overwrite `shutdown.bat` to terminate processes listening on ports `4323` (API) and `8090` (WebUI test/debug).
     *   Use native Windows command-line tools (`netstat` and `taskkill`) to gracefully find and kill the processes.
     *   Ensure that if no processes are listening on these ports, the script exits gracefully without throwing ugly error messages.
 *   **Acceptance Criteria**:
-    *   Running `shutdown.bat` cleanly kills any active services on ports `4323` and `4324` and reports success.
+    *   Running `shutdown.bat` cleanly kills any active services on ports `4323` and `8090` and reports success.
 *   **Prerequisites**: None
 
 ---
 
 ## Phase 6: Polish
 
-### [Task 6.1] Coding Standards Audit and Static Checks
+### [x] [Task 6.1] Coding Standards Audit and Static Checks
 *   **Description**:
     *   Manually inspect or automatically scan all newly written Python code to ensure:
         1. All `import` statements are strictly at the top of the file.
@@ -151,11 +151,11 @@ This task list strictly follows the Speckit specification, breaking down the tec
     *   Script files 100% conform to the constraints defined in `constitution.md` and `coding-standards.mdc`.
 *   **Prerequisites**: Task 5.1, Task 5.3, Task 5.4
 
-### [Task 6.2] Metrics Measurement and Performance Verification
+### [x] [Task 6.2] Metrics Measurement and Performance Verification
 *   **Description**:
     *   Run the complete `install.bat` on both a Windows CPU virtual machine and a Windows NVIDIA GPU physical machine.
     *   Record execution time, bandwidth utilization, and PyTorch adaptation for CPU/GPU.
-    *   Verify that the final TTS API starts normally on `http://127.0.0.1:4323` and the WebUI on `http://127.0.0.1:4324`. Output the final Speckit deployment completion report.
+    *   Verify that the final TTS API starts normally on `http://127.0.0.1:4323` and the optional WebUI on `http://127.0.0.1:8090`. Output the final Speckit deployment completion report.
 *   **Acceptance Criteria**:
     *   All metrics 100% meet the success standards SC-001 ~ SC-005 defined in `spec.md`.
 *   **Prerequisites**: Task 6.1

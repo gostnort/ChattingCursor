@@ -227,7 +227,7 @@ def main() -> int:
             log("[warn] 权重未下载；请稍后运行 install.bat 或在「语音」页点击「安装 PilotTTS」。")
         log("=== 完成 ===")
         log("Bridge 朗读 API：http://127.0.0.1:4323")
-        log("Pilot 配置 WebUI：http://127.0.0.1:4324 （需在语音页勾选「启用朗读 API」后可选 WebUI）")
+        log("Pilot 配置 WebUI：http://127.0.0.1:8090 （测试/调试；需在语音页勾选「启用朗读 API」后可选 WebUI）")
         return 0
     except subprocess.CalledProcessError as exc:
         log(f"[error] 命令失败 exit={exc.returncode}")

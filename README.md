@@ -18,7 +18,7 @@ Open **http://127.0.0.1:43210/ChattingCursor/** → **Local → Config** → con
 | Bridge | `4321` | `BRIDGE_PORT`, `BRIDGE_HOST` — main API |
 | Offline LLM | `4322` | Local GGUF chat sidecar |
 | PilotTTS API | `4323` | `PILOT_TTS_PORT` — chat read-aloud / synthesis |
-| PilotTTS WebUI | `4324` | `PILOT_TTS_WEBUI_PORT` — optional Gradio config / preview |
+| PilotTTS WebUI | `8090` | `PILOT_TTS_WEBUI_PORT` — optional Gradio test/debug config UI |
 | Offline VLM | `4325` | Local vision sidecar |
 | Web dev | `43210` | Vite; base path `/ChattingCursor/` |
 | Chrome debug (optional) | `9222` | Free `/websearch`: Bridge → Windows Chrome CDP (`127.0.0.1:9222`), not WSL MCP; see [docs/QUICKSTART.md](docs/QUICKSTART.md) |

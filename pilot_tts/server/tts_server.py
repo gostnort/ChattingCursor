@@ -121,7 +121,7 @@ def load_gpu_engine() -> None:
 async def health() -> dict[str, object]:
     ready = weights_ready() and _gpu_loaded
     api_port = int(read_env("PILOT_TTS_PORT", str(DEFAULT_PORT)) or DEFAULT_PORT)
-    webui_port = int(read_env("PILOT_TTS_WEBUI_PORT", "4324") or "4324")
+    webui_port = int(read_env("PILOT_TTS_WEBUI_PORT", "8090") or "8090")
     return {
         "status": "ready" if ready else "degraded",
         "weightsReady": weights_ready(),

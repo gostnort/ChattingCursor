@@ -8,9 +8,9 @@ for /f "tokens=5" %%a in ('netstat -ano ^| findstr :4323 ^| findstr LISTENING') 
     taskkill /f /pid %%a >nul 2>&1
 )
 
-:: 查找并杀死占用 4324 端口（WebUI 服务）的进程
-echo Stopping WebUI service on port 4324...
-for /f "tokens=5" %%a in ('netstat -ano ^| findstr :4324 ^| findstr LISTENING') do (
+:: 查找并杀死占用 8090 端口（WebUI 测试/调试界面）的进程
+echo Stopping WebUI service on port 8090...
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr :8090 ^| findstr LISTENING') do (
     taskkill /f /pid %%a >nul 2>&1
 )
 

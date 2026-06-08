@@ -1,6 +1,19 @@
 # PilotTTS（ChattingCursor 本地朗读）
 
-Bridge 通过 `pilot_tts/server/tts_server.py` 提供朗读 API；可选 Gradio WebUI 用于试听与配置。端口见仓库根目录 [README — Ports](../README.md#ports)（`4323` / `4324`，可用 `PILOT_TTS_PORT`、`PILOT_TTS_WEBUI_PORT` 覆盖）。
+Bridge 通过 `pilot_tts/server/tts_server.py` 提供朗读 API（生产路径）；可选 Gradio WebUI（`8090`）仅用于测试/调试与配置。端口见仓库根目录 [README — Ports](../README.md#ports)（`4323` / `8090`，可用 `PILOT_TTS_PORT`、`PILOT_TTS_WEBUI_PORT` 覆盖）。
+
+## 启动方式（测试 vs 生产）
+
+| 场景 | 谁启动 | 进程 | 端口 |
+|------|--------|------|------|
+| 独立测试/调试（默认） | `pilot_tts\run.bat` | `upstream/webui.py --port 8090` | `8090` |
+| 手动验证朗读 API | `pilot_tts\run.bat api` | `server/tts_server.py` | `4323` |
+| ChattingCursor 生产朗读 | Bridge `pilot-tts-spawn.ts` | `server/tts_server.py` | `4323` |
+| 语音页打开配置界面 | Bridge `POST /tts/webui/start` | `upstream/webui.py` | `8090` |
+
+`run.bat` 默认分支**不会**被 ChattingCursor 自动调用；应用在「本地 → 语音」勾选「启用朗读 API」后，由 Bridge 拉起 `4323` sidecar 处理 `POST /tts/synthesize`。
+
+停止本机测试进程：`pilot_tts\shutdown.bat`（释放 `4323` 与 `8090`）。
 
 ## 安装会做什么
 

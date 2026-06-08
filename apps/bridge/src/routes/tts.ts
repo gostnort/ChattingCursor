@@ -31,7 +31,7 @@ import {
 } from "../services/resource-scheduler.js";
 
 
-/** PilotTTS：安装、4323 API、4324 WebUI */
+/** PilotTTS：安装、4323 API、8090 WebUI（测试/调试） */
 export async function registerTtsRoutes(app: FastifyInstance): Promise<void> {
   app.get("/tts/capability", async (_request, reply) => {
     const snapshot = getResourceSchedulerSnapshot();

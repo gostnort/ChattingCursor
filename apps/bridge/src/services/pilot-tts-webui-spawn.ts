@@ -59,7 +59,6 @@ export function mapPilotWebuiError(error: unknown): string {
   }
   return raw
     .replace(/\b8090\b/g, "配置端口")
-    .replace(/\b4324\b/g, "配置端口")
     .replace(/\bsidecar\b/gi, "朗读服务");
 }
 
