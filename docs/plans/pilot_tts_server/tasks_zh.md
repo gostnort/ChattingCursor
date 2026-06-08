@@ -13,20 +13,20 @@
     *   8 个计划文件存在并交叉引用端口 `4323`（API）/ `8090`（可选 WebUI）与 Bridge 路由。
     *   `demo.py` 惰性导入章程例外已文档化。
 
-### [ ] [Task 1.2] 修正安装计划中过时的 `api.py` 引用
+### [x] [Task 1.2] 修正安装计划中过时的 `api.py` 引用
 *   **描述**：更新 `docs/plans/pilot_tts_installation/plan.md` §4.1 启动批处理示例：将 `upstream/api.py` 替换为 `server/tts_server.py`，与 `pilot_tts/run.bat` 一致。
 *   **前置条件**：Task 1.1。
 *   **验收标准**：
     *   安装计划 `run.bat` 片段在 `api` 模式显示 `server\tts_server.py`。
     *   片段中文档化端口 `4323` 与 env `PILOT_TTS_PORT`。
 
-### [ ] [Task 1.3] 在 sidecar 计划中记录 `run.bat api` 入口
+### [x] [Task 1.3] 在 sidecar 计划中记录 `run.bat api` 入口
 *   **描述**：确保本包 `plan.md` 明确映射 `run.bat api` → `server/tts_server.py`，默认模式 → `upstream/webui.py` 端口 `8090`（仅测试/调试）。
 *   **前置条件**：Task 1.1。
 *   **验收标准**：
     *   运维无需读源码即可找到手动 API 启动说明。
 
-### [ ] [Task 1.4] 文档化 `demo.py` 上游契约
+### [x] [Task 1.4] 文档化 `demo.py` 上游契约
 *   **描述**：在 `plan.md` §3.5 与 `constitution.md` §2.4 中记录 `load_engine` / `synthesize` 签名、`sys.path` 注入及惰性导入理由（上游非 pip 包）。
 *   **前置条件**：Task 1.1。
 *   **验收标准**：

@@ -35,13 +35,10 @@ local_vlm/**
 local_vlm/server/__pycache__/
 local_vlm/server/**/*.py[cod]
 
-pilot_tts/**
-!pilot_tts/server/
-!pilot_tts/server/**
-!pilot_tts/install.bat
-!pilot_tts/install.py
-!pilot_tts/requirements-inference.txt
-!pilot_tts/README.md
+# pilot_tts 的相关配置
 pilot_tts/.venv/
 pilot_tts/upstream/
 pilot_tts/.install-logs/
+
+# Spec_Kit MCP的产出
+ChattingCursor

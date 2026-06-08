@@ -44,13 +44,28 @@ The ChattingCursor PilotTTS sidecar (`pilot_tts/server/tts_server.py`) is the **
 
 ### 2.4 Documented Lazy Import Exception
 
-Upstream `demo.py` is not published as a pip package. ChattingCursor integration requires:
+Upstream `demo.py` lives in the git-cloned tree `pilot_tts/upstream/` (`.gitignore`, no pip package). ChattingCursor **cannot** use a top-level `from demo import ...` without first injecting that directory onto `sys.path`. This is a **documented exception** to the project top-level-import rule.
 
-1. `ensure_upstream_on_path()` — insert upstream root into `sys.path`.
-2. Optional `os.chdir(upstream_dir)` — upstream code may assume repo-root cwd (P2: reduce reliance).
-3. `from demo import load_engine` / `from demo import synthesize` — **inside** `load_gpu_engine()` and `synthesize()` only.
+**Why lazy import (not file-top import)**:
+- `/health` must respond even when `upstream/` is absent; eager `demo` import would fail at module load or pull GPU deps too early.
+- Path setup (`sys.path`, optional `os.chdir`) must precede import; function-scoped imports preserve that order.
+- Only `load_gpu_engine()` and the `synthesize()` route handler may import `demo`; all other project Python files follow normal top-level imports.
 
-This pattern is intentional and must be documented in `plan.md` and referenced in code comments; it does not apply to other project Python files.
+**Step 1 — `sys.path` injection** (`ensure_upstream_on_path()`):
+- Resolve `upstream_dir()` from `PILOT_TTS_UPSTREAM_DIR` or `<pilot_tts>/upstream`.
+- Insert the absolute upstream root at `sys.path[0]` when missing so `import demo` resolves to `upstream/demo.py`.
+
+**Step 2 — optional cwd** (`load_gpu_engine()` only):
+- `os.chdir(upstream_dir())` before `load_engine`; upstream configs may use cwd-relative paths (P2: reduce reliance).
+
+**Step 3 — function signatures and import sites**:
+
+| Function | Expected signature | Import site |
+|----------|-------------------|-------------|
+| `load_engine` | `load_engine(*, config_path: str, checkpoint: str) -> Any` | `load_gpu_engine()` after steps 1–2 |
+| `synthesize` | `synthesize(engine, *, text: str, prompt_wav: str, output_path: str) -> None` | `synthesize()` handler after step 1 |
+
+Detailed call-site arguments are in `plan.md` §3.5. Inline Chinese comments before each lazy import block (Phase 3) must cite this section.
 
 ---
 

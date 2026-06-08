@@ -13,20 +13,20 @@ This task list follows the Speckit-style phase structure used in `docs/plans/pil
     *   All 8 planning files exist and cross-reference ports `4323` (API) / `8090` (optional WebUI) and Bridge routes.
     *   `demo.py` lazy-import constitution exception is documented.
 
-### [ ] [Task 1.2] Fix stale `api.py` reference in installation plan
+### [x] [Task 1.2] Fix stale `api.py` reference in installation plan
 *   **Description**: Update `docs/plans/pilot_tts_installation/plan.md` §4.1 startup batch example: replace `upstream/api.py` with `server/tts_server.py`, matching actual `pilot_tts/run.bat`.
 *   **Prerequisites**: Task 1.1.
 *   **Acceptance Criteria**:
     *   Installation plan `run.bat` snippet shows `server\tts_server.py` for `api` mode.
     *   Port `4323` and env `PILOT_TTS_PORT` documented in snippet.
 
-### [ ] [Task 1.3] Document `run.bat api` entry in sidecar plan
+### [x] [Task 1.3] Document `run.bat api` entry in sidecar plan
 *   **Description**: Ensure `plan.md` (this package) explicitly maps `run.bat api` → `server/tts_server.py` and default mode → `upstream/webui.py` on port `8090` (test/debug only).
 *   **Prerequisites**: Task 1.1.
 *   **Acceptance Criteria**:
     *   Operators can find manual API launch instructions without reading source.
 
-### [ ] [Task 1.4] Document `demo.py` upstream contract
+### [x] [Task 1.4] Document `demo.py` upstream contract
 *   **Description**: In `plan.md` §3.5 and `constitution.md` §2.4, document `load_engine` / `synthesize` signatures, `sys.path` injection, and lazy-import rationale (upstream not pip package).
 *   **Prerequisites**: Task 1.1.
 *   **Acceptance Criteria**:

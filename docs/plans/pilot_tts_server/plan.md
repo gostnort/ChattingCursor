@@ -26,7 +26,28 @@ Manual launch (`pilot_tts/run.bat`):
 | `api` | `.venv\Scripts\python.exe server\tts_server.py` | 4323 (`PILOT_TTS_PORT`) |
 | (default) | `upstream\webui.py --port 8090` (+ env vars for Bridge parity) | 8090 (test/debug only) |
 
-**Correction**: `docs/plans/pilot_tts_installation/plan.md` §4.1 still shows `upstream/api.py`; actual `run.bat` already uses `server/tts_server.py`. This plan's Phase 1 updates that stale reference.
+**Phase 1 note**: `docs/plans/pilot_tts_installation/plan.md` §4.1 now matches `pilot_tts/run.bat` (`server\tts_server.py` on `4323`; no legacy `upstream/api.py`).
+
+### 1.1 Manual Launch Reference (Operators)
+
+Use `pilot_tts/run.bat` for **standalone** test and debug. ChattingCursor production read-aloud is always **Bridge → `server/tts_server.py` :4323**; the default `run.bat` branch is not the production TTS path.
+
+| Goal | Command (from repo root) | URL |
+|------|--------------------------|-----|
+| Manual API sidecar test | `cd pilot_tts` → `run.bat api` | `http://127.0.0.1:4323/health` |
+| Optional Gradio WebUI (test/debug) | `cd pilot_tts` → `run.bat` | `http://127.0.0.1:8090` |
+| Stop services on 4323 / 8090 | `cd pilot_tts` → `shutdown.bat` | — |
+
+**Prerequisites**: Run `pilot_tts/install.bat` once so `.venv` and `upstream/` exist.
+
+**`run.bat api` → `server/tts_server.py` (port 4323)**:
+1. Sets `PILOT_TTS_PORT=4323` (override with env before launch if needed).
+2. Sets `PILOT_TTS_AUTO_LOAD=0` — GPU is **not** loaded at startup; call `POST http://127.0.0.1:4323/load` to warm up (same policy as Bridge spawn).
+3. Runs `.venv\Scripts\python.exe server\tts_server.py` — project-owned sidecar, **not** `upstream/api.py`.
+
+**Default `run.bat` → `upstream/webui.py` (port 8090, test/debug only)**:
+1. `cd upstream` and launch `webui.py --port 8090` with Gradio env vars (`GRADIO_SERVER_PORT=8090`, etc.).
+2. Used for voice tuning in a browser; Bridge `/tts/synthesize` proxies to the **4323** sidecar instead.
 
 ---
 
@@ -35,7 +56,7 @@ Manual launch (`pilot_tts/run.bat`):
 | Issue | Severity | Location | Notes |
 |-------|----------|----------|-------|
 | `weights_ready()` ignores w2v-bert | P0 | `tts_server.py:46-52` | `install_backend.verify_model_weights` requires `w2v-bert-2.0/config.json` |
-| Stale `api.py` in install plan | P0 | `pilot_tts_installation/plan.md:314` | Doc drift |
+| ~~Stale `api.py` in install plan~~ | — | `pilot_tts_installation/plan.md` §4.1 | **Fixed Phase 1** — shows `server/tts_server.py` |
 | `import time` unused | P1 | `tts_server.py:6` | Dead import |
 | Chinese API messages | P1 | Throughout `tts_server.py` | Violates coding-standards |
 | Temp wav leak | P1 | `synthesize()` `delete=False` | No cleanup after `FileResponse` |
@@ -104,18 +125,33 @@ Rationale: Bridge resource scheduler calls `POST /load` after spawn when user en
 
 ### 3.5 P1 — `demo.py` Integration Contract
 
-Upstream functions (expected signature from audit; verify against cloned `upstream/demo.py` at implementation time):
+Upstream `demo.py` is a **git-cloned script**, not an installable Python package. Sidecar code must prepare the import environment at call time and import inside functions only (constitution §2.4).
 
-| Function | Called from | Expected args |
-|----------|-------------|---------------|
-| `load_engine` | `load_gpu_engine()` | `config_path: str`, `checkpoint: str` |
-| `synthesize` | `synthesize()` | `engine`, `text: str`, `prompt_wav: str`, `output_path: str` |
+**Lazy-import rationale** (for reviewers):
+- Top-level `from demo import ...` fails when `upstream/` is missing and prevents FastAPI from serving `/health` during partial installs.
+- `demo` pulls heavy inference dependencies; defer import until `/load` or `/synthesize` needs the GPU engine.
+- `sys.path` insertion and optional `os.chdir` must run **before** import; function-scoped imports keep that ordering explicit.
 
-Preconditions before import:
-1. `ensure_upstream_on_path()`
-2. `os.chdir(upstream_dir())` — **P2 candidate for removal** after testing with absolute paths
+**`sys.path` injection** — `ensure_upstream_on_path()` in `tts_server.py`:
+- Resolve root via `PILOT_TTS_UPSTREAM_DIR` or default `<pilot_tts>/upstream`.
+- If absent from `sys.path`, `sys.path.insert(0, str(upstream_dir()))` so `import demo` resolves to `upstream/demo.py`.
 
-Add Chinese block comment before each lazy import citing constitution exception (upstream not pip-installable).
+**Working directory** — `load_gpu_engine()` only:
+- `os.chdir(str(upstream_dir()))` before `load_engine`; upstream YAML/assets may assume repo-root cwd.
+- P2 task tests whether absolute `config_path` / `checkpoint` remove this requirement.
+
+**Function signatures** (from `tts_server.py` call sites; re-verify against cloned `upstream/demo.py` when upstream is present):
+
+| Function | Expected signature | Sidecar caller | Arguments passed |
+|----------|-------------------|----------------|------------------|
+| `load_engine` | `load_engine(*, config_path: str, checkpoint: str) -> Any` | `load_gpu_engine()` | `config_path`: `configs/infer_pilot_tts.yaml` or `infer_pilot_tts_instruct.yaml`; `checkpoint`: absolute path to `pilot_tts.pt` or `pilot_tts_instruct.pt` under `weights_dir()` |
+| `synthesize` | `synthesize(engine, *, text: str, prompt_wav: str, output_path: str) -> None` | `synthesize()` route | `engine`: module-global `_engine`; `text`: trimmed user input (max 500 chars); `prompt_wav`: resolved reference wav; `output_path`: temp `.wav` for `FileResponse` |
+
+**Import sites** (only these two; no other `from demo import` in the sidecar):
+1. `load_gpu_engine()` — after `ensure_upstream_on_path()` and `os.chdir`, `from demo import load_engine`.
+2. `synthesize()` handler — after `ensure_upstream_on_path()`, `from demo import synthesize` (no chdir on synthesize path today).
+
+Phase 3 adds a Chinese single-line comment before each block citing constitution §2.4 (upstream not pip-installable).
 
 ### 3.6 P2 — `os.chdir` Mitigation
 

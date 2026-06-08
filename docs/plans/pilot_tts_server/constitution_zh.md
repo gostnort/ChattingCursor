@@ -44,13 +44,28 @@ ChattingCursor PilotTTS sidecar（`pilot_tts/server/tts_server.py`）是 GPU 预
 
 ### 2.4 文档化的惰性导入例外
 
-上游 `demo.py` 未作为 pip 包发布。ChattingCursor 集成需要：
+上游 `demo.py` 位于 Git 克隆树 `pilot_tts/upstream/`（`.gitignore`，非 pip 包）。ChattingCursor **不能**在未先将该目录注入 `sys.path` 的情况下使用顶层 `from demo import ...`。这是对项目顶层 import 规则的**文档化例外**。
 
-1. `ensure_upstream_on_path()` —— 将上游根目录插入 `sys.path`。
-2. 可选 `os.chdir(upstream_dir)` —— 上游代码可能假设以仓库根为 cwd（P2：减少依赖）。
-3. `from demo import load_engine` / `from demo import synthesize` —— **仅**在 `load_gpu_engine()` 与 `synthesize()` 内部。
+**为何惰性导入（非文件顶部 import）**：
+- 即使缺少 `upstream/`，`/health` 也须能响应；过早 import `demo` 会在模块加载时失败或过早拉取 GPU 依赖。
+- 路径准备（`sys.path`、可选 `os.chdir`）必须在 import 之前；函数内导入保持该顺序。
+- 仅 `load_gpu_engine()` 与 `synthesize()` 路由处理器可 import `demo`；项目其他 Python 文件仍遵循常规顶层 import。
 
-该模式为有意设计，须在 `plan.md` 中说明并在代码注释中引用；不适用于项目其他 Python 文件。
+**步骤 1 — `sys.path` 注入**（`ensure_upstream_on_path()`）：
+- 从 `PILOT_TTS_UPSTREAM_DIR` 或 `<pilot_tts>/upstream` 解析 `upstream_dir()`。
+- 若缺失则将上游根绝对路径插入 `sys.path[0]`，使 `import demo` 解析到 `upstream/demo.py`。
+
+**步骤 2 — 可选 cwd**（仅 `load_gpu_engine()`）：
+- 在 `load_engine` 前 `os.chdir(upstream_dir())`；上游配置可能使用 cwd 相对路径（P2：减少依赖）。
+
+**步骤 3 — 函数签名与导入位置**：
+
+| 函数 | 预期签名 | 导入位置 |
+|------|----------|----------|
+| `load_engine` | `load_engine(*, config_path: str, checkpoint: str) -> Any` | 步骤 1–2 之后的 `load_gpu_engine()` |
+| `synthesize` | `synthesize(engine, *, text: str, prompt_wav: str, output_path: str) -> None` | 步骤 1 之后的 `synthesize()` 处理器 |
+
+详细调用参数见 `plan.md` §3.5。Phase 3 在每个惰性 import 块前须添加引用本节的中文注释。
 
 ---
 
